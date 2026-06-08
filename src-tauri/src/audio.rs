@@ -35,12 +35,39 @@ struct Inner {
     samples: Vec<f32>,
 }
 
+/// List input devices reported by cpal. Empty if cpal can't enumerate (rare).
+pub fn list_input_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    match host.input_devices() {
+        Ok(devs) => devs.filter_map(|d| d.name().ok()).collect(),
+        Err(e) => {
+            log::warn!("audio: enumerate input devices failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
 impl Recorder {
-    pub fn start() -> Result<Self> {
+    /// Start capture on `device_name`, or the host's default input if `None`
+    /// or if the named device can't be found (logged + falls back).
+    pub fn start(device_name: Option<&str>) -> Result<Self> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow!("no default input device"))?;
+        let device = match device_name {
+            Some(name) => host
+                .input_devices()
+                .ok()
+                .and_then(|mut iter| iter.find(|d| d.name().ok().as_deref() == Some(name)))
+                .or_else(|| {
+                    log::warn!(
+                        "audio: input device {name:?} not found, falling back to default"
+                    );
+                    host.default_input_device()
+                })
+                .ok_or_else(|| anyhow!("no input device"))?,
+            None => host
+                .default_input_device()
+                .ok_or_else(|| anyhow!("no default input device"))?,
+        };
 
         let supported = device
             .default_input_config()

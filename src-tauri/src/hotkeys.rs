@@ -1,28 +1,61 @@
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
-use crate::{emit_state, show_overlay, AppState, DictationCmd, OverlayState};
+use crate::{emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, OverlayState};
 
-// Phase 1 trigger: a chord, NOT the Fn key. See CLAUDE.md hard rule #4.
-// Hold to dictate, release to commit.
+// Secondary dictation trigger. v1 default is the chord; Fn-hold lives in
+// `fn_key` (CLAUDE.md hard rule #4 was relaxed by explicit user request).
 const DICTATE: &str = "CmdOrCtrl+Shift+Space";
+// Phase 3 TTS trigger: tap once to start reading the selection, tap again
+// to stop. Posts AVSpeechSynthesizer on the main thread.
+const TTS_TOGGLE: &str = "Alt+A";
+// Cycle playback speed (1.0x ↔ 2.0x). Only meaningful for backends that
+// support it (ElevenLabs).
+const TTS_SPEED: &str = "Alt+Shift+S";
 
 pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
-    let shortcut: Shortcut = DICTATE
+    let dictate: Shortcut = DICTATE
+        .parse()
+        .expect("hard-coded shortcut string parses");
+    let tts: Shortcut = TTS_TOGGLE
+        .parse()
+        .expect("hard-coded shortcut string parses");
+    let tts_speed: Shortcut = TTS_SPEED
         .parse()
         .expect("hard-coded shortcut string parses");
 
-    app.global_shortcut().on_shortcut(
-        shortcut,
+    let gs = app.global_shortcut();
+    gs.on_shortcut(
+        dictate,
         move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
             ShortcutState::Pressed => on_press(app),
             ShortcutState::Released => on_release(app),
         },
     )?;
+    gs.on_shortcut(
+        tts,
+        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+            // Toggle on key-down only; releases mean nothing for TTS.
+            if event.state() == ShortcutState::Pressed {
+                tts_toggle(app);
+            }
+        },
+    )?;
+    gs.on_shortcut(
+        tts_speed,
+        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+            if event.state() == ShortcutState::Pressed {
+                tts_speed_cycle(app);
+            }
+        },
+    )?;
     Ok(())
 }
 
-fn on_press<R: Runtime>(app: &AppHandle<R>) {
+/// Begin a dictation. Safe to call from any thread that can resolve
+/// `AppHandle`; called by both the chord callback (this module) and the
+/// Fn-key event tap (`fn_key`).
+pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
     log::info!("hotkey: press");
     show_overlay(app);
     emit_state(app, OverlayState::Recording);
@@ -31,10 +64,10 @@ fn on_press<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn on_release<R: Runtime>(app: &AppHandle<R>) {
+/// Commit a dictation. Keep the overlay visible — the router flips it to
+/// Done/Error and schedules the idle render once transcribe + inject return.
+pub fn on_release<R: Runtime>(app: &AppHandle<R>) {
     log::info!("hotkey: release");
-    // Keep the overlay visible — the router will flip it to Done/Error and
-    // schedule the hide once the transcribe + inject pipeline returns.
     emit_state(app, OverlayState::Transcribing);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop) {
         log::warn!("hotkey: dictation worker unreachable: {e}");

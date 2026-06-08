@@ -37,8 +37,8 @@
     "trayIcon": {
       "id": "main",
       "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false,
+      "iconAsTemplate": false,
+      "menuOnLeftClick": true,
       "tooltip": "murmur"
     }
   },

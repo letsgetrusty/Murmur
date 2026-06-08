@@ -3,6 +3,7 @@
 // in subsequent phases and remain stubs.
 mod audio;
 mod config;
+mod fn_key;
 mod hotkeys;
 mod inject;
 mod kb;
@@ -11,14 +12,15 @@ mod selection;
 mod stt;
 mod tts;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use crate::tts::Speaker as _;
 
 use serde::Serialize;
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, RunEvent, Runtime,
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    AppHandle, Emitter, Manager, RunEvent, Runtime, Wry,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -29,6 +31,19 @@ pub enum DictationCmd {
 
 pub struct AppState {
     pub tx: UnboundedSender<DictationCmd>,
+    pub speaker: Arc<dyn tts::Speaker>,
+    /// Tray menu checkmarks for speed, in the same order as `tts::SPEEDS`.
+    pub speed_items: Vec<CheckMenuItem<Wry>>,
+    /// Tray menu checkmarks for voice, in the same order as `tts::ELEVENLABS_VOICES`.
+    pub voice_items: Vec<CheckMenuItem<Wry>>,
+    /// Tray menu checkmarks for the microphone picker. First entry is the
+    /// system default; rest mirror `mic_names`.
+    pub mic_items: Vec<CheckMenuItem<Wry>>,
+    /// cpal device names parallel to `mic_items[1..]`. Index 0 of mic_items
+    /// is "Default" (no name).
+    pub mic_names: Vec<String>,
+    /// Current mic selection. `None` = system default.
+    pub mic_name: Mutex<Option<String>>,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -62,6 +77,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            let cfg = config::load();
+
             // GroqWhisper reads the API key from Keychain on each transcribe,
             // so the user can run `set-key` without restarting the app.
             let transcriber: Arc<dyn stt::Transcriber> = Arc::new(stt::GroqWhisper::new());
@@ -70,30 +87,66 @@ pub fn run() {
             // worker thread so we never carry it across the global-shortcut
             // callback boundary.
             let tx = spawn_dictation_worker(app.handle().clone(), transcriber);
-            app.manage(AppState { tx });
 
-            // Tray
-            let quit = MenuItem::with_id(app, "quit", "Quit murmur", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit])?;
-            TrayIconBuilder::with_id("main")
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    if event.id.as_ref() == "quit" {
-                        app.exit(0);
-                    }
-                })
-                .build(app)?;
+            // Prefer ElevenLabs when the user has set a key; fall back to
+            // macOS AVSpeechSynthesizer otherwise so Option+A always does
+            // *something*. Hydrate the speaker from saved config.
+            let speaker: Arc<dyn tts::Speaker> = match secrets::get(secrets::ELEVENLABS_API_KEY) {
+                Ok(_) => {
+                    log::info!("tts: ElevenLabs backend (key present)");
+                    let s = tts::ElevenLabsSpeaker::new();
+                    s.set_speed(cfg.tts_speed);
+                    s.set_voice(&cfg.tts_voice_id);
+                    Arc::new(s)
+                }
+                Err(_) => {
+                    log::info!("tts: macOS AVSpeechSynthesizer backend (no ElevenLabs key)");
+                    Arc::new(tts::MacSpeaker::new())
+                }
+            };
 
-            // Pre-position the overlay; keep hidden until the hotkey fires.
+            // Build the tray menu with CheckMenuItems initialised from the
+            // saved config so the user sees their previous selection as soon
+            // as they open the menu.
+            let mic_names = audio::list_input_devices();
+            let (menu, speed_items, voice_items, mic_items) =
+                build_tray_menu(app.handle(), &cfg, &mic_names)?;
+            app.manage(AppState {
+                tx,
+                speaker,
+                speed_items,
+                voice_items,
+                mic_items,
+                mic_names,
+                mic_name: Mutex::new(cfg.mic_name.clone()),
+            });
+
+            // The tray icon itself is auto-created from the `trayIcon` block
+            // in `tauri.conf.json`. Attaching the menu to that single
+            // instance avoids the duplicate-slot bug we hit when building a
+            // second TrayIcon in setup.
+            let tray = app
+                .tray_by_id("main")
+                .ok_or_else(|| anyhow::anyhow!("tray 'main' not found — check tauri.conf.json"))?;
+            tray.set_menu(Some(menu))?;
+            tray.on_menu_event(handle_tray_event);
+
+            // Pre-position the overlay at the bottom-center of the primary
+            // monitor; keep hidden until the hotkey fires.
             if let Some(win) = app.get_webview_window("overlay") {
                 let _ = win.set_always_on_top(true);
                 let _ = win.set_skip_taskbar(true);
+                position_overlay_bottom(&win);
             }
 
             // Hotkey registration MUST happen on the main thread on macOS —
             // CLAUDE.md hard rule #1. `setup` runs on the main thread.
             hotkeys::register(app.handle())?;
+
+            // Install the Fn-key tap onto the main thread's CFRunLoop (same
+            // run loop NSApp drives). Failure here only means "no Fn yet" —
+            // the chord still works.
+            fn_key::install(app.handle().clone())?;
 
             Ok(())
         })
@@ -127,6 +180,62 @@ pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {
 /// goes away (LSUIElement does not exempt us from that). Subsequent
 /// "hides" are done by emitting `OverlayState::Idle`, which the
 /// frontend renders as nothing.
+/// Toggle TTS: if speaking, stop; otherwise capture the current selection
+/// and read it aloud. Always called on the main thread — both the global
+/// shortcut callback and the Fn tap dispatch into here from main, and both
+/// `selection::capture_selection` and `tts::Speaker::speak` require it.
+/// Cycle TTS playback speed. Currently 1.0 ↔ 2.0; tracked in the Speaker.
+/// Routes through `apply_speed` so the tray checkmarks and the on-disk
+/// config stay in lockstep with the hotkey.
+pub fn tts_speed_cycle<R: Runtime>(app: &AppHandle<R>) {
+    let next = app.state::<AppState>().speaker.cycle_speed();
+    apply_speed(app, next);
+}
+
+pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<AppState>();
+    if state.speaker.is_speaking() {
+        log::info!("tts: stop");
+        state.speaker.stop();
+        show_overlay(app);
+        emit_state(app, OverlayState::Done { chars: 0 });
+        idle_after(app.clone(), Duration::from_millis(400));
+        return;
+    }
+    match selection::capture_selection() {
+        Ok(Some(text)) => {
+            let chars = text.chars().count();
+            log::info!("tts: speak ({} chars)", chars);
+            show_overlay(app);
+            emit_state(app, OverlayState::Transcribing);
+            state.speaker.speak(&text);
+            spawn_tts_idle_watcher(app.clone());
+        }
+        Ok(None) => {
+            log::info!("tts: nothing selected");
+            show_overlay(app);
+            emit_state(
+                app,
+                OverlayState::Error {
+                    message: "no selection".into(),
+                },
+            );
+            idle_after(app.clone(), Duration::from_millis(1600));
+        }
+        Err(e) => {
+            log::warn!("tts: selection capture failed: {e}");
+            show_overlay(app);
+            emit_state(
+                app,
+                OverlayState::Error {
+                    message: format!("selection failed: {e}"),
+                },
+            );
+            idle_after(app.clone(), Duration::from_millis(2200));
+        }
+    }
+}
+
 pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("overlay") {
         let _ = win.set_always_on_top(true);
@@ -135,13 +244,242 @@ pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
+    // Wrap each call in an early-return so a single missing monitor query
+    // doesn't tank the whole setup.
+    let monitor = match win.primary_monitor() {
+        Ok(Some(m)) => m,
+        _ => {
+            log::warn!("overlay: no primary monitor; leaving at center");
+            return;
+        }
+    };
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let win_size = win
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(320, 80));
+    let x = mon_pos.x + (mon_size.width as i32 - win_size.width as i32) / 2;
+    // Sit ~20px above the screen edge so the pill is unmistakably at the
+    // bottom. If the user has the Dock at the bottom and it overlaps, they
+    // can move the Dock or hide it.
+    let y = mon_pos.y + mon_size.height as i32 - win_size.height as i32 - 20;
+    if let Err(e) = win.set_position(tauri::PhysicalPosition::new(x, y)) {
+        log::warn!("overlay: set_position failed: {e}");
+    }
+}
+
 /// Tell the overlay frontend to render nothing after a dwell. Uses a
 /// std::thread so we don't block any tokio worker.
+/// Poll the speaker after a `speak()` and emit `Idle` when playback ends —
+/// either because the audio finished naturally or because the user pressed
+/// Option+A again to stop. Without this the overlay would stay stuck on
+/// "Transcribing…" forever.
+fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
+    std::thread::spawn(move || {
+        let started_by = std::time::Instant::now() + Duration::from_secs(15);
+        // Phase 1: wait for `is_speaking` to flip true (the AVPlayer has
+        // started and is reading). Bail out if it never does — most likely
+        // an API failure that already logged its own warning.
+        loop {
+            if app.state::<AppState>().speaker.is_speaking() {
+                break;
+            }
+            if std::time::Instant::now() > started_by {
+                emit_state(&app, OverlayState::Idle);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        // Phase 2: wait for it to flip false (end-of-media or stop()).
+        loop {
+            std::thread::sleep(Duration::from_millis(200));
+            if !app.state::<AppState>().speaker.is_speaking() {
+                emit_state(&app, OverlayState::Idle);
+                return;
+            }
+        }
+    });
+}
+
 fn idle_after<R: Runtime>(app: AppHandle<R>, delay: Duration) {
     std::thread::spawn(move || {
         std::thread::sleep(delay);
         emit_state(&app, OverlayState::Idle);
     });
+}
+
+/// Build the tray menu. Returns the assembled menu plus parallel vectors of
+/// the speed, voice, and microphone `CheckMenuItem`s so the click handler can
+/// toggle their checked state when the user picks one.
+fn build_tray_menu(
+    app: &AppHandle<Wry>,
+    cfg: &config::Config,
+    mic_names: &[String],
+) -> tauri::Result<(
+    Menu<Wry>,
+    Vec<CheckMenuItem<Wry>>,
+    Vec<CheckMenuItem<Wry>>,
+    Vec<CheckMenuItem<Wry>>,
+)> {
+    let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
+    let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit murmur", true, None::<&str>)?;
+
+    // Speed submenu — CheckMenuItems with the current selection pre-checked.
+    let speed_items: Vec<CheckMenuItem<Wry>> = tts::SPEEDS
+        .iter()
+        .map(|&s| {
+            let id = format!("speed_{s}");
+            let label = format!("{s:.1}×");
+            let checked = (s - cfg.tts_speed).abs() < 1e-3;
+            CheckMenuItem::with_id(app, id, label, true, checked, None::<&str>)
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let speed_refs: Vec<&dyn IsMenuItem<Wry>> =
+        speed_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let speed_menu = Submenu::with_id_and_items(app, "speed", "Speed", true, &speed_refs)?;
+
+    // Voice submenu — same treatment.
+    let voice_items: Vec<CheckMenuItem<Wry>> = tts::ELEVENLABS_VOICES
+        .iter()
+        .map(|(id, name)| {
+            let item_id = format!("voice_{id}");
+            let checked = *id == cfg.tts_voice_id;
+            CheckMenuItem::with_id(app, item_id, *name, true, checked, None::<&str>)
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let voice_refs: Vec<&dyn IsMenuItem<Wry>> =
+        voice_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let voice_menu = Submenu::with_id_and_items(app, "voice", "Voice", true, &voice_refs)?;
+
+    // Microphone submenu — first entry is the system default, rest are
+    // whatever cpal enumerated.
+    let mut mic_items: Vec<CheckMenuItem<Wry>> = Vec::with_capacity(mic_names.len() + 1);
+    mic_items.push(CheckMenuItem::with_id(
+        app,
+        "mic_default",
+        "System default",
+        true,
+        cfg.mic_name.is_none(),
+        None::<&str>,
+    )?);
+    for (i, name) in mic_names.iter().enumerate() {
+        let id = format!("mic_{i}");
+        let checked = cfg.mic_name.as_deref() == Some(name.as_str());
+        mic_items.push(CheckMenuItem::with_id(
+            app,
+            id,
+            name.as_str(),
+            true,
+            checked,
+            None::<&str>,
+        )?);
+    }
+    let mic_refs: Vec<&dyn IsMenuItem<Wry>> =
+        mic_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let mic_menu = Submenu::with_id_and_items(app, "mic", "Microphone", true, &mic_refs)?;
+
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+
+    let menu = Menu::with_items(
+        app,
+        &[
+            &read as &dyn IsMenuItem<Wry>,
+            &stop_read,
+            &sep1,
+            &speed_menu,
+            &voice_menu,
+            &mic_menu,
+            &sep2,
+            &quit,
+        ],
+    )?;
+    Ok((menu, speed_items, voice_items, mic_items))
+}
+
+fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
+    let id = event.id.as_ref();
+    match id {
+        "quit" => app.exit(0),
+        "tts_read" => tts_toggle(app),
+        "tts_stop" => {
+            app.state::<AppState>().speaker.stop();
+        }
+        _ => {
+            if let Some(s) = id.strip_prefix("speed_") {
+                if let Ok(speed) = s.parse::<f32>() {
+                    apply_speed(app, speed);
+                }
+            } else if let Some(v) = id.strip_prefix("voice_") {
+                apply_voice(app, v);
+            } else if id == "mic_default" {
+                apply_mic(app, None);
+            } else if let Some(idx_str) = id.strip_prefix("mic_") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let name = app.state::<AppState>().mic_names.get(idx).cloned();
+                    apply_mic(app, name);
+                }
+            }
+        }
+    }
+}
+
+/// Apply a speed selection: update the speaker, flip tray checkmarks so the
+/// chosen one is the only check, and persist to disk.
+fn apply_speed<R: Runtime>(app: &AppHandle<R>, speed: f32) {
+    let state = app.state::<AppState>();
+    state.speaker.set_speed(speed);
+    for (item, &s) in state.speed_items.iter().zip(tts::SPEEDS.iter()) {
+        let _ = item.set_checked((s - speed).abs() < 1e-3);
+    }
+    log::info!("tts: speed → {speed}x");
+    persist_config(app);
+}
+
+/// Apply a voice selection: update the speaker, flip tray checkmarks, persist.
+fn apply_voice<R: Runtime>(app: &AppHandle<R>, voice_id: &str) {
+    let state = app.state::<AppState>();
+    state.speaker.set_voice(voice_id);
+    for (item, (id, _)) in state.voice_items.iter().zip(tts::ELEVENLABS_VOICES.iter()) {
+        let _ = item.set_checked(*id == voice_id);
+    }
+    log::info!("tts: voice → {voice_id}");
+    persist_config(app);
+}
+
+/// Apply a microphone selection: store the name, flip tray checkmarks (the
+/// "System default" item is index 0), persist. The new device takes effect
+/// on the next `DictationCmd::Start`.
+fn apply_mic<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
+    let state = app.state::<AppState>();
+    *state.mic_name.lock().expect("mic name mutex") = name.clone();
+    if let Some(item) = state.mic_items.first() {
+        let _ = item.set_checked(name.is_none());
+    }
+    for (i, item) in state.mic_items.iter().skip(1).enumerate() {
+        let matches = state
+            .mic_names
+            .get(i)
+            .map(|n| Some(n.as_str()) == name.as_deref())
+            .unwrap_or(false);
+        let _ = item.set_checked(matches);
+    }
+    log::info!("audio: mic → {}", name.as_deref().unwrap_or("(default)"));
+    persist_config(app);
+}
+
+fn persist_config<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<AppState>();
+    let cfg = config::Config {
+        tts_speed: state.speaker.current_speed(),
+        tts_voice_id: state.speaker.current_voice().unwrap_or_default(),
+        mic_name: state.mic_name.lock().ok().and_then(|g| g.clone()),
+    };
+    if let Err(e) = config::save(&cfg) {
+        log::warn!("config: save failed: {e}");
+    }
 }
 
 fn run_set_key() {
@@ -178,7 +516,13 @@ fn spawn_dictation_worker<R: Runtime>(
                         log::debug!("dictation: already recording, ignoring Start");
                         continue;
                     }
-                    match audio::Recorder::start() {
+                    let mic = app
+                        .state::<AppState>()
+                        .mic_name
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.clone());
+                    match audio::Recorder::start(mic.as_deref()) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
                             rec = Some(r);
