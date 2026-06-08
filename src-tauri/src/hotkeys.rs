@@ -59,6 +59,7 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
     log::info!("hotkey: press");
     show_overlay(app);
     emit_state(app, OverlayState::Recording);
+    register_escape(app);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Start) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
@@ -68,8 +69,38 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 /// Done/Error and schedules the idle render once transcribe + inject return.
 pub fn on_release<R: Runtime>(app: &AppHandle<R>) {
     log::info!("hotkey: release");
+    unregister_escape(app);
     emit_state(app, OverlayState::Transcribing);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
+    }
+}
+
+const ESC: &str = "Escape";
+
+/// Briefly hijack the Escape key while a dictation is in flight. The
+/// shortcut is unregistered the moment the user releases the hotkey or
+/// hits Esc, so we never block Esc system-wide outside of recording.
+fn register_escape<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(esc) = ESC.parse::<Shortcut>() else { return };
+    let res = app
+        .global_shortcut()
+        .on_shortcut(esc, |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+            if event.state() == ShortcutState::Pressed {
+                log::info!("hotkey: cancel (Esc)");
+                unregister_escape(app);
+                if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Cancel) {
+                    log::warn!("hotkey: cancel send failed: {e}");
+                }
+            }
+        });
+    if let Err(e) = res {
+        log::debug!("hotkey: esc register failed: {e}");
+    }
+}
+
+fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
+    if let Ok(esc) = ESC.parse::<Shortcut>() {
+        let _ = app.global_shortcut().unregister(esc);
     }
 }

@@ -39,6 +39,11 @@ function init() {
     return;
   }
   tauri.event.listen("state", (e) => applyState(e.payload));
+  tauri.event.listen("audio:level", (e) => {
+    // payload is a 0..1 peak amplitude from the capture thread.
+    const v = typeof e.payload === "number" ? e.payload : 0;
+    document.documentElement.style.setProperty("--audio-level", String(v));
+  });
 }
 
 if (document.readyState === "loading") {

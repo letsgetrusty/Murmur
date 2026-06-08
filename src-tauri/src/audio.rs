@@ -8,6 +8,7 @@
 // fast — the heavy work (transcribe) happens after we hand back the bytes.
 
 use std::io::{Cursor, Write};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
@@ -47,10 +48,16 @@ pub fn list_input_devices() -> Vec<String> {
     }
 }
 
+/// Callback invoked roughly 15–20 Hz with a 0..1 peak-normalised amplitude
+/// while capture is running. Hand-off so audio.rs stays Tauri-free.
+pub type LevelFn = Box<dyn Fn(f32) + Send + Sync + 'static>;
+
 impl Recorder {
     /// Start capture on `device_name`, or the host's default input if `None`
-    /// or if the named device can't be found (logged + falls back).
-    pub fn start(device_name: Option<&str>) -> Result<Self> {
+    /// or if the named device can't be found (logged + falls back). The
+    /// optional `on_level` callback gets a throttled stream of peak
+    /// amplitudes from the capture thread — used by the overlay waveform.
+    pub fn start(device_name: Option<&str>, on_level: Option<LevelFn>) -> Result<Self> {
         let host = cpal::default_host();
         let device = match device_name {
             Some(name) => host
@@ -92,18 +99,30 @@ impl Recorder {
 
         let err_fn = |e| log::warn!("audio stream error: {e}");
 
+        // Throttle level emits to ~15 Hz: emit every 3rd callback. cpal
+        // typically delivers chunks at 50–100 Hz on macOS.
+        let level_cb = on_level.map(Arc::new);
+        let throttle = Arc::new(AtomicU32::new(0));
+
         let stream = match sample_format {
             SampleFormat::F32 => {
                 let inner_cl = inner.clone();
+                let level_cb = level_cb.clone();
+                let throttle = throttle.clone();
                 device.build_input_stream(
                     &config,
-                    move |data: &[f32], _| push_f32(&inner_cl, data, channels),
+                    move |data: &[f32], _| {
+                        push_f32(&inner_cl, data, channels);
+                        maybe_emit_level(&level_cb, &throttle, data, channels);
+                    },
                     err_fn,
                     None,
                 )?
             }
             SampleFormat::I16 => {
                 let inner_cl = inner.clone();
+                let level_cb = level_cb.clone();
+                let throttle = throttle.clone();
                 device.build_input_stream(
                     &config,
                     move |data: &[i16], _| {
@@ -112,6 +131,7 @@ impl Recorder {
                             .map(|s| *s as f32 / i16::MAX as f32)
                             .collect();
                         push_f32(&inner_cl, &f, channels);
+                        maybe_emit_level(&level_cb, &throttle, &f, channels);
                     },
                     err_fn,
                     None,
@@ -119,6 +139,8 @@ impl Recorder {
             }
             SampleFormat::U16 => {
                 let inner_cl = inner.clone();
+                let level_cb = level_cb.clone();
+                let throttle = throttle.clone();
                 device.build_input_stream(
                     &config,
                     move |data: &[u16], _| {
@@ -127,6 +149,7 @@ impl Recorder {
                             .map(|s| (*s as f32 - 32768.0) / 32768.0)
                             .collect();
                         push_f32(&inner_cl, &f, channels);
+                        maybe_emit_level(&level_cb, &throttle, &f, channels);
                     },
                     err_fn,
                     None,
@@ -178,6 +201,31 @@ impl Recorder {
             mean_abs,
         })
     }
+}
+
+fn maybe_emit_level(
+    cb: &Option<Arc<LevelFn>>,
+    throttle: &Arc<AtomicU32>,
+    data: &[f32],
+    channels: usize,
+) {
+    let Some(cb) = cb else { return };
+    let n = throttle.fetch_add(1, Ordering::Relaxed);
+    if n % 3 != 0 {
+        return;
+    }
+    let mut peak: f32 = 0.0;
+    if channels <= 1 {
+        for s in data {
+            peak = peak.max(s.abs());
+        }
+    } else {
+        for frame in data.chunks_exact(channels) {
+            let mix = frame.iter().sum::<f32>() / channels as f32;
+            peak = peak.max(mix.abs());
+        }
+    }
+    cb(peak.min(1.0));
 }
 
 fn push_f32(inner: &Arc<Mutex<Inner>>, data: &[f32], channels: usize) {

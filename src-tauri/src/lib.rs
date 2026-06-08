@@ -27,6 +27,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 pub enum DictationCmd {
     Start,
     Stop,
+    /// User pressed Esc — drop the in-flight recorder and don't transcribe.
+    Cancel,
 }
 
 pub struct AppState {
@@ -74,10 +76,17 @@ pub fn run() {
         return run_set_key();
     }
 
+    // Enumerate cpal input devices BEFORE Tauri/NSApp takes over the main
+    // thread. Calling into CoreAudio HAL from inside the
+    // NSApplicationDidFinishLaunching notification handler segfaults the
+    // release build (HALDeviceList::GetData on a not-yet-ready audio
+    // subsystem). Querying from the bare process at startup is reliable.
+    let mic_names = audio::list_input_devices();
+    let cfg = config::load();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .setup(|app| {
-            let cfg = config::load();
+        .setup(move |app| {
 
             // GroqWhisper reads the API key from Keychain on each transcribe,
             // so the user can run `set-key` without restarting the app.
@@ -107,8 +116,8 @@ pub fn run() {
 
             // Build the tray menu with CheckMenuItems initialised from the
             // saved config so the user sees their previous selection as soon
-            // as they open the menu.
-            let mic_names = audio::list_input_devices();
+            // as they open the menu. `mic_names` was enumerated above before
+            // Tauri took the main thread.
             let (menu, speed_items, voice_items, mic_items) =
                 build_tray_menu(app.handle(), &cfg, &mic_names)?;
             app.manage(AppState {
@@ -522,7 +531,12 @@ fn spawn_dictation_worker<R: Runtime>(
                         .lock()
                         .ok()
                         .and_then(|g| g.clone());
-                    match audio::Recorder::start(mic.as_deref()) {
+                    // Forward audio levels to the overlay frontend.
+                    let app_for_level = app.clone();
+                    let on_level: audio::LevelFn = Box::new(move |level: f32| {
+                        let _ = app_for_level.emit("audio:level", level);
+                    });
+                    match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
                             rec = Some(r);
@@ -538,6 +552,13 @@ fn spawn_dictation_worker<R: Runtime>(
                             idle_after(app.clone(), Duration::from_millis(2200));
                         }
                     }
+                }
+                DictationCmd::Cancel => {
+                    if rec.take().is_some() {
+                        log::info!("dictation: cancelled");
+                    }
+                    emit_state(&app, OverlayState::Idle);
+                    continue;
                 }
                 DictationCmd::Stop => {
                     let Some(r) = rec.take() else {

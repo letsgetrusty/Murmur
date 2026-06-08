@@ -63,11 +63,24 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Recording — pulsing red dot. */
+/* Recording — red dot that grows with the live audio level. The
+   --audio-level custom property is updated by main.js from the
+   "audio:level" Tauri event (~15 Hz). Falls back to the pulse animation
+   when no level is reported. */
 .pill[data-state="recording"] .dot {
   background: #ff5b5b;
   box-shadow: 0 0 10px rgba(255, 91, 91, 0.7);
-  animation: pulse 1s ease-in-out infinite;
+  transform: scale(calc(1 + var(--audio-level, 0) * 1.4));
+  transition: transform 60ms ease-out;
+}
+.pill[data-state="recording"] .dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  animation: pulse 1.4s ease-in-out infinite;
+  background: rgba(255, 91, 91, 0.5);
+  z-index: -1;
 }
 
 /* Transcribing — pulsing cyan dot. */
