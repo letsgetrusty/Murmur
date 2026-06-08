@@ -1,46 +1,44 @@
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
-// v1 trigger is a chord, NOT the Fn key. See CLAUDE.md hard rule #4.
-const TOGGLE_OVERLAY: &str = "CmdOrCtrl+Shift+Space";
+use crate::{AppState, DictationCmd};
+
+// Phase 1 trigger: a chord, NOT the Fn key. See CLAUDE.md hard rule #4.
+// Hold to dictate, release to commit.
+const DICTATE: &str = "CmdOrCtrl+Shift+Space";
 
 pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
-    let shortcut: Shortcut = TOGGLE_OVERLAY
+    let shortcut: Shortcut = DICTATE
         .parse()
         .expect("hard-coded shortcut string parses");
 
     app.global_shortcut().on_shortcut(
         shortcut,
-        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
-            // Fire on key-down only; v1 is a press-to-toggle, not press-to-hold.
-            if event.state() == ShortcutState::Pressed {
-                log::info!("hotkey fired: {TOGGLE_OVERLAY}");
-                toggle_overlay(app);
-            }
+        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
+            ShortcutState::Pressed => on_press(app),
+            ShortcutState::Released => on_release(app),
         },
     )?;
-
     Ok(())
 }
 
-pub fn toggle_overlay<R: Runtime>(app: &AppHandle<R>) {
-    let Some(win) = app.get_webview_window("overlay") else {
-        log::warn!("overlay window not found");
-        return;
-    };
+fn on_press<R: Runtime>(app: &AppHandle<R>) {
+    log::debug!("hotkey: press");
+    if let Some(win) = app.get_webview_window("overlay") {
+        let _ = win.set_always_on_top(true);
+        let _ = win.show();
+    }
+    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Start) {
+        log::warn!("hotkey: dictation worker unreachable: {e}");
+    }
+}
 
-    match win.is_visible() {
-        Ok(true) => {
-            if let Err(e) = win.hide() {
-                log::warn!("overlay hide failed: {e}");
-            }
-        }
-        Ok(false) => {
-            let _ = win.set_always_on_top(true);
-            if let Err(e) = win.show() {
-                log::warn!("overlay show failed: {e}");
-            }
-        }
-        Err(e) => log::warn!("overlay visibility check failed: {e}"),
+fn on_release<R: Runtime>(app: &AppHandle<R>) {
+    log::debug!("hotkey: release");
+    if let Some(win) = app.get_webview_window("overlay") {
+        let _ = win.hide();
+    }
+    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop) {
+        log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }
