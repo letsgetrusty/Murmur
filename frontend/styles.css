@@ -35,16 +35,65 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   font-size: 13px;
   letter-spacing: 0.2px;
+  max-width: 280px;
+  transition: opacity 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+/* The native window stays "visible" to NSApp so the process doesn't get
+   terminated when there's nothing on screen; we just hide the pill. */
+.pill[data-state="idle"] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ff5b5b;
-  box-shadow: 0 0 8px rgba(255, 91, 91, 0.7);
+  background: #8a8a90;
+  box-shadow: none;
+  transition: background 160ms ease, box-shadow 160ms ease;
+  flex: 0 0 auto;
 }
 
 .label {
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Recording — pulsing red dot. */
+.pill[data-state="recording"] .dot {
+  background: #ff5b5b;
+  box-shadow: 0 0 10px rgba(255, 91, 91, 0.7);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Transcribing — pulsing cyan dot. */
+.pill[data-state="transcribing"] .dot {
+  background: #5ac8fa;
+  box-shadow: 0 0 10px rgba(90, 200, 250, 0.7);
+  animation: pulse 0.7s ease-in-out infinite;
+}
+
+/* Done — solid green. */
+.pill[data-state="done"] .dot {
+  background: #34c759;
+  box-shadow: 0 0 8px rgba(52, 199, 89, 0.55);
+}
+
+/* Error — solid amber/red, label tinted. */
+.pill[data-state="error"] {
+  background: rgba(58, 22, 26, 0.88);
+  color: #ffb4b4;
+}
+.pill[data-state="error"] .dot {
+  background: #ff453a;
+  box-shadow: 0 0 8px rgba(255, 69, 58, 0.6);
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    opacity: 1;   }
+  50%      { transform: scale(1.25); opacity: 0.6; }
 }

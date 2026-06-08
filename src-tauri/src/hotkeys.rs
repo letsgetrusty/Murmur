@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
-use crate::{AppState, DictationCmd};
+use crate::{emit_state, show_overlay, AppState, DictationCmd, OverlayState};
 
 // Phase 1 trigger: a chord, NOT the Fn key. See CLAUDE.md hard rule #4.
 // Hold to dictate, release to commit.
@@ -23,21 +23,19 @@ pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
 }
 
 fn on_press<R: Runtime>(app: &AppHandle<R>) {
-    log::debug!("hotkey: press");
-    if let Some(win) = app.get_webview_window("overlay") {
-        let _ = win.set_always_on_top(true);
-        let _ = win.show();
-    }
+    log::info!("hotkey: press");
+    show_overlay(app);
+    emit_state(app, OverlayState::Recording);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Start) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }
 
 fn on_release<R: Runtime>(app: &AppHandle<R>) {
-    log::debug!("hotkey: release");
-    if let Some(win) = app.get_webview_window("overlay") {
-        let _ = win.hide();
-    }
+    log::info!("hotkey: release");
+    // Keep the overlay visible — the router will flip it to Done/Error and
+    // schedule the hide once the transcribe + inject pipeline returns.
+    emit_state(app, OverlayState::Transcribing);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
