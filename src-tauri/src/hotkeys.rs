@@ -1,7 +1,9 @@
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
-use crate::{emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, OverlayState};
+use crate::{
+    emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, OverlayState,
+};
 
 // Secondary dictation trigger. v1 default is the chord; Fn-hold lives in
 // `fn_key` (CLAUDE.md hard rule #4 was relaxed by explicit user request).
@@ -14,9 +16,7 @@ const TTS_TOGGLE: &str = "Alt+A";
 const TTS_SPEED: &str = "Alt+Shift+S";
 
 pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
-    let dictate: Shortcut = DICTATE
-        .parse()
-        .expect("hard-coded shortcut string parses");
+    let dictate: Shortcut = DICTATE.parse().expect("hard-coded shortcut string parses");
     let tts: Shortcut = TTS_TOGGLE
         .parse()
         .expect("hard-coded shortcut string parses");
@@ -82,10 +82,12 @@ const ESC: &str = "Escape";
 /// shortcut is unregistered the moment the user releases the hotkey or
 /// hits Esc, so we never block Esc system-wide outside of recording.
 fn register_escape<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(esc) = ESC.parse::<Shortcut>() else { return };
-    let res = app
-        .global_shortcut()
-        .on_shortcut(esc, |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+    let Ok(esc) = ESC.parse::<Shortcut>() else {
+        return;
+    };
+    let res = app.global_shortcut().on_shortcut(
+        esc,
+        |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
             if event.state() == ShortcutState::Pressed {
                 log::info!("hotkey: cancel (Esc)");
                 unregister_escape(app);
@@ -93,7 +95,8 @@ fn register_escape<R: Runtime>(app: &AppHandle<R>) {
                     log::warn!("hotkey: cancel send failed: {e}");
                 }
             }
-        });
+        },
+    );
     if let Err(e) = res {
         log::debug!("hotkey: esc register failed: {e}");
     }
