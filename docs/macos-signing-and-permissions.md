@@ -61,12 +61,14 @@ Then re-trust it (below) and re-grant the two permissions once.
 ### 2. Trust the cert for code signing (one-time, privileged)
 
 This is what stops the per-rebuild re-prompting. It writes a trusted
-code-signing root into the **System** keychain, so it needs admin auth and must
-be run **by the user** (the agent's sandbox blocks system-trust changes):
+code-signing root into the **System** keychain, so it needs **root** (`sudo`)
+and must be run **by the user** (the agent's sandbox blocks system-trust
+changes). Without `sudo` it fails with
+`SecCertificateAddToKeychain: Write permissions error`:
 
 ```bash
 security find-certificate -c "murmur dev" -p > /tmp/murmurdev.pem
-security add-trusted-cert -d -r trustRoot -p codeSign \
+sudo security add-trusted-cert -d -r trustRoot -p codeSign \
   -k /Library/Keychains/System.keychain /tmp/murmurdev.pem
 ```
 
@@ -75,7 +77,7 @@ in your keychain and only you can sign with it, so on a personal machine the
 risk is low. Reverse with:
 
 ```bash
-security remove-trusted-cert -d /tmp/murmurdev.pem
+sudo security remove-trusted-cert -d /tmp/murmurdev.pem
 ```
 
 The clean alternative is a paid **Developer ID** cert (Apple-anchored, no
