@@ -57,7 +57,11 @@ registered, stable signing identity configured.
 Do not start Phase 1+ until Phase 0 is met. Phase definitions: `voice-tool-architecture.md` §7.
 
 ## Commands
-- Dev: `npm run tauri dev`
+- Dev: `./scripts/dev.sh` — builds, signs, wraps in `Murmur.app`, launches via
+  `open`. Use this, **not** `npm run tauri dev`: bare `tauri dev` breaks the
+  Fn-key Input Monitoring grant on macOS. See
+  `docs/macos-signing-and-permissions.md` for why (signing identity, TCC
+  responsible-process attribution, cert trust). Logs: `~/Library/Logs/murmur.log`.
 - Rust check (from `src-tauri/`): `cargo check`
 - Rust tests: `cargo test`
 - Release build: `npm run tauri build`
