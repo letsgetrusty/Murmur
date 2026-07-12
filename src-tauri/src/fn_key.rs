@@ -59,8 +59,24 @@ extern "C" {
         user_info: *mut c_void,
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+    fn CGEventTapIsEnabled(tap: CFMachPortRef) -> bool;
     fn CGEventGetFlags(event: CGEventRef) -> u64;
 }
+
+// IOKit's HID access API is the only reliable way to check/prompt for Input
+// Monitoring. `CGEventTapCreate` returns a non-null port even when the
+// permission is missing — the tap is simply created disabled — so a null
+// check alone silently degrades. We preflight here so the log is truthful and
+// the user actually gets the system prompt.
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOHIDCheckAccess(request: u32) -> u32;
+    fn IOHIDRequestAccess(request: u32) -> bool;
+}
+// kIOHIDRequestTypeListenEvent — the "monitor input" (Input Monitoring) grant.
+const KIOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
+// kIOHIDAccessTypeGranted
+const KIOHID_ACCESS_TYPE_GRANTED: u32 = 0;
 
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
@@ -112,6 +128,23 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
     })) as *mut c_void;
 
     unsafe {
+        // Preflight Input Monitoring. If it isn't granted, the tap below is
+        // born disabled and never delivers events, so trigger the system
+        // prompt (which also adds `murmur` to the Input Monitoring list). The
+        // grant only takes effect on the next launch.
+        let access = IOHIDCheckAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
+        if access != KIOHID_ACCESS_TYPE_GRANTED {
+            log::warn!(
+                "Fn-key: Input Monitoring not granted (access={access}). Prompting; grant `murmur` in System Settings → Privacy & Security → Input Monitoring, then restart. Fn-hold is disabled until then."
+            );
+            IOHIDRequestAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
+            // Reclaim the state we allocated for the (now-pointless) tap and
+            // bail — creating a dead tap only produces the misleading
+            // "installed" log we're fixing.
+            let _ = Box::from_raw(state as *mut TapState<R>);
+            return Ok(());
+        }
+
         let tap = CGEventTapCreate(
             KCG_SESSION_EVENT_TAP,
             KCG_HEAD_INSERT_EVENT_TAP,
@@ -131,7 +164,13 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         let source = CFMachPortCreateRunLoopSource(ptr::null_mut(), tap, 0);
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
         CGEventTapEnable(tap, true);
-        log::info!("Fn-key tap installed");
+        if CGEventTapIsEnabled(tap) {
+            log::info!("Fn-key tap installed and enabled");
+        } else {
+            log::warn!(
+                "Fn-key tap created but disabled by the system — Input Monitoring likely missing. Grant `murmur` and restart."
+            );
+        }
         // Intentionally leak the tap + source + state for the lifetime of the
         // app. macOS releases them on process exit.
     }
