@@ -178,6 +178,39 @@ pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(
     Ok(())
 }
 
+// --- History -----------------------------------------------------------------
+
+#[tauri::command]
+pub fn list_history(
+    state: State<AppState>,
+    query: String,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<crate::history::Entry>, String> {
+    let conn = state.history.lock().map_err(|e| e.to_string())?;
+    crate::history::list(&conn, &query, limit, offset).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_history(state: State<AppState>, id: i64) -> Result<(), String> {
+    let conn = state.history.lock().map_err(|e| e.to_string())?;
+    crate::history::delete(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_history(state: State<AppState>) -> Result<(), String> {
+    let conn = state.history.lock().map_err(|e| e.to_string())?;
+    crate::history::clear(&conn).map_err(|e| e.to_string())
+}
+
+/// Put arbitrary text on the clipboard (used by the History "Copy" button).
+#[tauri::command]
+pub fn copy_text(text: String) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.set_text(text))
+        .map_err(|e| e.to_string())
+}
+
 // --- API keys (Keychain) -----------------------------------------------------
 
 // (ui id, keychain item name, label, what it powers)

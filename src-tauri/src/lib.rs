@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod fn_key;
 mod focus;
+mod history;
 mod hotkeys;
 mod inject;
 mod kb;
@@ -58,6 +59,9 @@ pub struct AppState {
     pub config: Arc<Mutex<config::Config>>,
     /// Cumulative refinement token/cost totals, shared with the refiner.
     pub usage: Arc<Mutex<usage::UsageStats>>,
+    /// Dictation history database (SQLite). `Connection` is `!Sync`, so it's
+    /// behind a Mutex; access is infrequent (once per dictation / UI action).
+    pub history: Arc<Mutex<rusqlite::Connection>>,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -150,6 +154,10 @@ pub fn run() {
             commands::get_usage,
             commands::reset_usage,
             commands::get_openrouter_spend,
+            commands::list_history,
+            commands::delete_history,
+            commands::clear_history,
+            commands::copy_text,
         ])
         .setup(move |app| {
 
@@ -163,6 +171,9 @@ pub fn run() {
 
             // Cumulative refinement usage, persisted across restarts.
             let usage_state = Arc::new(Mutex::new(usage::load()));
+
+            // Dictation history database.
+            let history_state = Arc::new(Mutex::new(history::open()));
 
             // Refiner for Fn+Ctrl dictation. Reads model + prompt from the shared
             // config; the key is read from Keychain lazily on first refine.
@@ -209,6 +220,7 @@ pub fn run() {
                 mic_name: Mutex::new(cfg.mic_name.clone()),
                 config: config_state.clone(),
                 usage: usage_state.clone(),
+                history: history_state.clone(),
             });
 
             // The tray icon itself is auto-created from the `trayIcon` block
@@ -783,6 +795,34 @@ fn record_usage<R: Runtime>(app: &AppHandle<R>, update: impl FnOnce(&mut usage::
     }
 }
 
+/// Save a committed dictation to the history database, honoring the enable
+/// toggle and retention cap. `refined` is set only for Fn-refined dictations.
+fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&str>) {
+    // Clone the Arcs out of the managed state so the locks below don't borrow
+    // the temporary `State` guard.
+    let (config, history) = {
+        let state = app.state::<AppState>();
+        (state.config.clone(), state.history.clone())
+    };
+    let (enabled, limit) = config
+        .lock()
+        .map(|c| (c.history_enabled, c.history_limit))
+        .unwrap_or((true, 1000));
+    if !enabled {
+        return;
+    }
+    let conn = match history.lock() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if let Err(e) = history::insert(&conn, raw, refined) {
+        log::warn!("history: insert failed: {e}");
+    }
+    let _ = history::prune(&conn, limit);
+    drop(conn);
+    let _ = app.emit("history", ()); // nudge the History tab to refresh if open
+}
+
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -834,6 +874,8 @@ fn handle_recording<R: Runtime>(
                     text.chars().count(),
                     text
                 );
+                let raw = text.clone(); // keep the original transcript for history
+                let mut was_refined = false;
                 // Fn+Ctrl: run the transcript through the LLM refiner before
                 // pasting. On refine failure, fall back to the raw transcript
                 // so a dropped API call never loses the user's dictation.
@@ -850,6 +892,7 @@ fn handle_recording<R: Runtime>(
                             if let Ok(u) = app.state::<AppState>().usage.lock() {
                                 let _ = app.emit("usage", u.clone());
                             }
+                            was_refined = true;
                             refined
                         }
                         Err(e) => {
@@ -860,6 +903,11 @@ fn handle_recording<R: Runtime>(
                 } else {
                     text
                 };
+                record_history(
+                    &app,
+                    &raw,
+                    if was_refined { Some(&final_text) } else { None },
+                );
                 let chars = final_text.chars().count();
                 // `inject::paste_text` calls enigo, which posts CGEvents via
                 // Quartz. CGEventPost requires a CFRunLoop on the calling

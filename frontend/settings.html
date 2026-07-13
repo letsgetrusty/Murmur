@@ -154,12 +154,29 @@
           </div>
         </section>
 
-        <!-- History (Phase B) -->
+        <!-- History -->
         <section id="tab-history" class="tab">
-          <header class="tab-head"><h1>History</h1></header>
-          <div class="empty">
-            <p>Your past dictations will show up here.</p>
-            <p class="hint">Coming in the next update.</p>
+          <header class="tab-head">
+            <h1>History</h1>
+            <div class="actions">
+              <label class="toggle" title="Record dictations to a local database">
+                <input type="checkbox" id="history-enabled" /> Record
+              </label>
+              <input
+                id="history-search"
+                class="search"
+                type="search"
+                placeholder="Search…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button id="history-clear" class="small-btn danger">Clear all</button>
+            </div>
+          </header>
+          <div id="history-list"></div>
+          <div id="history-empty" class="empty" hidden>
+            <p>No dictations yet.</p>
+            <p class="hint">Dictate with Murmur and your history shows up here (stored locally).</p>
           </div>
         </section>
       </main>

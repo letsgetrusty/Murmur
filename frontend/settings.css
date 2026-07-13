@@ -421,6 +421,82 @@ select:focus {
   min-height: 1em;
 }
 
+/* History ----------------------------------------------------------------- */
+.search {
+  width: 200px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(191, 90, 242, 0.22);
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toggle input {
+  accent-color: var(--accent);
+}
+
+.hist-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--bg-elev);
+}
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.hist-spacer {
+  flex: 1;
+}
+.hist-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.hist-badge.refined {
+  color: var(--accent);
+  background: rgba(191, 90, 242, 0.14);
+}
+.hist-badge.raw {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+}
+.hist-time {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.hist-text {
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hist-row .small-btn {
+  padding: 5px 10px;
+  font-size: 11.5px;
+}
+
 /* Empty state ------------------------------------------------------------- */
 .empty {
   border: 1px dashed var(--border);

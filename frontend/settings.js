@@ -452,6 +452,116 @@ function initUsage() {
   });
 }
 
+// --- History ------------------------------------------------------------------
+
+let historyQuery = "";
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return (
+    d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+    ", " +
+    d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  );
+}
+
+function renderHistoryRow(e) {
+  const text = e.refined ?? e.raw;
+  const row = document.createElement("div");
+  row.className = "hist-row";
+
+  const head = document.createElement("div");
+  head.className = "hist-head";
+  const badge = document.createElement("span");
+  badge.className = `hist-badge ${e.refined ? "refined" : "raw"}`;
+  badge.textContent = e.refined ? "Refined" : "Raw";
+  const time = document.createElement("span");
+  time.className = "hist-time";
+  time.textContent = fmtTime(e.ts);
+  const spacer = document.createElement("span");
+  spacer.className = "hist-spacer";
+
+  const copy = document.createElement("button");
+  copy.className = "small-btn";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", async () => {
+    try {
+      await invoke("copy_text", { text });
+      copy.textContent = "Copied";
+      setTimeout(() => (copy.textContent = "Copy"), 1200);
+    } catch (_) {}
+  });
+  const del = document.createElement("button");
+  del.className = "small-btn danger";
+  del.textContent = "Delete";
+  del.addEventListener("click", async () => {
+    try {
+      await invoke("delete_history", { id: e.id });
+      row.remove();
+      if (!el("history-list").children.length) el("history-empty").hidden = false;
+    } catch (_) {}
+  });
+  head.append(badge, time, spacer, copy, del);
+
+  const body = document.createElement("div");
+  body.className = "hist-text";
+  body.textContent = text;
+
+  row.append(head, body);
+  return row;
+}
+
+async function loadHistory() {
+  if (!invoke) return;
+  try {
+    const entries = await invoke("list_history", {
+      query: historyQuery,
+      limit: 200,
+      offset: 0,
+    });
+    const list = el("history-list");
+    list.innerHTML = "";
+    el("history-empty").hidden = entries.length > 0;
+    for (const e of entries) list.appendChild(renderHistoryRow(e));
+  } catch (_) {}
+}
+
+function initHistory() {
+  const enabled = el("history-enabled");
+  enabled.checked = currentConfig?.history_enabled ?? true;
+  enabled.addEventListener("change", async (e) => {
+    const next = { ...currentConfig, history_enabled: e.target.checked };
+    try {
+      await invoke("save_config", { config: next });
+      currentConfig = next;
+    } catch (_) {}
+  });
+
+  let t = null;
+  el("history-search").addEventListener("input", (e) => {
+    historyQuery = e.target.value;
+    clearTimeout(t);
+    t = setTimeout(loadHistory, 150);
+  });
+
+  el("history-clear").addEventListener("click", async () => {
+    if (!window.confirm("Delete all dictation history?")) return;
+    try {
+      await invoke("clear_history");
+      loadHistory();
+    } catch (_) {}
+  });
+
+  // Refresh live when a new dictation lands and we're on the History tab.
+  window.__TAURI__?.event?.listen?.("history", () => {
+    if (document.getElementById("tab-history")?.classList.contains("active")) loadHistory();
+  });
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -461,6 +571,7 @@ function switchTab(name) {
   for (const t of document.querySelectorAll(".tab")) {
     t.classList.toggle("active", t.id === `tab-${name}`);
   }
+  if (name === "history") loadHistory();
 }
 
 async function init() {
@@ -483,6 +594,7 @@ async function init() {
   await loadKeys();
   initUsage();
   await loadUsage();
+  initHistory();
 }
 
 if (document.readyState === "loading") {
