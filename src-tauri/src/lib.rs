@@ -138,6 +138,10 @@ pub fn run() {
             commands::set_voice,
             commands::set_mic,
             commands::set_hotkey,
+            commands::list_keys,
+            commands::reveal_key,
+            commands::save_key,
+            commands::delete_key,
         ])
         .setup(move |app| {
 

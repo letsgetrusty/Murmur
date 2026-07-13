@@ -115,3 +115,100 @@ pub fn set_hotkey(
     };
     crate::config::save(&snapshot).map_err(|e| e.to_string())
 }
+
+// --- API keys (Keychain) -----------------------------------------------------
+
+// (ui id, keychain item name, label, what it powers)
+const MANAGED_KEYS: &[(&str, &str, &str, &str)] = &[
+    (
+        "groq",
+        crate::secrets::GROQ_API_KEY,
+        "Groq",
+        "Dictation — speech-to-text",
+    ),
+    (
+        "elevenlabs",
+        crate::secrets::ELEVENLABS_API_KEY,
+        "ElevenLabs",
+        "Read-aloud — text-to-speech",
+    ),
+    (
+        "openrouter",
+        crate::secrets::OPENROUTER_API_KEY,
+        "OpenRouter",
+        "Refinement — Fn+Ctrl dictation",
+    ),
+];
+
+fn keychain_name(id: &str) -> Option<&'static str> {
+    MANAGED_KEYS
+        .iter()
+        .find(|(i, ..)| *i == id)
+        .map(|(_, name, ..)| *name)
+}
+
+/// Mask a secret for display: first 4 + … + last 4, or bullets if short.
+fn mask(key: &str) -> String {
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() <= 8 {
+        "•".repeat(chars.len().max(4))
+    } else {
+        let first: String = chars[..4].iter().collect();
+        let last: String = chars[chars.len() - 4..].iter().collect();
+        format!("{first}…{last}")
+    }
+}
+
+#[derive(Serialize)]
+pub struct KeyInfo {
+    id: String,
+    label: String,
+    purpose: String,
+    present: bool,
+    masked: String,
+}
+
+/// Presence + masked preview for each managed key. Never returns full values.
+#[tauri::command]
+pub fn list_keys() -> Vec<KeyInfo> {
+    MANAGED_KEYS
+        .iter()
+        .map(|(id, name, label, purpose)| {
+            let val = crate::secrets::get(name).ok();
+            KeyInfo {
+                id: (*id).to_string(),
+                label: (*label).to_string(),
+                purpose: (*purpose).to_string(),
+                present: val.is_some(),
+                masked: val.as_deref().map(mask).unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Full value for a single key, for the reveal toggle (local IPC only).
+#[tauri::command]
+pub fn reveal_key(id: String) -> Result<String, String> {
+    let name = keychain_name(&id).ok_or_else(|| format!("unknown key: {id}"))?;
+    crate::secrets::get(name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_key(id: String, value: String) -> Result<(), String> {
+    let name = keychain_name(&id).ok_or_else(|| format!("unknown key: {id}"))?;
+    let v = value.trim();
+    if v.is_empty() {
+        return Err("key is empty".into());
+    }
+    crate::secrets::set(name, v).map_err(|e| e.to_string())?;
+    log::info!("secrets: '{id}' key updated"); // never log the value
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_key(id: String) -> Result<(), String> {
+    let name = keychain_name(&id).ok_or_else(|| format!("unknown key: {id}"))?;
+    crate::secrets::delete(name).map_err(|e| e.to_string())?;
+    log::info!("secrets: '{id}' key removed");
+    Ok(())
+}

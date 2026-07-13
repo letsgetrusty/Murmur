@@ -18,3 +18,8 @@ pub fn set(name: &str, value: &str) -> Result<()> {
     let entry = keyring::Entry::new(SERVICE, name).context("create keyring entry")?;
     entry.set_password(value).context("write keyring entry")
 }
+
+pub fn delete(name: &str) -> Result<()> {
+    let entry = keyring::Entry::new(SERVICE, name).context("create keyring entry")?;
+    entry.delete_credential().context("delete keyring entry")
+}

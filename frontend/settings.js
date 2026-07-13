@@ -242,6 +242,120 @@ function initHotkeys() {
   }
 }
 
+// --- API keys -----------------------------------------------------------------
+
+function setKeyMsg(row, text, kind = "") {
+  const m = row.querySelector(".key-msg");
+  if (m) {
+    m.textContent = text;
+    m.className = `key-msg hint ${kind}`;
+  }
+}
+
+function renderKeyRow(k) {
+  const row = document.createElement("div");
+  row.className = "key-row";
+
+  const head = document.createElement("div");
+  head.className = "key-head";
+  const label = document.createElement("span");
+  label.className = "row-label";
+  label.textContent = k.label;
+  const status = document.createElement("span");
+  status.className = `key-status ${k.present ? "ok" : "off"}`;
+  status.textContent = k.present ? `Set · ${k.masked}` : "Not set";
+  head.append(label, status);
+
+  const purpose = document.createElement("div");
+  purpose.className = "hint key-purpose";
+  purpose.textContent = k.purpose;
+
+  const controls = document.createElement("div");
+  controls.className = "key-controls";
+
+  const input = document.createElement("input");
+  input.type = "password";
+  input.className = "key-input";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = k.present ? "•••• set — paste to replace" : "paste key…";
+
+  const reveal = document.createElement("button");
+  reveal.className = "small-btn";
+  reveal.textContent = "Reveal";
+  reveal.disabled = !k.present;
+  let revealed = false;
+  reveal.addEventListener("click", async () => {
+    if (revealed) {
+      input.type = "password";
+      input.value = "";
+      reveal.textContent = "Reveal";
+      revealed = false;
+      return;
+    }
+    try {
+      input.value = await invoke("reveal_key", { id: k.id });
+      input.type = "text";
+      reveal.textContent = "Hide";
+      revealed = true;
+    } catch (e) {
+      setKeyMsg(row, `Reveal failed: ${e}`, "error");
+    }
+  });
+
+  const save = document.createElement("button");
+  save.className = "primary small";
+  save.textContent = "Save";
+  save.addEventListener("click", async () => {
+    const v = input.value.trim();
+    if (!v) {
+      setKeyMsg(row, "Enter a key first.", "error");
+      return;
+    }
+    try {
+      await invoke("save_key", { id: k.id, value: v });
+      setKeyMsg(row, "Saved ✓ — relaunch to apply.", "ok");
+      await loadKeys();
+    } catch (e) {
+      setKeyMsg(row, `Save failed: ${e}`, "error");
+    }
+  });
+
+  const remove = document.createElement("button");
+  remove.className = "small-btn danger";
+  remove.textContent = "Remove";
+  remove.disabled = !k.present;
+  remove.addEventListener("click", async () => {
+    try {
+      await invoke("delete_key", { id: k.id });
+      await loadKeys();
+    } catch (e) {
+      setKeyMsg(row, `Remove failed: ${e}`, "error");
+    }
+  });
+
+  controls.append(input, reveal, save, remove);
+
+  const msg = document.createElement("div");
+  msg.className = "key-msg hint";
+
+  row.append(head, purpose, controls, msg);
+  return row;
+}
+
+async function loadKeys() {
+  if (!invoke) return;
+  let keys;
+  try {
+    keys = await invoke("list_keys");
+  } catch (e) {
+    return;
+  }
+  const container = el("keys");
+  container.innerHTML = "";
+  for (const k of keys) container.appendChild(renderKeyRow(k));
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -270,6 +384,7 @@ async function init() {
   await loadConfig();
   await loadOptions();
   initHotkeys();
+  await loadKeys();
 }
 
 if (document.readyState === "loading") {

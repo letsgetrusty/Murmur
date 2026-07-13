@@ -296,6 +296,74 @@ select:focus {
   color: var(--error);
 }
 
+/* API key rows ------------------------------------------------------------ */
+.key-row {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.key-row:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+.key-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.key-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+.key-status.ok {
+  color: var(--ok);
+}
+.key-status.off {
+  color: var(--text-dim);
+}
+.key-purpose {
+  margin: 2px 0 8px;
+}
+.key-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.key-input {
+  flex: 1;
+  min-width: 0;
+}
+.small-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+}
+.small-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.small-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.small-btn.danger:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+}
+.primary.small {
+  padding: 7px 14px;
+  font-size: 12.5px;
+}
+.key-msg {
+  margin-top: 6px;
+  min-height: 1em;
+}
+
 /* Empty state ------------------------------------------------------------- */
 .empty {
   border: 1px dashed var(--border);
