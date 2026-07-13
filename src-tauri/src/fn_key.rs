@@ -36,6 +36,8 @@ const KCG_EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_MASK_FLAGS_CHANGED: u64 = 1 << KCG_EVENT_FLAGS_CHANGED;
 // kCGEventFlagMaskSecondaryFn
 const KCG_EVENT_FLAG_MASK_SECONDARY_FN: u64 = 0x00800000;
+// kCGEventFlagMaskControl — held together with Fn to trigger refined dictation.
+const KCG_EVENT_FLAG_MASK_CONTROL: u64 = 0x00040000;
 
 type CGEventRef = *mut c_void;
 type CGEventTapProxy = *mut c_void;
@@ -104,6 +106,10 @@ extern "C" {
 struct TapState<R: Runtime> {
     app: AppHandle<R>,
     fn_down: AtomicBool,
+    /// Whether Control was held at any point during the current Fn hold.
+    /// Seeded at Fn-down and OR'd on every flags change while Fn is down, so
+    /// Fn+Ctrl refines regardless of which key is pressed first.
+    refine_latch: AtomicBool,
 }
 
 unsafe extern "C" fn tap_callback<R: Runtime>(
@@ -115,13 +121,23 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
     let state = &*(user_info as *const TapState<R>);
     let flags = CGEventGetFlags(event);
     let fn_down_now = (flags & KCG_EVENT_FLAG_MASK_SECONDARY_FN) != 0;
+    let ctrl_now = (flags & KCG_EVENT_FLAG_MASK_CONTROL) != 0;
     let was_down = state.fn_down.swap(fn_down_now, Ordering::AcqRel);
     if fn_down_now != was_down {
         if fn_down_now {
+            // Fn just went down: seed the refine latch with the current Ctrl
+            // state (handles Ctrl-then-Fn).
+            state.refine_latch.store(ctrl_now, Ordering::Release);
             hotkeys::on_press(&state.app);
         } else {
-            hotkeys::on_release(&state.app);
+            // Fn released: refine if Ctrl was held at any point during the hold.
+            let refine = state.refine_latch.load(Ordering::Acquire);
+            hotkeys::on_release(&state.app, refine);
         }
+    } else if fn_down_now && ctrl_now {
+        // Ctrl pressed while Fn is already held (handles Fn-then-Ctrl), so the
+        // order of the two keys doesn't matter.
+        state.refine_latch.store(true, Ordering::Release);
     }
     event
 }
@@ -136,6 +152,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
     let state = Box::into_raw(Box::new(TapState {
         app,
         fn_down: AtomicBool::new(false),
+        refine_latch: AtomicBool::new(false),
     })) as *mut c_void;
 
     unsafe {

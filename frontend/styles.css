@@ -90,6 +90,13 @@ body {
   animation: pulse 0.7s ease-in-out infinite;
 }
 
+/* Refining (Fn+Ctrl) — pulsing violet dot to distinguish from transcribing. */
+.pill[data-state="refining"] .dot {
+  background: #bf5af2;
+  box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
+  animation: pulse 0.7s ease-in-out infinite;
+}
+
 /* Done — solid green. */
 .pill[data-state="done"] .dot {
   background: #34c759;

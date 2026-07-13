@@ -28,8 +28,9 @@ pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
     gs.on_shortcut(
         dictate,
         move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
+            // The chord is always plain dictation; refined dictation is Fn+Ctrl.
             ShortcutState::Pressed => on_press(app),
-            ShortcutState::Released => on_release(app),
+            ShortcutState::Released => on_release(app, false),
         },
     )?;
     gs.on_shortcut(
@@ -67,11 +68,12 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 
 /// Commit a dictation. Keep the overlay visible — the router flips it to
 /// Done/Error and schedules the idle render once transcribe + inject return.
-pub fn on_release<R: Runtime>(app: &AppHandle<R>) {
-    log::info!("hotkey: release");
+/// `refine` = Fn+Ctrl was held during this dictation → refine before pasting.
+pub fn on_release<R: Runtime>(app: &AppHandle<R>, refine: bool) {
+    log::info!("hotkey: release (refine={refine})");
     unregister_escape(app);
     emit_state(app, OverlayState::Transcribing);
-    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop) {
+    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop { refine }) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }

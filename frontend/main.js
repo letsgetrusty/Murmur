@@ -5,6 +5,7 @@ const LABELS = {
   idle: "murmur",
   recording: "Recording…",
   transcribing: "Transcribing…",
+  refining: "Refining…",
 };
 
 function applyState(payload) {

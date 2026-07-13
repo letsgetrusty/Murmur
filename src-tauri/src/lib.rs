@@ -7,6 +7,7 @@ mod fn_key;
 mod hotkeys;
 mod inject;
 mod kb;
+mod refine;
 mod secrets;
 mod selection;
 mod stt;
@@ -26,7 +27,10 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 pub enum DictationCmd {
     Start,
-    Stop,
+    /// `refine` = run the transcript through the LLM refiner before pasting
+    /// (Fn+Ctrl). Plain dictation sets it false. Decided at release so Ctrl
+    /// can be pressed before or after Fn.
+    Stop { refine: bool },
     /// User pressed Esc — drop the in-flight recorder and don't transcribe.
     Cancel,
 }
@@ -61,6 +65,8 @@ pub enum OverlayState {
     Idle,
     Recording,
     Transcribing,
+    /// Fn+Ctrl only: the transcript is being cleaned up by the LLM.
+    Refining,
     Done { chars: usize },
     Error { message: String },
 }
@@ -105,7 +111,9 @@ pub fn run() {
     // CLAUDE.md hard rule #6: secrets never live in config files or source.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("set-key") {
-        return run_set_key();
+        // `murmur set-key [groq|openrouter|elevenlabs]`; defaults to groq.
+        let which = args.get(2).map(String::as_str).unwrap_or("groq");
+        return run_set_key(which);
     }
 
     // Enumerate cpal input devices BEFORE Tauri/NSApp takes over the main
@@ -124,10 +132,18 @@ pub fn run() {
             // so the user can run `set-key` without restarting the app.
             let transcriber: Arc<dyn stt::Transcriber> = Arc::new(stt::GroqWhisper::new());
 
+            // Refiner for Fn+Ctrl dictation. Model + prompt come from config so
+            // they're tunable without a recompile. The key is read from Keychain
+            // lazily on first refine.
+            let refiner: Arc<dyn refine::Refiner> = Arc::new(refine::OpenRouterRefiner::new(
+                cfg.refine_model.clone(),
+                cfg.refine_prompt.clone(),
+            ));
+
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
             // callback boundary.
-            let tx = spawn_dictation_worker(app.handle().clone(), transcriber);
+            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner);
 
             // Prefer ElevenLabs when the user has set a key; fall back to
             // macOS AVSpeechSynthesizer otherwise so Option+A always does
@@ -513,19 +529,29 @@ fn apply_mic<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
 
 fn persist_config<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<AppState>();
-    let cfg = config::Config {
-        tts_speed: state.speaker.current_speed(),
-        tts_voice_id: state.speaker.current_voice().unwrap_or_default(),
-        mic_name: state.mic_name.lock().ok().and_then(|g| g.clone()),
-    };
+    // Start from the on-disk config so user-edited fields we don't own here
+    // (refine_model, refine_prompt) are preserved across tray changes.
+    let mut cfg = config::load();
+    cfg.tts_speed = state.speaker.current_speed();
+    cfg.tts_voice_id = state.speaker.current_voice().unwrap_or_default();
+    cfg.mic_name = state.mic_name.lock().ok().and_then(|g| g.clone());
     if let Err(e) = config::save(&cfg) {
         log::warn!("config: save failed: {e}");
     }
 }
 
-fn run_set_key() {
+fn run_set_key(which: &str) {
     use std::io::{self, Write};
-    eprint!("Enter Groq API key: ");
+    let (key_name, label) = match which {
+        "groq" => (secrets::GROQ_API_KEY, "Groq"),
+        "openrouter" => (secrets::OPENROUTER_API_KEY, "OpenRouter"),
+        "elevenlabs" => (secrets::ELEVENLABS_API_KEY, "ElevenLabs"),
+        other => {
+            eprintln!("unknown key '{other}'. Use: groq | openrouter | elevenlabs");
+            return;
+        }
+    };
+    eprint!("Enter {label} API key: ");
     let _ = io::stderr().flush();
     let mut key = String::new();
     if let Err(e) = io::stdin().read_line(&mut key) {
@@ -537,8 +563,8 @@ fn run_set_key() {
         eprintln!("empty key, aborting");
         return;
     }
-    match secrets::set(secrets::GROQ_API_KEY, key) {
-        Ok(()) => eprintln!("saved to Keychain."),
+    match secrets::set(key_name, key) {
+        Ok(()) => eprintln!("{label} key saved to Keychain."),
         Err(e) => eprintln!("save failed: {e}"),
     }
 }
@@ -546,6 +572,7 @@ fn run_set_key() {
 fn spawn_dictation_worker<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
+    refiner: Arc<dyn refine::Refiner>,
 ) -> UnboundedSender<DictationCmd> {
     let (tx, mut rx) = unbounded_channel::<DictationCmd>();
     std::thread::spawn(move || {
@@ -592,14 +619,20 @@ fn spawn_dictation_worker<R: Runtime>(
                     emit_state(&app, OverlayState::Idle);
                     continue;
                 }
-                DictationCmd::Stop => {
+                DictationCmd::Stop { refine } => {
                     let Some(r) = rec.take() else {
                         log::debug!("dictation: Stop without active recording");
                         continue;
                     };
                     match r.stop() {
                         Ok(recording) => {
-                            handle_recording(app.clone(), transcriber.clone(), recording);
+                            handle_recording(
+                                app.clone(),
+                                transcriber.clone(),
+                                refiner.clone(),
+                                recording,
+                                refine,
+                            );
                         }
                         Err(e) => {
                             log::warn!("dictation: stop failed: {e}");
@@ -623,7 +656,9 @@ fn spawn_dictation_worker<R: Runtime>(
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
+    refiner: Arc<dyn refine::Refiner>,
     recording: audio::Recording,
+    refine: bool,
 ) {
     if recording.duration_ms < 200 {
         log::info!(
@@ -658,14 +693,40 @@ fn handle_recording<R: Runtime>(
                 (OverlayState::Done { chars: 0 }, 400)
             }
             Ok(text) => {
-                let chars = text.chars().count();
-                log::info!("dictation: transcript ({} chars): {}", chars, text);
+                log::info!(
+                    "dictation: transcript ({} chars): {}",
+                    text.chars().count(),
+                    text
+                );
+                // Fn+Ctrl: run the transcript through the LLM refiner before
+                // pasting. On refine failure, fall back to the raw transcript
+                // so a dropped API call never loses the user's dictation.
+                let final_text = if refine {
+                    emit_state(&app, OverlayState::Refining);
+                    match refiner.refine(&text).await {
+                        Ok(refined) => {
+                            log::info!(
+                                "dictation: refined ({} chars): {}",
+                                refined.chars().count(),
+                                refined
+                            );
+                            refined
+                        }
+                        Err(e) => {
+                            log::warn!("dictation: refine failed, pasting raw transcript: {e}");
+                            text
+                        }
+                    }
+                } else {
+                    text
+                };
+                let chars = final_text.chars().count();
                 // `inject::paste_text` calls enigo, which posts CGEvents via
                 // Quartz. CGEventPost requires a CFRunLoop on the calling
                 // thread — tokio workers don't have one, and calling from a
                 // bare worker exits the process silently. Run on the main
                 // thread (NSApp's run loop) instead.
-                let result = paste_on_main_thread(&app, text).await;
+                let result = paste_on_main_thread(&app, final_text).await;
                 match result {
                     Ok(()) => (OverlayState::Done { chars }, 600),
                     Err(e) => {
