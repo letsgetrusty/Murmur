@@ -50,13 +50,19 @@ pub trait Speaker: Send + Sync {
 
 /// Voices the tray menu exposes for the ElevenLabs backend. Kept here so the
 /// IDs and friendly names are colocated.
+// Premade ElevenLabs voices (available to every account, verified usable).
+// Chosen to be distinct and friendly — the old 2023 default set had two
+// near-identical males (Antoni/Adam). Names match the ElevenLabs library.
 pub const ELEVENLABS_VOICES: &[(&str, &str)] = &[
-    ("21m00Tcm4TlvDq8ikWAM", "Rachel"),
-    ("AZnzlk1XvdvUeBnXmlld", "Domi"),
-    ("EXAVITQu4vr4xnSDxMaL", "Bella"),
-    ("ErXwobaYiN019PkySvjV", "Antoni"),
-    ("MF3mGyEYCl7XYWbV9V6O", "Elli"),
-    ("pNInz6obpgDQGcFmaJgB", "Adam"),
+    ("21m00Tcm4TlvDq8ikWAM", "Rachel"),  // calm female
+    ("XrExE9yKIg1WjnnlVkGX", "Matilda"), // warm, friendly female
+    ("cgSgspJ2msm6clMCkdW9", "Jessica"), // expressive, friendly female
+    ("pFZP5JQG7iQjIQuC4Bku", "Lily"),    // warm British female
+    ("bIHbv24MWmeRgasZH58o", "Will"),    // young, chill male
+    ("iP95p4xoKVk53GoZ742B", "Chris"),   // casual, natural male
+    ("cjVigY5qzO86Huf0OWal", "Eric"),    // friendly, classy male
+    ("JBFqnCBsd6RMkjVDRZzb", "George"),  // warm, mature British male
+    ("nPczCjzI2devNBz1zQrb", "Brian"),   // deep narration male
 ];
 
 /// Speeds the tray menu exposes. AVPlayer's spectral pitch algorithm sounds
