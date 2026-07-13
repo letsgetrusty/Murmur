@@ -65,23 +65,14 @@ say "Building (cargo build, incremental)…"
 cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 
 # 3. Assemble the .app -------------------------------------------------------
-#    MacOS/murmur-bin : the real Rust binary
-#    MacOS/murmur     : launcher script (CFBundleExecutable) → redirects logs
+# Direct binary as the executable (no launcher-script indirection — that broke
+# the TCC identity match). The app tees its own logs to ~/Library/Logs/murmur.log,
+# so we don't need `open --stdout` (which fails -10810 on a self-signed app).
 say "Wrapping in Murmur.app…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/murmur-bin"
+cp "$BIN" "$APP/Contents/MacOS/murmur"
 [ -f src-tauri/icons/icon.icns ] && cp src-tauri/icons/icon.icns "$APP/Contents/Resources/icon.icns"
-
-cat > "$APP/Contents/MacOS/murmur" <<SH
-#!/bin/bash
-# Launcher: exec the real binary with output redirected to the log. exec keeps
-# the same PID so the LaunchServices-assigned responsible process (this .app)
-# is preserved — that's what makes the Input Monitoring grant apply.
-DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-exec "\$DIR/murmur-bin" >"$LOG" 2>&1
-SH
-chmod +x "$APP/Contents/MacOS/murmur"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -103,13 +94,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 4. Sign — nested binary first (same identifier so the post-exec identity
-#    matches the grant), then the bundle. --------------------------------------
+# 4. Sign with the stable identity ------------------------------------------
 say "Signing with '$IDENTITY' (identifier $BUNDLE_ID)…"
-codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP/Contents/MacOS/murmur-bin"
 codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP"
-codesign -dvvv "$APP/Contents/MacOS/murmur-bin" 2>&1 | grep -qi "adhoc" \
-  && die "murmur-bin is still ad-hoc signed — signing did not take."
+codesign -dvvv "$APP/Contents/MacOS/murmur" 2>&1 | grep -qi "adhoc" \
+  && die "murmur is still ad-hoc signed — signing did not take."
 # Fresh bundle at a reused path confuses LaunchServices; clear provenance.
 xattr -cr "$APP" 2>/dev/null || true
 
@@ -118,17 +107,16 @@ say "Relaunching…"
 osascript -e 'quit app "Murmur"' >/dev/null 2>&1 || true
 pkill -f "Murmur.app/Contents/MacOS/" >/dev/null 2>&1 || true
 sleep 1
-: > "$LOG"
-RUST_LOG="${RUST_LOG:-info}" open "$APP"
+RUST_LOG="${RUST_LOG:-info}" open "$APP"   # app tees its own log to $LOG
 
 # 6. Confirm the tap actually came up ----------------------------------------
 for _ in $(seq 1 20); do grep -qE "Fn-key" "$LOG" 2>/dev/null && break; sleep 0.5; done
 if grep -q "Fn-key tap installed and enabled" "$LOG" 2>/dev/null; then
   say "Murmur up — Fn tap enabled."
 else
-  printf '\033[1;33m⚠ Fn tap not enabled. Grant Input Monitoring to Murmur and re-run:\033[0m\n'
+  printf '\033[1;33m⚠ Fn tap not enabled. Grant Accessibility to Murmur and re-run:\033[0m\n'
   grep -E "Fn-key" "$LOG" 2>/dev/null || true
-  printf '   System Settings → Privacy & Security → Input Monitoring → enable Murmur\n'
+  printf '   System Settings → Privacy & Security → Accessibility → enable Murmur\n'
 fi
 echo "   Logs:     tail -f $LOG"
 echo "   Triggers: hold Fn to dictate · Alt+A read-aloud · Alt+Shift+S speed"

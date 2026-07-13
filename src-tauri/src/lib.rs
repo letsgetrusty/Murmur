@@ -65,9 +65,41 @@ pub enum OverlayState {
     Error { message: String },
 }
 
+/// Tee log output to both stderr and a file. When the app is launched as a
+/// bundle via `open` (the dev workflow), stderr is discarded — the file is the
+/// only way to see logs. stderr stays useful for `cargo run` from a terminal.
+struct Tee(std::fs::File);
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), buf);
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        self.0.flush()
+    }
+}
+
+/// `~/Library/Logs/murmur.log`, truncated each launch so it stays readable.
+fn open_log_file() -> Option<std::fs::File> {
+    let mut path = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    path.push("Library/Logs/murmur.log");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .ok()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if let Some(file) = open_log_file() {
+        builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
+    }
+    builder.init();
 
     // First-run setup: `murmur set-key` stores the Groq API key in Keychain.
     // CLAUDE.md hard rule #6: secrets never live in config files or source.

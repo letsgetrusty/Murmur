@@ -1,39 +1,56 @@
 # macOS signing & permissions (dev)
 
-How Murmur gets stable **Accessibility** and **Input Monitoring** grants during
-development, and why the dev workflow is `scripts/dev.sh` rather than plain
-`tauri dev`. This is macOS-specific plumbing; read it before touching the
-hotkey/injection paths or the dev launch flow.
+How Murmur gets a stable **Accessibility** grant during development, and why the
+dev workflow is `scripts/dev.sh` rather than plain `tauri dev`. This is
+macOS-specific plumbing; read it before touching the hotkey/injection paths or
+the dev launch flow.
 
-## The problem
+## TL;DR — Murmur needs exactly ONE permission: Accessibility
 
-Dictation needs two TCC permissions:
+Both things that look like they need separate permissions are covered by the
+single **Accessibility** grant:
 
-- **Input Monitoring** — the Fn-key event tap (`fn_key.rs`, a `CGEventTap`).
-- **Accessibility** — `enigo` simulating `Cmd+C`/`Cmd+V` for selection + inject.
+- **`enigo`** simulating `Cmd+C`/`Cmd+V` for selection + paste-injection → Accessibility.
+- **The Fn-key `CGEventTap`** (`fn_key.rs`) → needs event-listen authorization,
+  which on macOS is **satisfied by the Accessibility grant**. No separate Input
+  Monitoring grant is required. (Verified empirically on macOS 26: with
+  Accessibility granted and Input Monitoring left at "unknown",
+  `IOHIDCheckAccess` returns *granted* and the tap delivers Fn events.)
 
-Getting them to *stick* fought three separate macOS behaviors:
+This is the same one-permission model Wispr Flow uses.
+
+## The bug that made it look like Input Monitoring was needed
+
+`fn_key.rs` used to call **`IOHIDRequestAccess`** when it saw Input Monitoring
+wasn't explicitly granted. That call records an explicit Input Monitoring
+**denial** in TCC — and an explicit denial *overrides* the Accessibility
+coupling, so `IOHIDCheckAccess` then returns `denied` forever and the tap stays
+off. The fix: gate the tap on `AXIsProcessTrusted()` and **never call
+`IOHIDRequestAccess`**. If a stale denial is already recorded, clear it once:
+`tccutil reset ListenEvent dev.lgr.murmur`.
+
+## Why grants didn't *stick* across rebuilds
+
+Two macOS behaviors, both fixed by the setup below:
 
 1. **`tauri dev` ad-hoc signs the binary.** `signingIdentity` in
    `tauri.conf.json` only applies to `tauri build` bundles, so every `cargo`
    rebuild in dev produced an ad-hoc signature with a changing identity. TCC
-   can't pin a grant to an ad-hoc identity across rebuilds.
+   can't pin a grant to an ad-hoc identity across rebuilds. → Sign with the
+   stable `murmur dev` identity (below) and launch as a real `.app`.
 
-2. **A bare, shell-launched binary is not its own "responsible process."** For
-   Input Monitoring, macOS attributes the grant to the *responsible* process —
-   which for a binary launched from a terminal is the **terminal**, not Murmur.
-   So toggling "murmur" in System Settings never affected the actual check
-   (`IOHIDCheckAccess` kept returning denied). Running as a real **`.app`
-   launched via `open`** (LaunchServices) makes Murmur its own responsible
-   process, and the grant applies.
-
-3. **A self-signed cert that isn't *trusted* forces cdhash-based TCC matching.**
+2. **A self-signed cert that isn't *trusted* forces cdhash-based TCC matching.**
    Even correctly signed with a stable identity, an **untrusted** cert makes TCC
    fall back to matching the exact **cdhash** instead of the (stable) designated
    requirement. The cdhash changes on every code change → TCC treats each
-   rebuild as a new app → re-prompts for permission. Marking the cert
-   **trusted for code signing** makes TCC match on the designated requirement,
-   which is stable, so the grant survives rebuilds.
+   rebuild as a new app → re-prompts. Marking the cert **trusted for code
+   signing** makes TCC match on the designated requirement, which is stable, so
+   the grant survives rebuilds.
+
+Note: the app is launched as a real **`.app` via `open`** (not a bare
+shell-launched binary) so it is its own TCC "responsible process". A bare binary
+launched from a terminal gets its grants attributed to the *terminal*, not
+Murmur.
 
 ## The setup
 
@@ -56,7 +73,7 @@ designated => identifier "dev.lgr.murmur" and certificate leaf = H"148a757457681
 - Name: `murmur dev` · Identity Type: Self Signed Root · Certificate Type:
   **Code Signing**.
 
-Then re-trust it (below) and re-grant the two permissions once.
+Then re-trust it (below) and re-grant Accessibility once.
 
 ### 2. Trust the cert for code signing (one-time, privileged)
 
@@ -91,18 +108,16 @@ distribute Murmur to other Macs.
 
 1. ensures the Vite dev server is up (frontend hot-reload still works),
 2. `cargo build` (incremental),
-3. wraps the binary in a signed **`Murmur.app`** whose `CFBundleExecutable` is a
-   tiny **launcher script** that `exec`s the real binary with stderr/stdout
-   redirected to `~/Library/Logs/murmur.log`,
-4. signs the nested binary *and* the bundle with `murmur dev` /
-   `identifier dev.lgr.murmur`,
+3. wraps the **direct binary** in a signed **`Murmur.app`** (no launcher-script
+   indirection — that broke the TCC identity match),
+4. signs the bundle with `murmur dev` / `identifier dev.lgr.murmur`,
 5. relaunches via `open` and confirms `Fn-key tap installed and enabled`.
 
-Why the launcher script: `open --stdout/--stderr` fails with `-10810` on a
-self-signed app (that flag takes a spawn path Gatekeeper rejects), and
-env_logger's stderr does **not** reach the unified log. The launcher `exec`s in
-place (same PID) so the LaunchServices-assigned responsible process is preserved
-— which is what keeps Input Monitoring working — while still capturing logs.
+Logs: the app **tees its own logs** to `~/Library/Logs/murmur.log` (see the
+`Tee` writer in `lib.rs`). This is why the bundle can be a clean direct binary —
+we don't need `open --stdout/--stderr` (which fails with `-10810` on a
+self-signed app because that flag takes a spawn path Gatekeeper rejects), and
+env_logger's stderr does **not** reach the unified log for a bundled app.
 
 ```bash
 ./scripts/dev.sh                 # build, sign, wrap, launch
@@ -114,28 +129,33 @@ Editing the webview → instant (Vite). Editing Rust → re-run the script.
 ## Granting permissions (first time, or after recreating the cert)
 
 1. Run `./scripts/dev.sh`.
-2. System Settings → Privacy & Security:
-   - **Input Monitoring** → enable **Murmur**
-   - **Accessibility** → enable **Murmur**
-3. Re-run `./scripts/dev.sh`. `~/Library/Logs/murmur.log` should show
-   `Fn-key tap installed and enabled`, and injection should log
-   `The application has the permission to simulate input`.
+2. System Settings → Privacy & Security → **Accessibility** → enable **Murmur**.
+   (That's the *only* permission needed — do NOT touch Input Monitoring.)
+3. The first launch after the cert-trust change also pops a **Keychain** prompt
+   to read the API keys (the new signature changed the binary hash). Click
+   **Always Allow** so it doesn't recur on future rebuilds.
+4. Re-run `./scripts/dev.sh`. `~/Library/Logs/murmur.log` should show
+   `Accessibility=true … InputMonitoring=0` and `Fn-key tap installed and enabled`.
 
-With the cert trusted (step 2 above), these grants persist across rebuilds.
+With the cert trusted, the Accessibility grant + Keychain "Always Allow" both
+persist across rebuilds.
 
 ## Quick diagnostics
 
 ```bash
 # What identity is the running app signed with? (want Authority=murmur dev, not adhoc)
-codesign -dvvv src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur-bin | grep -iE "Authority|adhoc|Identifier"
+codesign -dvvv src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur | grep -iE "Authority|adhoc|Identifier"
 
 # Designated requirement (must be stable across rebuilds)
-codesign -d -r- src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur-bin | grep designated
+codesign -d -r- src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur | grep designated
 
 # Is the cert trusted for code signing?
 security dump-trust-settings -d 2>/dev/null | grep -iA2 murmur
 
-# Reset a stuck TCC grant to re-trigger the prompt
-tccutil reset ListenEvent dev.lgr.murmur      # Input Monitoring
-tccutil reset Accessibility dev.lgr.murmur     # Accessibility
+# Real permission state is logged at startup:
+grep "Fn-key: Accessibility" ~/Library/Logs/murmur.log
+
+# Clear a stuck/poisoned grant, then relaunch to re-evaluate
+tccutil reset Accessibility dev.lgr.murmur     # the one that matters
+tccutil reset ListenEvent dev.lgr.murmur       # clears any stale Input Monitoring denial
 ```

@@ -9,9 +9,13 @@
 // run loop NSApp drives. Callbacks therefore arrive on the main thread, just
 // like the chord callbacks.
 //
-// Requires **Input Monitoring** permission. If the user hasn't granted it,
-// `CGEventTapCreate` returns null; we log a clear message and continue with
-// the chord as the only trigger.
+// Permissions: this tap needs event-listen authorization, which on macOS is
+// satisfied by the **Accessibility** grant Murmur already requires for
+// paste-injection — so it needs NO separate Input Monitoring grant. We gate
+// tap creation on `AXIsProcessTrusted()` and deliberately never call
+// `IOHIDRequestAccess`: doing so records an explicit Input Monitoring *denial*
+// that overrides the Accessibility coupling and wedges the tap off. (Verified
+// on macOS 26; see docs/macos-signing-and-permissions.md.)
 
 use std::ffi::c_void;
 use std::ptr;
@@ -48,6 +52,14 @@ type CGEventTapCallBack = unsafe extern "C" fn(
     user_info: *mut c_void,
 ) -> CGEventRef;
 
+// Accessibility trust. On macOS 26 an app trusted for Accessibility also
+// satisfies Input Monitoring's IOHIDCheckAccess, so Accessibility is the one
+// permission that matters. We log it to see the real state.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventTapCreate(
@@ -71,12 +83,11 @@ extern "C" {
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
     fn IOHIDCheckAccess(request: u32) -> u32;
-    fn IOHIDRequestAccess(request: u32) -> bool;
 }
 // kIOHIDRequestTypeListenEvent — the "monitor input" (Input Monitoring) grant.
+// Only used for the diagnostic IOHIDCheckAccess log; the tap is gated on
+// Accessibility, not this value.
 const KIOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
-// kIOHIDAccessTypeGranted
-const KIOHID_ACCESS_TYPE_GRANTED: u32 = 0;
 
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
@@ -132,15 +143,19 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         // born disabled and never delivers events, so trigger the system
         // prompt (which also adds `murmur` to the Input Monitoring list). The
         // grant only takes effect on the next launch.
+        let ax_trusted = AXIsProcessTrusted();
         let access = IOHIDCheckAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
-        if access != KIOHID_ACCESS_TYPE_GRANTED {
+        log::info!("Fn-key: Accessibility(AXIsProcessTrusted)={ax_trusted}  InputMonitoring(IOHIDCheckAccess)={access} [0=granted,1=denied,2=unknown]");
+        // Accessibility is the ONE permission Murmur needs: it's required for
+        // paste-injection AND it authorizes the Fn CGEventTap (an app trusted
+        // for Accessibility satisfies the event-listen check, so a separate
+        // Input Monitoring grant is unnecessary). We deliberately do NOT call
+        // IOHIDRequestAccess — it records an explicit Input Monitoring *denial*
+        // that then overrides the Accessibility grant and wedges the tap off.
+        if !ax_trusted {
             log::warn!(
-                "Fn-key: Input Monitoring not granted (access={access}). Prompting; grant `murmur` in System Settings → Privacy & Security → Input Monitoring, then restart. Fn-hold is disabled until then."
+                "Fn-key: Accessibility not granted — Fn-hold disabled. Grant Murmur in System Settings → Privacy & Security → Accessibility, then relaunch."
             );
-            IOHIDRequestAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
-            // Reclaim the state we allocated for the (now-pointless) tap and
-            // bail — creating a dead tap only produces the misleading
-            // "installed" log we're fixing.
             let _ = Box::from_raw(state as *mut TapState<R>);
             return Ok(());
         }
