@@ -5,6 +5,7 @@ mod audio;
 mod commands;
 mod config;
 mod fn_key;
+mod focus;
 mod hotkeys;
 mod inject;
 mod kb;
@@ -371,14 +372,41 @@ pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Find the monitor whose bounds contain `pt`, a global top-left point in
+/// *logical* screen points. Each monitor's physical bounds are converted to
+/// points by dividing by its own scale factor, so this stays correct on
+/// mixed-DPI multi-monitor setups.
+fn monitor_containing_point<R: Runtime>(
+    win: &tauri::WebviewWindow<R>,
+    pt: (f64, f64),
+) -> Option<tauri::Monitor> {
+    let monitors = win.available_monitors().ok()?;
+    monitors.into_iter().find(|m| {
+        let s = m.scale_factor();
+        let pos = m.position();
+        let size = m.size();
+        let lx = pos.x as f64 / s;
+        let ly = pos.y as f64 / s;
+        let lw = size.width as f64 / s;
+        let lh = size.height as f64 / s;
+        pt.0 >= lx && pt.0 < lx + lw && pt.1 >= ly && pt.1 < ly + lh
+    })
+}
+
 fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
-    // Target the screen the user is actually working on: the monitor under the
-    // mouse cursor. Fall back to the window's current monitor, then primary.
-    // Wrap in early-returns so a single missing monitor query doesn't tank it.
-    let monitor = win
-        .cursor_position()
-        .ok()
-        .and_then(|p| win.monitor_from_point(p.x, p.y).ok().flatten())
+    // Target the screen the user is actually working on: the one holding the
+    // active window they're dictating into. Ask Accessibility for the focused
+    // window's center (global top-left points) and match it to a monitor. If
+    // there's no focused window, fall back to the monitor under the mouse
+    // cursor, then the window's current monitor, then primary. Wrap in
+    // early-returns so a single missing monitor query doesn't tank it.
+    let monitor = focus::focused_window_center()
+        .and_then(|pt| monitor_containing_point(win, pt))
+        .or_else(|| {
+            win.cursor_position()
+                .ok()
+                .and_then(|p| win.monitor_from_point(p.x, p.y).ok().flatten())
+        })
         .or_else(|| win.current_monitor().ok().flatten())
         .or_else(|| win.primary_monitor().ok().flatten());
     let monitor = match monitor {
