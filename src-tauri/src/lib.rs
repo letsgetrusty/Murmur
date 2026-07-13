@@ -2,6 +2,7 @@
 // hotkey → recorder lifecycle → transcribe → inject. selection / tts / kb land
 // in subsequent phases and remain stubs.
 mod audio;
+mod commands;
 mod config;
 mod fn_key;
 mod hotkeys;
@@ -50,6 +51,9 @@ pub struct AppState {
     pub mic_names: Vec<String>,
     /// Current mic selection. `None` = system default.
     pub mic_name: Mutex<Option<String>>,
+    /// Live config, shared with the refiner and the settings-window IPC
+    /// commands so edits apply without a restart.
+    pub config: Arc<Mutex<config::Config>>,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -126,19 +130,24 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            commands::get_config,
+            commands::save_config,
+        ])
         .setup(move |app| {
+
+            // Shared live config: the refiner reads it on each refine and the
+            // settings window edits it via IPC, so changes apply without a restart.
+            let config_state = Arc::new(Mutex::new(cfg.clone()));
 
             // GroqWhisper reads the API key from Keychain on each transcribe,
             // so the user can run `set-key` without restarting the app.
             let transcriber: Arc<dyn stt::Transcriber> = Arc::new(stt::GroqWhisper::new());
 
-            // Refiner for Fn+Ctrl dictation. Model + prompt come from config so
-            // they're tunable without a recompile. The key is read from Keychain
-            // lazily on first refine.
-            let refiner: Arc<dyn refine::Refiner> = Arc::new(refine::OpenRouterRefiner::new(
-                cfg.refine_model.clone(),
-                cfg.refine_prompt.clone(),
-            ));
+            // Refiner for Fn+Ctrl dictation. Reads model + prompt from the shared
+            // config; the key is read from Keychain lazily on first refine.
+            let refiner: Arc<dyn refine::Refiner> =
+                Arc::new(refine::OpenRouterRefiner::new(config_state.clone()));
 
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
@@ -176,6 +185,7 @@ pub fn run() {
                 mic_items,
                 mic_names,
                 mic_name: Mutex::new(cfg.mic_name.clone()),
+                config: config_state.clone(),
             });
 
             // The tray icon itself is auto-created from the `trayIcon` block
@@ -193,7 +203,23 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("overlay") {
                 let _ = win.set_always_on_top(true);
                 let _ = win.set_skip_taskbar(true);
+                // Show on every Space/desktop, so the pill follows the user
+                // instead of staying on the Space where it was created.
+                let _ = win.set_visible_on_all_workspaces(true);
                 position_overlay_bottom(&win);
+            }
+
+            // The main (settings/history) window hides instead of closing, so
+            // the tray/dock can re-show the same instance. It starts hidden and
+            // is shown on demand via `show_main_window`.
+            if let Some(main) = app.get_webview_window("main") {
+                let main_for_close = main.clone();
+                main.on_window_event(move |ev| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                        api.prevent_close();
+                        let _ = main_for_close.hide();
+                    }
+                });
             }
 
             // Hotkey registration MUST happen on the main thread on macOS —
@@ -214,13 +240,30 @@ pub fn run() {
         // a transient pill that's hidden most of the time, with the tray icon
         // as the persistent UI. Only exit when the tray Quit menu item calls
         // `app.exit(N)` (which surfaces here as `code = Some(N)`).
-        .run(|_app, event| {
-            if let RunEvent::ExitRequested { code, api, .. } = event {
+        .run(|app, event| match event {
+            RunEvent::ExitRequested { code, api, .. } => {
                 if code.is_none() {
                     api.prevent_exit();
                 }
             }
+            // macOS: clicking the dock icon (with no visible windows) fires
+            // Reopen — bring the settings window up.
+            RunEvent::Reopen { .. } => show_main_window(app),
+            _ => {}
         });
+}
+
+/// Show and focus the main settings/history window. Used by the dock-reopen
+/// handler and the tray "Open Murmur…" item.
+fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    match app.get_webview_window("main") {
+        Some(win) => {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        }
+        None => log::warn!("main window not found"),
+    }
 }
 
 pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {
@@ -295,6 +338,9 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
 
 pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("overlay") {
+        // Re-place the pill on the screen the user is currently on before
+        // showing — otherwise it stays pinned to wherever it started.
+        position_overlay_bottom(&win);
         let _ = win.set_always_on_top(true);
         let _ = win.set_ignore_cursor_events(true);
         let _ = win.show();
@@ -302,12 +348,19 @@ pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
-    // Wrap each call in an early-return so a single missing monitor query
-    // doesn't tank the whole setup.
-    let monitor = match win.primary_monitor() {
-        Ok(Some(m)) => m,
-        _ => {
-            log::warn!("overlay: no primary monitor; leaving at center");
+    // Target the screen the user is actually working on: the monitor under the
+    // mouse cursor. Fall back to the window's current monitor, then primary.
+    // Wrap in early-returns so a single missing monitor query doesn't tank it.
+    let monitor = win
+        .cursor_position()
+        .ok()
+        .and_then(|p| win.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| win.current_monitor().ok().flatten())
+        .or_else(|| win.primary_monitor().ok().flatten());
+    let monitor = match monitor {
+        Some(m) => m,
+        None => {
+            log::warn!("overlay: no monitor found; leaving position as-is");
             return;
         }
     };
@@ -379,6 +432,7 @@ fn build_tray_menu(
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
 )> {
+    let open_main = MenuItem::with_id(app, "open_main", "Open Murmur…", true, None::<&str>)?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit murmur", true, None::<&str>)?;
@@ -440,10 +494,13 @@ fn build_tray_menu(
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
 
+    let sep0 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
         &[
-            &read as &dyn IsMenuItem<Wry>,
+            &open_main as &dyn IsMenuItem<Wry>,
+            &sep0,
+            &read,
             &stop_read,
             &sep1,
             &speed_menu,
@@ -459,6 +516,7 @@ fn build_tray_menu(
 fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     let id = event.id.as_ref();
     match id {
+        "open_main" => show_main_window(app),
         "quit" => app.exit(0),
         "tts_read" => tts_toggle(app),
         "tts_stop" => {
@@ -529,13 +587,19 @@ fn apply_mic<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
 
 fn persist_config<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<AppState>();
-    // Start from the on-disk config so user-edited fields we don't own here
-    // (refine_model, refine_prompt) are preserved across tray changes.
-    let mut cfg = config::load();
-    cfg.tts_speed = state.speaker.current_speed();
-    cfg.tts_voice_id = state.speaker.current_voice().unwrap_or_default();
-    cfg.mic_name = state.mic_name.lock().ok().and_then(|g| g.clone());
-    if let Err(e) = config::save(&cfg) {
+    // Update the shared live config in place (preserving refine/history fields
+    // the tray doesn't own), then write that snapshot to disk.
+    let snapshot = {
+        let Ok(mut cfg) = state.config.lock() else {
+            log::warn!("config: lock poisoned; skipping save");
+            return;
+        };
+        cfg.tts_speed = state.speaker.current_speed();
+        cfg.tts_voice_id = state.speaker.current_voice().unwrap_or_default();
+        cfg.mic_name = state.mic_name.lock().ok().and_then(|g| g.clone());
+        cfg.clone()
+    };
+    if let Err(e) = config::save(&snapshot) {
         log::warn!("config: save failed: {e}");
     }
 }

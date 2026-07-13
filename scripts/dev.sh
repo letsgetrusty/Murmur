@@ -88,7 +88,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>0.0.0</string>
   <key>CFBundleShortVersionString</key><string>0.0.0</string>
   <key>LSMinimumSystemVersion</key><string>10.15</string>
-  <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Murmur records audio for dictation.</string>
 </dict>
 </plist>

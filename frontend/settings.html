@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Murmur</title>
+    <link rel="stylesheet" href="./settings.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-dot"></span> Murmur</div>
+        <nav>
+          <button class="nav-item active" data-tab="settings">Settings</button>
+          <button class="nav-item" data-tab="history">History</button>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <!-- Settings -->
+        <section id="tab-settings" class="tab active">
+          <header class="tab-head">
+            <h1>Settings</h1>
+            <div class="actions">
+              <span id="status" class="status"></span>
+              <button id="save" class="primary" disabled>Save</button>
+            </div>
+          </header>
+
+          <div class="card">
+            <h2>Refinement <span class="chip">Fn + Ctrl</span></h2>
+            <p class="hint">
+              When you hold Fn + Ctrl, your dictation is cleaned up by this model
+              using the prompt below before it's pasted.
+            </p>
+
+            <label class="field">
+              <span class="field-label">Prompt</span>
+              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Model</span>
+              <input id="refine-model" list="models" autocomplete="off" spellcheck="false" />
+              <datalist id="models">
+                <option value="anthropic/claude-haiku-4.5"></option>
+                <option value="anthropic/claude-sonnet-4.5"></option>
+                <option value="openai/gpt-4o-mini"></option>
+                <option value="openai/gpt-4.1-mini"></option>
+                <option value="meta-llama/llama-3.3-70b-instruct"></option>
+                <option value="google/gemini-2.5-flash"></option>
+              </datalist>
+              <span class="hint">Any model slug from openrouter.ai/models.</span>
+            </label>
+          </div>
+        </section>
+
+        <!-- History (Phase B) -->
+        <section id="tab-history" class="tab">
+          <header class="tab-head"><h1>History</h1></header>
+          <div class="empty">
+            <p>Your past dictations will show up here.</p>
+            <p class="hint">Coming in the next update.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./settings.js"></script>
+  </body>
+</html>

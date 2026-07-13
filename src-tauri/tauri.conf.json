@@ -29,6 +29,19 @@
         "shadow": false,
         "acceptFirstMouse": false,
         "center": true
+      },
+      {
+        "label": "main",
+        "title": "Murmur",
+        "url": "settings.html",
+        "width": 900,
+        "height": 640,
+        "minWidth": 640,
+        "minHeight": 460,
+        "resizable": true,
+        "decorations": true,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

@@ -13,11 +13,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
+use crate::config::Config;
 use crate::secrets;
 
 pub type RefineFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
@@ -28,17 +29,17 @@ pub trait Refiner: Send + Sync {
 
 pub struct OpenRouterRefiner {
     client: reqwest::Client,
-    model: String,
-    system_prompt: String,
+    /// Shared with `AppState` so edits from the Settings window take effect on
+    /// the next refine without a restart.
+    config: Arc<Mutex<Config>>,
     api_key: Mutex<Option<String>>,
 }
 
 impl OpenRouterRefiner {
-    pub fn new(model: String, system_prompt: String) -> Self {
+    pub fn new(config: Arc<Mutex<Config>>) -> Self {
         Self {
             client: reqwest::Client::new(),
-            model,
-            system_prompt,
+            config,
             api_key: Mutex::new(None),
         }
     }
@@ -63,10 +64,18 @@ impl Refiner for OpenRouterRefiner {
     fn refine<'a>(&'a self, text: &'a str) -> RefineFuture<'a> {
         Box::pin(async move {
             let api_key = self.api_key()?;
+            // Snapshot model + prompt from shared config (no await while locked).
+            let (model, system_prompt) = {
+                let cfg = self
+                    .config
+                    .lock()
+                    .map_err(|_| anyhow!("config lock poisoned"))?;
+                (cfg.refine_model.clone(), cfg.refine_prompt.clone())
+            };
             let body = json!({
-                "model": self.model,
+                "model": model,
                 "messages": [
-                    { "role": "system", "content": self.system_prompt },
+                    { "role": "system", "content": system_prompt },
                     { "role": "user", "content": text },
                 ],
             });

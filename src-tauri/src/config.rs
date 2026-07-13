@@ -32,6 +32,12 @@ pub struct Config {
     /// System prompt for the refine pass.
     #[serde(default = "default_refine_prompt")]
     pub refine_prompt: String,
+    /// Record dictation history to the local SQLite store.
+    #[serde(default = "default_history_enabled")]
+    pub history_enabled: bool,
+    /// Cap on retained history rows; oldest are pruned past this.
+    #[serde(default = "default_history_limit")]
+    pub history_limit: u32,
 }
 
 fn default_refine_model() -> String {
@@ -39,6 +45,12 @@ fn default_refine_model() -> String {
 }
 fn default_refine_prompt() -> String {
     DEFAULT_REFINE_PROMPT.to_string()
+}
+fn default_history_enabled() -> bool {
+    true
+}
+fn default_history_limit() -> u32 {
+    1000
 }
 
 impl Default for Config {
@@ -49,6 +61,8 @@ impl Default for Config {
             mic_name: None,
             refine_model: default_refine_model(),
             refine_prompt: default_refine_prompt(),
+            history_enabled: default_history_enabled(),
+            history_limit: default_history_limit(),
         }
     }
 }

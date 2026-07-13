@@ -1,7 +1,11 @@
 import { defineConfig } from "vite";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = fileURLToPath(new URL("frontend", import.meta.url));
 
 export default defineConfig({
-  root: "frontend",
+  root,
   clearScreen: false,
   server: {
     port: 1420,
@@ -11,5 +15,12 @@ export default defineConfig({
     outDir: "../dist",
     emptyOutDir: true,
     target: "safari15",
+    rollupOptions: {
+      // Multi-page: the frameless overlay pill and the main settings window.
+      input: {
+        overlay: resolve(root, "index.html"),
+        settings: resolve(root, "settings.html"),
+      },
+    },
   },
 });
