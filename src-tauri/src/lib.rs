@@ -133,6 +133,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
+            commands::get_options,
+            commands::set_speed,
+            commands::set_voice,
+            commands::set_mic,
+            commands::set_hotkey,
         ])
         .setup(move |app| {
 
@@ -223,8 +228,9 @@ pub fn run() {
             }
 
             // Hotkey registration MUST happen on the main thread on macOS —
-            // CLAUDE.md hard rule #1. `setup` runs on the main thread.
-            hotkeys::register(app.handle())?;
+            // CLAUDE.md hard rule #1. `setup` runs on the main thread. Chords
+            // come from config so the settings window can rebind them.
+            hotkeys::register(app.handle(), &cfg)?;
 
             // Install the Fn-key tap onto the main thread's CFRunLoop (same
             // run loop NSApp drives). Failure here only means "no Fn yet" —
@@ -543,7 +549,7 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
 
 /// Apply a speed selection: update the speaker, flip tray checkmarks so the
 /// chosen one is the only check, and persist to disk.
-fn apply_speed<R: Runtime>(app: &AppHandle<R>, speed: f32) {
+pub(crate) fn apply_speed<R: Runtime>(app: &AppHandle<R>, speed: f32) {
     let state = app.state::<AppState>();
     state.speaker.set_speed(speed);
     for (item, &s) in state.speed_items.iter().zip(tts::SPEEDS.iter()) {
@@ -554,7 +560,7 @@ fn apply_speed<R: Runtime>(app: &AppHandle<R>, speed: f32) {
 }
 
 /// Apply a voice selection: update the speaker, flip tray checkmarks, persist.
-fn apply_voice<R: Runtime>(app: &AppHandle<R>, voice_id: &str) {
+pub(crate) fn apply_voice<R: Runtime>(app: &AppHandle<R>, voice_id: &str) {
     let state = app.state::<AppState>();
     state.speaker.set_voice(voice_id);
     for (item, (id, _)) in state.voice_items.iter().zip(tts::ELEVENLABS_VOICES.iter()) {
@@ -567,7 +573,7 @@ fn apply_voice<R: Runtime>(app: &AppHandle<R>, voice_id: &str) {
 /// Apply a microphone selection: store the name, flip tray checkmarks (the
 /// "System default" item is index 0), persist. The new device takes effect
 /// on the next `DictationCmd::Start`.
-fn apply_mic<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
+pub(crate) fn apply_mic<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
     let state = app.state::<AppState>();
     *state.mic_name.lock().expect("mic name mutex") = name.clone();
     if let Some(item) = state.mic_items.first() {

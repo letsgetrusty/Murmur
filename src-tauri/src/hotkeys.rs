@@ -1,55 +1,106 @@
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
+use crate::config::Config;
 use crate::{
     emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, OverlayState,
 };
 
-// Secondary dictation trigger. v1 default is the chord; Fn-hold lives in
-// `fn_key` (CLAUDE.md hard rule #4 was relaxed by explicit user request).
-const DICTATE: &str = "CmdOrCtrl+Shift+Space";
-// Phase 3 TTS trigger: tap once to start reading the selection, tap again
-// to stop. Posts AVSpeechSynthesizer on the main thread.
-const TTS_TOGGLE: &str = "Alt+A";
-// Cycle playback speed (1.0x ↔ 2.0x). Only meaningful for backends that
-// support it (ElevenLabs).
-const TTS_SPEED: &str = "Alt+Shift+S";
+/// The three configurable global-shortcut chords. (Fn-hold dictation is a
+/// hardware event tap in `fn_key`, not a plugin shortcut, so it isn't here.)
+#[derive(Clone, Copy)]
+pub enum HotkeyAction {
+    Dictate,
+    TtsToggle,
+    TtsSpeed,
+}
 
-pub fn register<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<()> {
-    let dictate: Shortcut = DICTATE.parse().expect("hard-coded shortcut string parses");
-    let tts: Shortcut = TTS_TOGGLE
-        .parse()
-        .expect("hard-coded shortcut string parses");
-    let tts_speed: Shortcut = TTS_SPEED
-        .parse()
-        .expect("hard-coded shortcut string parses");
+impl HotkeyAction {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "dictate" => Some(Self::Dictate),
+            "tts_toggle" => Some(Self::TtsToggle),
+            "tts_speed" => Some(Self::TtsSpeed),
+            _ => None,
+        }
+    }
+}
 
+/// Register a single action's handler under `shortcut`. The handler differs per
+/// action but the registration plumbing is shared.
+fn register_action<R: Runtime>(
+    app: &AppHandle<R>,
+    action: HotkeyAction,
+    shortcut: &str,
+) -> anyhow::Result<()> {
+    let sc: Shortcut = shortcut
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid shortcut '{shortcut}': {e}"))?;
     let gs = app.global_shortcut();
-    gs.on_shortcut(
-        dictate,
-        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
-            // The chord is always plain dictation; refined dictation is Fn+Ctrl.
-            ShortcutState::Pressed => on_press(app),
-            ShortcutState::Released => on_release(app, false),
-        },
-    )?;
-    gs.on_shortcut(
-        tts,
-        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
-            // Toggle on key-down only; releases mean nothing for TTS.
-            if event.state() == ShortcutState::Pressed {
-                tts_toggle(app);
-            }
-        },
-    )?;
-    gs.on_shortcut(
-        tts_speed,
-        move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
-            if event.state() == ShortcutState::Pressed {
-                tts_speed_cycle(app);
-            }
-        },
-    )?;
+    match action {
+        HotkeyAction::Dictate => gs.on_shortcut(
+            sc,
+            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
+                // The chord is always plain dictation; refined is Fn+Ctrl.
+                ShortcutState::Pressed => on_press(app),
+                ShortcutState::Released => on_release(app, false),
+            },
+        )?,
+        HotkeyAction::TtsToggle => gs.on_shortcut(
+            sc,
+            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+                if event.state() == ShortcutState::Pressed {
+                    tts_toggle(app);
+                }
+            },
+        )?,
+        HotkeyAction::TtsSpeed => gs.on_shortcut(
+            sc,
+            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+                if event.state() == ShortcutState::Pressed {
+                    tts_speed_cycle(app);
+                }
+            },
+        )?,
+    }
+    Ok(())
+}
+
+/// Register all three chords from config. A bad user-supplied binding is logged
+/// and skipped rather than aborting the others.
+pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<()> {
+    for (action, sc) in [
+        (HotkeyAction::Dictate, &cfg.hotkey_dictate),
+        (HotkeyAction::TtsToggle, &cfg.hotkey_tts),
+        (HotkeyAction::TtsSpeed, &cfg.hotkey_tts_speed),
+    ] {
+        if let Err(e) = register_action(app, action, sc) {
+            log::warn!("hotkey: register '{sc}' failed: {e}");
+        }
+    }
+    Ok(())
+}
+
+/// Swap an action's chord live: validate the new one, unregister the old, then
+/// register the new — restoring the old if the new registration fails.
+pub fn rebind<R: Runtime>(
+    app: &AppHandle<R>,
+    action: HotkeyAction,
+    old: &str,
+    new: &str,
+) -> anyhow::Result<()> {
+    // Validate before we touch the live registration.
+    let _: Shortcut = new
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid shortcut '{new}': {e}"))?;
+    if let Ok(old_sc) = old.parse::<Shortcut>() {
+        let _ = app.global_shortcut().unregister(old_sc);
+    }
+    if let Err(e) = register_action(app, action, new) {
+        let _ = register_action(app, action, old);
+        return Err(e);
+    }
+    log::info!("hotkey: rebound to '{new}'");
     Ok(())
 }
 

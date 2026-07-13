@@ -53,6 +53,44 @@
               <span class="hint">Any model slug from openrouter.ai/models.</span>
             </label>
           </div>
+
+          <div class="card">
+            <h2>Audio</h2>
+            <div class="row">
+              <span class="row-label">Playback speed</span>
+              <select id="speed"></select>
+            </div>
+            <div class="row">
+              <span class="row-label">Voice</span>
+              <select id="voice"></select>
+            </div>
+            <div class="row">
+              <span class="row-label">Microphone</span>
+              <select id="mic"></select>
+            </div>
+            <p class="hint">Changes apply immediately (same as the tray menu).</p>
+          </div>
+
+          <div class="card">
+            <h2>Keyboard shortcuts</h2>
+            <div class="row">
+              <span class="row-label">Dictation chord</span>
+              <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+Space"></button>
+            </div>
+            <div class="row">
+              <span class="row-label">Read aloud</span>
+              <button class="recorder" data-action="tts_toggle" data-default="Alt+A"></button>
+            </div>
+            <div class="row">
+              <span class="row-label">Cycle speed</span>
+              <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
+            </div>
+            <p id="hotkey-status" class="hint">
+              Click a shortcut, then press the new key combination (needs at
+              least one modifier). Hold-to-dictate on the <b>Fn</b> key is
+              always on and isn't configurable here.
+            </p>
+          </div>
         </section>
 
         <!-- History (Phase B) -->

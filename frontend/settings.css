@@ -224,6 +224,78 @@ textarea {
   cursor: default;
 }
 
+.card + .card {
+  margin-top: 16px;
+}
+
+/* Rows (label + control) -------------------------------------------------- */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.row:first-of-type {
+  border-top: none;
+  padding-top: 6px;
+}
+.row-label {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+select {
+  min-width: 200px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(191, 90, 242, 0.22);
+}
+
+/* Shortcut recorder ------------------------------------------------------- */
+.recorder {
+  min-width: 140px;
+  text-align: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.recorder:hover {
+  border-color: var(--accent);
+}
+.recorder.recording {
+  border-color: var(--accent);
+  background: rgba(191, 90, 242, 0.16);
+  color: var(--accent);
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
+.hint.ok {
+  color: var(--ok);
+}
+.hint.error {
+  color: var(--error);
+}
+
 /* Empty state ------------------------------------------------------------- */
 .empty {
   border: 1px dashed var(--border);

@@ -38,6 +38,29 @@ pub struct Config {
     /// Cap on retained history rows; oldest are pruned past this.
     #[serde(default = "default_history_limit")]
     pub history_limit: u32,
+    /// Global-shortcut chords (the tauri-plugin-global-shortcut format, e.g.
+    /// "Alt+A"). The Fn-hold dictation trigger is a hardware tap and is not
+    /// configurable here.
+    #[serde(default = "default_hotkey_dictate")]
+    pub hotkey_dictate: String,
+    #[serde(default = "default_hotkey_tts")]
+    pub hotkey_tts: String,
+    #[serde(default = "default_hotkey_tts_speed")]
+    pub hotkey_tts_speed: String,
+}
+
+pub const DEFAULT_HOTKEY_DICTATE: &str = "CmdOrCtrl+Shift+Space";
+pub const DEFAULT_HOTKEY_TTS: &str = "Alt+A";
+pub const DEFAULT_HOTKEY_TTS_SPEED: &str = "Alt+Shift+S";
+
+fn default_hotkey_dictate() -> String {
+    DEFAULT_HOTKEY_DICTATE.to_string()
+}
+fn default_hotkey_tts() -> String {
+    DEFAULT_HOTKEY_TTS.to_string()
+}
+fn default_hotkey_tts_speed() -> String {
+    DEFAULT_HOTKEY_TTS_SPEED.to_string()
 }
 
 fn default_refine_model() -> String {
@@ -63,6 +86,9 @@ impl Default for Config {
             refine_prompt: default_refine_prompt(),
             history_enabled: default_history_enabled(),
             history_limit: default_history_limit(),
+            hotkey_dictate: default_hotkey_dictate(),
+            hotkey_tts: default_hotkey_tts(),
+            hotkey_tts_speed: default_hotkey_tts_speed(),
         }
     }
 }
