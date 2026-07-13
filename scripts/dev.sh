@@ -54,7 +54,8 @@ if curl -s -o /dev/null "$VITE_URL" 2>/dev/null; then
   say "Vite already up on 1420"
 else
   say "Starting Vite (npm run dev)…"
-  npm run dev >"$TARGET_DIR/vite.log" 2>&1 &
+  # nohup + detached stdin so the dev server survives this script exiting.
+  nohup npm run dev >"$TARGET_DIR/vite.log" 2>&1 </dev/null &
   until curl -s -o /dev/null "$VITE_URL" 2>/dev/null; do sleep 0.3; done
   say "Vite up on 1420"
 fi
