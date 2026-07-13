@@ -20,10 +20,19 @@
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Runtime};
 
 use crate::hotkeys;
+
+// Fn-gesture timing. A press held at least this long is a dictation; anything
+// shorter is a "tap". Two taps whose releases fall within `DOUBLE_WINDOW`
+// toggle read-aloud (TTS). 300ms cleanly separates a deliberate hold-to-talk
+// from a ~100ms double-tap without adding latency to real holds.
+const HOLD_MIN: Duration = Duration::from_millis(300);
+const DOUBLE_WINDOW: Duration = Duration::from_millis(400);
 
 // CGEventTapLocation
 const KCG_SESSION_EVENT_TAP: u32 = 1;
@@ -130,6 +139,12 @@ struct TapState<R: Runtime> {
     /// current Fn hold. Seeded at Fn-down and OR'd on every flags change while
     /// Fn is down, so it refines regardless of which key is pressed first.
     refine_latch: AtomicBool,
+    /// When the current Fn press began, used to tell a hold (dictation) from a
+    /// tap (read-aloud gesture) at release.
+    press_at: Mutex<Option<Instant>>,
+    /// Release time of the previous quick tap, for double-tap detection. Set on
+    /// the first tap, consumed by the second within `DOUBLE_WINDOW`.
+    last_tap_at: Mutex<Option<Instant>>,
 }
 
 unsafe extern "C" fn tap_callback<R: Runtime>(
@@ -145,14 +160,43 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
     if fn_down_now != was_down {
         if fn_down_now {
             // Fn just went down: seed the refine latch with the current state of
-            // the configured refine modifier (handles modifier-then-Fn).
+            // the configured refine modifier (handles modifier-then-Fn), stamp
+            // the press time, and optimistically start recording.
             let mask = refine_mask(&state.app);
             state.refine_latch.store((flags & mask) != 0, Ordering::Release);
+            *state.press_at.lock().unwrap() = Some(Instant::now());
             hotkeys::on_press(&state.app);
         } else {
-            // Fn released: refine if the modifier was held at any point.
-            let refine = state.refine_latch.load(Ordering::Acquire);
-            hotkeys::on_release(&state.app, refine);
+            // Fn released. A long-enough hold is a dictation; a quick tap is
+            // (half of) a double-tap read-aloud gesture.
+            let held = state
+                .press_at
+                .lock()
+                .unwrap()
+                .take()
+                .map(|t| t.elapsed())
+                .unwrap_or_default();
+            if held >= HOLD_MIN {
+                // Genuine dictation hold: refine if the modifier was held at any
+                // point. Reset any pending tap so a hold can't complete one.
+                let refine = state.refine_latch.load(Ordering::Acquire);
+                hotkeys::on_release(&state.app, refine);
+                *state.last_tap_at.lock().unwrap() = None;
+            } else {
+                // Quick tap: drop the recording we optimistically started so it
+                // never transcribes/pastes, then check for a double-tap.
+                hotkeys::abort_dictation(&state.app);
+                let now = Instant::now();
+                let mut last = state.last_tap_at.lock().unwrap();
+                if matches!(*last, Some(prev) if now.saturating_duration_since(prev) <= DOUBLE_WINDOW)
+                {
+                    *last = None;
+                    drop(last);
+                    crate::tts_toggle(&state.app);
+                } else {
+                    *last = Some(now);
+                }
+            }
         }
     } else if fn_down_now && (flags & refine_mask(&state.app)) != 0 {
         // Modifier pressed while Fn is already held (handles Fn-then-modifier),
@@ -173,6 +217,8 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         app,
         fn_down: AtomicBool::new(false),
         refine_latch: AtomicBool::new(false),
+        press_at: Mutex::new(None),
+        last_tap_at: Mutex::new(None),
     })) as *mut c_void;
 
     unsafe {

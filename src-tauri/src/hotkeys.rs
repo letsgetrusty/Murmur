@@ -129,6 +129,18 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, refine: bool) {
     }
 }
 
+/// Drop an in-flight dictation without transcribing or pasting. Used when a Fn
+/// press turns out to be a quick tap (part of a double-tap read-aloud gesture)
+/// rather than a hold: `on_press` optimistically started recording, so we undo
+/// it here and clear the overlay.
+pub fn abort_dictation<R: Runtime>(app: &AppHandle<R>) {
+    unregister_escape(app);
+    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Cancel) {
+        log::warn!("hotkey: abort send failed: {e}");
+    }
+    emit_state(app, OverlayState::Idle);
+}
+
 const ESC: &str = "Escape";
 
 /// Briefly hijack the Escape key while a dictation is in flight. The
