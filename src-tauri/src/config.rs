@@ -47,6 +47,15 @@ pub struct Config {
     pub hotkey_tts: String,
     #[serde(default = "default_hotkey_tts_speed")]
     pub hotkey_tts_speed: String,
+    /// Modifier held together with Fn to trigger refined dictation.
+    /// One of "Ctrl" | "Shift" | "Alt" | "Cmd".
+    #[serde(default = "default_refine_modifier")]
+    pub refine_modifier: String,
+}
+
+pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
+fn default_refine_modifier() -> String {
+    DEFAULT_REFINE_MODIFIER.to_string()
 }
 
 pub const DEFAULT_HOTKEY_DICTATE: &str = "CmdOrCtrl+Shift+Space";
@@ -89,6 +98,7 @@ impl Default for Config {
             hotkey_dictate: default_hotkey_dictate(),
             hotkey_tts: default_hotkey_tts(),
             hotkey_tts_speed: default_hotkey_tts_speed(),
+            refine_modifier: default_refine_modifier(),
         }
     }
 }

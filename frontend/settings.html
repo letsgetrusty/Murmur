@@ -55,6 +55,45 @@
           </div>
 
           <div class="card">
+            <h2>Usage &amp; cost</h2>
+            <p class="hint">
+              OpenRouter is exact (pulled live from their API, all-time).
+              Groq &amp; ElevenLabs don't expose usage to your keys, so those are
+              local counts since Murmur started tracking, with estimated cost.
+            </p>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Refinement · OpenRouter</span>
+                <span class="usage-cost" id="or-total">…</span>
+              </div>
+              <div class="usage-sub" id="or-sub"></div>
+            </div>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Dictation · Groq</span>
+                <span class="usage-cost" id="stt-cost">—</span>
+              </div>
+              <div class="usage-sub" id="stt-sub"></div>
+            </div>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Read-aloud · ElevenLabs</span>
+                <span class="usage-cost" id="tts-cost">—</span>
+              </div>
+              <div class="usage-sub" id="tts-sub"></div>
+            </div>
+
+            <div class="usage-actions">
+              <span id="usage-msg" class="hint"></span>
+              <button id="u-refresh" class="small-btn">Refresh</button>
+              <button id="u-reset" class="small-btn danger">Reset local</button>
+            </div>
+          </div>
+
+          <div class="card">
             <h2>Audio</h2>
             <div class="row">
               <span class="row-label">Playback speed</span>
@@ -85,10 +124,23 @@
               <span class="row-label">Cycle speed</span>
               <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
             </div>
+            <div class="row">
+              <span class="row-label">Refined dictation</span>
+              <span class="refine-combo">
+                <span class="fn-badge">Fn</span>
+                <span class="plus">+</span>
+                <select id="refine-modifier">
+                  <option value="Ctrl">⌃ Control</option>
+                  <option value="Shift">⇧ Shift</option>
+                  <option value="Alt">⌥ Option</option>
+                  <option value="Cmd">⌘ Command</option>
+                </select>
+              </span>
+            </div>
             <p id="hotkey-status" class="hint">
-              Click a shortcut, then press the new key combination (needs at
-              least one modifier). Hold-to-dictate on the <b>Fn</b> key is
-              always on and isn't configurable here.
+              Click a chord, then press the new combination (needs at least one
+              modifier). Hold-to-dictate on the <b>Fn</b> key is always on;
+              hold Fn + the modifier above to dictate <i>and refine</i>.
             </p>
           </div>
 

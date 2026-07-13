@@ -36,8 +36,28 @@ const KCG_EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_MASK_FLAGS_CHANGED: u64 = 1 << KCG_EVENT_FLAGS_CHANGED;
 // kCGEventFlagMaskSecondaryFn
 const KCG_EVENT_FLAG_MASK_SECONDARY_FN: u64 = 0x00800000;
-// kCGEventFlagMaskControl — held together with Fn to trigger refined dictation.
-const KCG_EVENT_FLAG_MASK_CONTROL: u64 = 0x00040000;
+// Modifier flag masks; one of these (per config.refine_modifier) held with Fn
+// triggers refined dictation.
+const KCG_FLAG_SHIFT: u64 = 0x0002_0000;
+const KCG_FLAG_CONTROL: u64 = 0x0004_0000;
+const KCG_FLAG_ALT: u64 = 0x0008_0000;
+const KCG_FLAG_COMMAND: u64 = 0x0010_0000;
+
+/// The flag mask for the configured refine modifier (defaults to Control).
+/// Read from the shared config so a change in the settings window applies live.
+fn refine_mask<R: Runtime>(app: &AppHandle<R>) -> u64 {
+    use tauri::Manager;
+    let modifier = app
+        .try_state::<crate::AppState>()
+        .and_then(|s| s.config.lock().ok().map(|c| c.refine_modifier.clone()))
+        .unwrap_or_else(|| "Ctrl".to_string());
+    match modifier.as_str() {
+        "Shift" => KCG_FLAG_SHIFT,
+        "Alt" | "Option" => KCG_FLAG_ALT,
+        "Cmd" | "Command" | "Super" => KCG_FLAG_COMMAND,
+        _ => KCG_FLAG_CONTROL,
+    }
+}
 
 type CGEventRef = *mut c_void;
 type CGEventTapProxy = *mut c_void;
@@ -106,9 +126,9 @@ extern "C" {
 struct TapState<R: Runtime> {
     app: AppHandle<R>,
     fn_down: AtomicBool,
-    /// Whether Control was held at any point during the current Fn hold.
-    /// Seeded at Fn-down and OR'd on every flags change while Fn is down, so
-    /// Fn+Ctrl refines regardless of which key is pressed first.
+    /// Whether the configured refine modifier was held at any point during the
+    /// current Fn hold. Seeded at Fn-down and OR'd on every flags change while
+    /// Fn is down, so it refines regardless of which key is pressed first.
     refine_latch: AtomicBool,
 }
 
@@ -121,22 +141,22 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
     let state = &*(user_info as *const TapState<R>);
     let flags = CGEventGetFlags(event);
     let fn_down_now = (flags & KCG_EVENT_FLAG_MASK_SECONDARY_FN) != 0;
-    let ctrl_now = (flags & KCG_EVENT_FLAG_MASK_CONTROL) != 0;
     let was_down = state.fn_down.swap(fn_down_now, Ordering::AcqRel);
     if fn_down_now != was_down {
         if fn_down_now {
-            // Fn just went down: seed the refine latch with the current Ctrl
-            // state (handles Ctrl-then-Fn).
-            state.refine_latch.store(ctrl_now, Ordering::Release);
+            // Fn just went down: seed the refine latch with the current state of
+            // the configured refine modifier (handles modifier-then-Fn).
+            let mask = refine_mask(&state.app);
+            state.refine_latch.store((flags & mask) != 0, Ordering::Release);
             hotkeys::on_press(&state.app);
         } else {
-            // Fn released: refine if Ctrl was held at any point during the hold.
+            // Fn released: refine if the modifier was held at any point.
             let refine = state.refine_latch.load(Ordering::Acquire);
             hotkeys::on_release(&state.app, refine);
         }
-    } else if fn_down_now && ctrl_now {
-        // Ctrl pressed while Fn is already held (handles Fn-then-Ctrl), so the
-        // order of the two keys doesn't matter.
+    } else if fn_down_now && (flags & refine_mask(&state.app)) != 0 {
+        // Modifier pressed while Fn is already held (handles Fn-then-modifier),
+        // so the order of the two keys doesn't matter.
         state.refine_latch.store(true, Ordering::Release);
     }
     event

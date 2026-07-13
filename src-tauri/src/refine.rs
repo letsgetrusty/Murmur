@@ -20,6 +20,7 @@ use serde_json::json;
 
 use crate::config::Config;
 use crate::secrets;
+use crate::usage::UsageStats;
 
 pub type RefineFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
 
@@ -32,14 +33,17 @@ pub struct OpenRouterRefiner {
     /// Shared with `AppState` so edits from the Settings window take effect on
     /// the next refine without a restart.
     config: Arc<Mutex<Config>>,
+    /// Cumulative token/cost totals, shared with `AppState`.
+    usage: Arc<Mutex<UsageStats>>,
     api_key: Mutex<Option<String>>,
 }
 
 impl OpenRouterRefiner {
-    pub fn new(config: Arc<Mutex<Config>>) -> Self {
+    pub fn new(config: Arc<Mutex<Config>>, usage: Arc<Mutex<UsageStats>>) -> Self {
         Self {
             client: reqwest::Client::new(),
             config,
+            usage,
             api_key: Mutex::new(None),
         }
     }
@@ -78,6 +82,8 @@ impl Refiner for OpenRouterRefiner {
                     { "role": "system", "content": system_prompt },
                     { "role": "user", "content": text },
                 ],
+                // Ask OpenRouter to return token counts + actual USD cost.
+                "usage": { "include": true },
             });
 
             let resp = self
@@ -108,6 +114,26 @@ impl Refiner for OpenRouterRefiner {
             if out.is_empty() {
                 return Err(anyhow!("openrouter returned empty content"));
             }
+
+            // Record token usage + cost (best-effort — never fail a refine over it).
+            if let Some(u) = json.get("usage") {
+                let field = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                let cost = u.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if let Ok(mut stats) = self.usage.lock() {
+                    stats.record(
+                        field("prompt_tokens"),
+                        field("completion_tokens"),
+                        field("total_tokens"),
+                        cost,
+                    );
+                    let snapshot = stats.clone();
+                    drop(stats);
+                    if let Err(e) = crate::usage::save(&snapshot) {
+                        log::warn!("usage: save failed: {e}");
+                    }
+                }
+            }
+
             Ok(out)
         })
     }

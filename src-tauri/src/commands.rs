@@ -116,6 +116,68 @@ pub fn set_hotkey(
     crate::config::save(&snapshot).map_err(|e| e.to_string())
 }
 
+/// Cumulative local usage totals (refine tokens, STT seconds, TTS chars).
+#[tauri::command]
+pub fn get_usage(state: State<AppState>) -> crate::usage::UsageStats {
+    state.usage.lock().map(|u| u.clone()).unwrap_or_default()
+}
+
+#[derive(Serialize)]
+pub struct OpenRouterSpend {
+    total_usd: f64,
+    month_usd: f64,
+}
+
+/// Real OpenRouter spend for the configured key (all-time + this month), from
+/// the provider's /key endpoint. This is the authoritative refinement cost.
+#[tauri::command]
+pub async fn get_openrouter_spend() -> Result<OpenRouterSpend, String> {
+    let key = crate::secrets::get(crate::secrets::OPENROUTER_API_KEY)
+        .map_err(|_| "no OpenRouter key in Keychain".to_string())?;
+    let resp = reqwest::Client::new()
+        .get("https://openrouter.ai/api/v1/key")
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("openrouter {}", resp.status()));
+    }
+    let j: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let d = &j["data"];
+    Ok(OpenRouterSpend {
+        total_usd: d["usage"].as_f64().unwrap_or(0.0),
+        month_usd: d["usage_monthly"].as_f64().unwrap_or(0.0),
+    })
+}
+
+#[tauri::command]
+pub fn reset_usage(state: State<AppState>) -> Result<(), String> {
+    let snapshot = {
+        let mut u = state.usage.lock().map_err(|e| e.to_string())?;
+        *u = crate::usage::UsageStats::default();
+        u.clone()
+    };
+    crate::usage::save(&snapshot).map_err(|e| e.to_string())
+}
+
+/// Set the modifier held with Fn for refined dictation. Read live by the Fn
+/// tap from the shared config, so it applies without a restart.
+#[tauri::command]
+pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(), String> {
+    if !["Ctrl", "Shift", "Alt", "Cmd"].contains(&modifier.as_str()) {
+        return Err(format!("invalid modifier: {modifier}"));
+    }
+    let snapshot = {
+        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
+        cfg.refine_modifier = modifier.clone();
+        cfg.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    log::info!("config: refine modifier → Fn+{modifier}");
+    Ok(())
+}
+
 // --- API keys (Keychain) -----------------------------------------------------
 
 // (ui id, keychain item name, label, what it powers)

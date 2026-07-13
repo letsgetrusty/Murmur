@@ -13,6 +13,7 @@ mod secrets;
 mod selection;
 mod stt;
 mod tts;
+mod usage;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -54,6 +55,8 @@ pub struct AppState {
     /// Live config, shared with the refiner and the settings-window IPC
     /// commands so edits apply without a restart.
     pub config: Arc<Mutex<config::Config>>,
+    /// Cumulative refinement token/cost totals, shared with the refiner.
+    pub usage: Arc<Mutex<usage::UsageStats>>,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -138,10 +141,14 @@ pub fn run() {
             commands::set_voice,
             commands::set_mic,
             commands::set_hotkey,
+            commands::set_refine_modifier,
             commands::list_keys,
             commands::reveal_key,
             commands::save_key,
             commands::delete_key,
+            commands::get_usage,
+            commands::reset_usage,
+            commands::get_openrouter_spend,
         ])
         .setup(move |app| {
 
@@ -153,10 +160,15 @@ pub fn run() {
             // so the user can run `set-key` without restarting the app.
             let transcriber: Arc<dyn stt::Transcriber> = Arc::new(stt::GroqWhisper::new());
 
+            // Cumulative refinement usage, persisted across restarts.
+            let usage_state = Arc::new(Mutex::new(usage::load()));
+
             // Refiner for Fn+Ctrl dictation. Reads model + prompt from the shared
             // config; the key is read from Keychain lazily on first refine.
-            let refiner: Arc<dyn refine::Refiner> =
-                Arc::new(refine::OpenRouterRefiner::new(config_state.clone()));
+            let refiner: Arc<dyn refine::Refiner> = Arc::new(refine::OpenRouterRefiner::new(
+                config_state.clone(),
+                usage_state.clone(),
+            ));
 
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
@@ -195,6 +207,7 @@ pub fn run() {
                 mic_names,
                 mic_name: Mutex::new(cfg.mic_name.clone()),
                 config: config_state.clone(),
+                usage: usage_state.clone(),
             });
 
             // The tray icon itself is auto-created from the `trayIcon` block
@@ -316,6 +329,7 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
         Ok(Some(text)) => {
             let chars = text.chars().count();
             log::info!("tts: speak ({} chars)", chars);
+            record_usage(app, |u| u.record_tts(chars as u64));
             show_overlay(app);
             emit_state(app, OverlayState::Transcribing);
             state.speaker.speak(&text);
@@ -727,6 +741,20 @@ fn spawn_dictation_worker<R: Runtime>(
     tx
 }
 
+/// Record local usage (STT audio-seconds / TTS characters), persist, and push
+/// the updated totals to the settings window.
+fn record_usage<R: Runtime>(app: &AppHandle<R>, update: impl FnOnce(&mut usage::UsageStats)) {
+    if let Ok(mut u) = app.state::<AppState>().usage.lock() {
+        update(&mut u);
+        let snapshot = u.clone();
+        drop(u);
+        if let Err(e) = usage::save(&snapshot) {
+            log::warn!("usage: save failed: {e}");
+        }
+        let _ = app.emit("usage", snapshot);
+    }
+}
+
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -761,7 +789,13 @@ fn handle_recording<R: Runtime>(
     }
 
     tauri::async_runtime::spawn(async move {
-        let (state, dwell_ms) = match transcriber.transcribe(&recording.wav).await {
+        let secs = recording.duration_ms as f64 / 1000.0;
+        let transcribe_result = transcriber.transcribe(&recording.wav).await;
+        // Groq billed us for the audio if the request succeeded.
+        if transcribe_result.is_ok() {
+            record_usage(&app, |u| u.record_stt(secs));
+        }
+        let (state, dwell_ms) = match transcribe_result {
             Ok(text) if text.is_empty() => {
                 log::info!("dictation: empty transcript");
                 (OverlayState::Done { chars: 0 }, 400)
@@ -784,6 +818,10 @@ fn handle_recording<R: Runtime>(
                                 refined.chars().count(),
                                 refined
                             );
+                            // Push updated usage to the settings window if open.
+                            if let Ok(u) = app.state::<AppState>().usage.lock() {
+                                let _ = app.emit("usage", u.clone());
+                            }
                             refined
                         }
                         Err(e) => {

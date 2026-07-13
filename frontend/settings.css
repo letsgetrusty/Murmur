@@ -296,6 +296,63 @@ select:focus {
   color: var(--error);
 }
 
+/* Usage ------------------------------------------------------------------- */
+.usage-provider {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.usage-provider:first-of-type {
+  border-top: none;
+  padding-top: 6px;
+}
+.usage-provider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.usage-cost {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.usage-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+.usage-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+.usage-actions .hint {
+  margin-right: auto;
+}
+
+/* Refined-dictation combo (Fn + modifier) --------------------------------- */
+.refine-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.fn-badge {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.refine-combo .plus {
+  color: var(--text-dim);
+}
+#refine-modifier {
+  min-width: 140px;
+}
+
 /* API key rows ------------------------------------------------------------ */
 .key-row {
   padding: 14px 0;

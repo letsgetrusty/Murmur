@@ -240,6 +240,23 @@ function initHotkeys() {
       window.addEventListener("keydown", onRecordKey, true);
     });
   }
+
+  // Refined dictation: Fn + a configurable modifier.
+  const rm = el("refine-modifier");
+  if (rm) {
+    rm.value = currentConfig.refine_modifier ?? "Ctrl";
+    rm.addEventListener("change", async (e) => {
+      const modifier = e.target.value;
+      try {
+        await invoke("set_refine_modifier", { modifier });
+        currentConfig.refine_modifier = modifier;
+        setHotkeyStatus(`Refined dictation → Fn+${modifier} ✓`, "ok");
+      } catch (err) {
+        rm.value = currentConfig.refine_modifier ?? "Ctrl";
+        setHotkeyStatus(`Couldn't set that: ${err}`, "error");
+      }
+    });
+  }
 }
 
 // --- API keys -----------------------------------------------------------------
@@ -356,6 +373,85 @@ async function loadKeys() {
   for (const k of keys) container.appendChild(renderKeyRow(k));
 }
 
+// --- Usage --------------------------------------------------------------------
+
+// Groq whisper-large-v3-turbo list price (per hour of audio) for the estimate.
+const GROQ_USD_PER_SEC = 0.04 / 3600;
+
+let localUsage = null; // from get_usage (STT/TTS counts, refine tokens)
+let orSpend = null; // from get_openrouter_spend (real $), or null on error
+
+function fmtCost(usd) {
+  const n = usd || 0;
+  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+}
+
+function renderUsageAll() {
+  const u = localUsage || {};
+
+  // Refinement · OpenRouter — cost is exact from the API; tokens/count local.
+  el("or-total").textContent = orSpend ? fmtCost(orSpend.total_usd) : "n/a";
+  el("or-sub").textContent = [
+    orSpend ? `${fmtCost(orSpend.month_usd)} this month` : null,
+    `${(u.total_tokens || 0).toLocaleString()} tokens`,
+    `${u.refine_count || 0} refinements`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  // Dictation · Groq — estimated from audio duration.
+  const groqCost = (u.stt_seconds || 0) * GROQ_USD_PER_SEC;
+  el("stt-cost").textContent = `~${fmtCost(groqCost)}`;
+  el("stt-sub").textContent = `${u.stt_count || 0} clips · ${((u.stt_seconds || 0) / 60).toFixed(
+    1
+  )} min · est. @ $0.04/hr`;
+
+  // Read-aloud · ElevenLabs — characters (cost varies by plan).
+  el("tts-cost").textContent = `${(u.tts_chars || 0).toLocaleString()} chars`;
+  el("tts-sub").textContent = `${u.tts_count || 0} reads · $ varies by plan`;
+}
+
+async function fetchOpenRouterSpend() {
+  try {
+    orSpend = await invoke("get_openrouter_spend");
+    el("usage-msg").textContent = "";
+  } catch (e) {
+    orSpend = null;
+    el("usage-msg").textContent = `OpenRouter usage unavailable: ${e}`;
+  }
+  renderUsageAll();
+}
+
+async function loadUsage() {
+  if (!invoke) return;
+  try {
+    localUsage = await invoke("get_usage");
+  } catch (e) {
+    /* ignore */
+  }
+  renderUsageAll();
+  fetchOpenRouterSpend();
+}
+
+function initUsage() {
+  el("u-refresh").addEventListener("click", loadUsage);
+  el("u-reset").addEventListener("click", async () => {
+    try {
+      await invoke("reset_usage");
+      localUsage = null;
+      renderUsageAll();
+      el("usage-msg").textContent = "Local counts reset (OpenRouter total is provider-side).";
+    } catch (e) {
+      el("usage-msg").textContent = `Reset failed: ${e}`;
+    }
+  });
+  // Live-update the local counts while the window is open.
+  window.__TAURI__?.event?.listen?.("usage", (e) => {
+    localUsage = e.payload;
+    renderUsageAll();
+  });
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -385,6 +481,8 @@ async function init() {
   await loadOptions();
   initHotkeys();
   await loadKeys();
+  initUsage();
+  await loadUsage();
 }
 
 if (document.readyState === "loading") {
