@@ -25,7 +25,7 @@ use crate::tts::Speaker as _;
 use serde::Serialize;
 use tauri::{
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, RunEvent, Runtime, Wry,
+    AppHandle, Emitter, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, Wry,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -244,18 +244,10 @@ pub fn run() {
                 position_overlay_bottom(&win);
             }
 
-            // The main (settings/history) window hides instead of closing, so
-            // the tray/dock can re-show the same instance. It starts hidden and
-            // is shown on demand via `show_main_window`.
-            if let Some(main) = app.get_webview_window("main") {
-                let main_for_close = main.clone();
-                main.on_window_event(move |ev| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
-                        api.prevent_close();
-                        let _ = main_for_close.hide();
-                    }
-                });
-            }
+            // The main (settings/history) window is created lazily on first
+            // open (tray item / dock reopen) and destroyed on close, so an
+            // idle Murmur carries no WebKit content process for a window the
+            // user may never open. See `show_main_window`.
 
             // Hotkey registration MUST happen on the main thread on macOS —
             // CLAUDE.md hard rule #1. `setup` runs on the main thread. Chords
@@ -289,16 +281,32 @@ pub fn run() {
         });
 }
 
-/// Show and focus the main settings/history window. Used by the dock-reopen
-/// handler and the tray "Open Murmur…" item.
+/// Show the main settings/history window, creating it if needed. Used by the
+/// dock-reopen handler and the tray "Open Murmur…" item.
+///
+/// The window is not declared in `tauri.conf.json`; it's built here on first
+/// open and destroyed when the user closes it (Tauri's default), so an idle
+/// Murmur keeps no WebKit content process for a window that's rarely opened.
+/// It self-populates from the backend on load (`settings.js` `init`), so a
+/// fresh instance needs no restored state.
 fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
-    match app.get_webview_window("main") {
-        Some(win) => {
-            let _ = win.show();
-            let _ = win.unminimize();
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        return;
+    }
+    match WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
+        .title("Murmur")
+        .inner_size(900.0, 640.0)
+        .min_inner_size(640.0, 460.0)
+        .center()
+        .build()
+    {
+        Ok(win) => {
             let _ = win.set_focus();
         }
-        None => log::warn!("main window not found"),
+        Err(e) => log::warn!("failed to create settings window: {e}"),
     }
 }
 
