@@ -119,4 +119,4 @@ else
   printf '   System Settings → Privacy & Security → Accessibility → enable Murmur\n'
 fi
 echo "   Logs:     tail -f $LOG"
-echo "   Triggers: hold Fn to dictate · Alt+A read-aloud · Alt+Shift+S speed"
+echo "   Triggers: hold Fn to dictate · Cmd+Shift+R read-aloud · Alt+Shift+S speed"

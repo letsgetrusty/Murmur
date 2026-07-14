@@ -17,7 +17,7 @@ Personal daily-driver tool. macOS only, single user, no accounts or telemetry.
   through an LLM (via OpenRouter) that cleans up spoken filler into polished
   text before it's pasted. Falls back to the raw transcript if the call fails,
   so a dropped request never loses your words.
-- **Read-aloud** — select text and **double-tap Fn** to hear it, double-tap again
+- **Read-aloud** — select text and press **`Cmd+Shift+R`** to hear it, press again
   to stop. Uses ElevenLabs when a key is set, falling back to the macOS system
   voice (`AVSpeechSynthesizer`) so it always does *something*.
 - **Playback speed** — `Alt+Shift+S` cycles read-aloud speed.
@@ -35,7 +35,7 @@ Personal daily-driver tool. macOS only, single user, no accounts or telemetry.
 | --- | --- |
 | Dictate | Hold **Fn** &nbsp;·&nbsp; or `Cmd+Shift+Space` |
 | Refined dictation | Hold **Fn+Ctrl** |
-| Read-aloud (toggle) | **Double-tap Fn** |
+| Read-aloud (toggle) | `Cmd+Shift+R` |
 | Cycle read-aloud speed | `Alt+Shift+S` |
 | Cancel in-flight dictation | `Esc` |
 

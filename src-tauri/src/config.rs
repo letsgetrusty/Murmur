@@ -59,7 +59,9 @@ fn default_refine_modifier() -> String {
 }
 
 pub const DEFAULT_HOTKEY_DICTATE: &str = "CmdOrCtrl+Shift+Space";
-pub const DEFAULT_HOTKEY_TTS: &str = "Alt+A";
+// Option-based chords (e.g. Alt+A) are swallowed by macOS's special-character
+// input, so read-aloud uses a Cmd+Shift chord instead.
+pub const DEFAULT_HOTKEY_TTS: &str = "CmdOrCtrl+Shift+R";
 pub const DEFAULT_HOTKEY_TTS_SPEED: &str = "Alt+Shift+S";
 
 fn default_hotkey_dictate() -> String {
