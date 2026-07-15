@@ -18,14 +18,16 @@ Personal daily-driver tool. macOS only, single user, no accounts or telemetry.
   text before it's pasted. Falls back to the raw transcript if the call fails,
   so a dropped request never loses your words.
 - **Read-aloud** — select text and press **`Cmd+Shift+R`** to hear it, press again
-  to stop. Uses ElevenLabs when a key is set, falling back to the macOS system
-  voice (`AVSpeechSynthesizer`) so it always does *something*.
+  to stop. With nothing selected it reads the **clipboard** instead — handy for
+  mouse-capturing terminal apps where you can't drag-select. Uses ElevenLabs when
+  a key is set, falling back to the macOS system voice (`AVSpeechSynthesizer`).
 - **Playback speed** — `Alt+Shift+S` cycles read-aloud speed.
 - **Overlay pill** — a small status pill appears at the bottom of the screen
   holding the *active window* (not wherever the mouse happens to be) and shows
   recording / transcribing / done state.
-- **Settings window** — rebind hotkeys, manage API keys (stored in Keychain),
-  pick microphone and voice, and see per-provider usage & cost.
+- **Settings window** — rebind hotkeys, manage API keys (stored in Keychain, each
+  with a link to where you get one), pick microphone and voice, and see
+  per-provider usage & cost.
 - **Dictation history** — every dictation is saved to a local SQLite database
   (with an enable toggle and retention cap) and browsable in the settings window.
 

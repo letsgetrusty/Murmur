@@ -21,9 +21,10 @@ phase from it. When this file and the architecture doc disagree, ask.**
 - Audio in: `cpal` · audio out: `rodio`
 - STT v1: Groq/OpenAI Whisper via `reqwest`; STT local (later): `whisper-rs`
 - Inject/selection: `enigo` + `arboard`
-- TTS v1: `AVSpeechSynthesizer` via `objc2`; (later) ElevenLabs/OpenAI via `reqwest`
+- TTS: ElevenLabs via `reqwest` (primary), `AVSpeechSynthesizer` via `objc2` (fallback)
+- Refinement (Fn+Ctrl): OpenRouter via `reqwest`
 - Vector store: `lancedb` · embeddings: Voyage/OpenAI via `reqwest` (or `fastembed`)
-- Generation: Anthropic Messages API via `reqwest`
+- Generation (Phase 4, KB): Anthropic Messages API via `reqwest`
 - Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
 
 ## Hard rules — these prevent silent, hard-to-debug failures
@@ -34,9 +35,12 @@ phase from it. When this file and the architecture doc disagree, ask.**
    clipboard managers).
 3. **Selection capture = simulate `Cmd+C` → read clipboard → restore.** Do not rely
    on the AX selected-text API; it's inconsistent across apps.
-4. **v1 trigger is a chord (default `Cmd+Shift+Space`), NOT the Fn key.** The Fn key
-   needs a `CGEventTap` + Input Monitoring permission and is out of scope unless
-   explicitly requested.
+4. **Fn hold-to-dictate is a `CGEventTap` (`fn_key.rs`) gated on Accessibility
+   alone** — never call `IOHIDRequestAccess`: it records an Input Monitoring
+   denial that overrides the Accessibility coupling and silently wedges the tap
+   off. `Cmd+Shift+Space` is the alternative dictation chord; read-aloud is the
+   `Cmd+Shift+R` chord. Avoid Option-based chords (e.g. `Alt+A`) — macOS swallows
+   them for special-character input.
 5. **Use a stable signing identity** so Accessibility/Screen Recording grants
    survive rebuilds. Never produce a flow that re-prompts the user to grant
    Accessibility on every build.
@@ -50,13 +54,20 @@ STT, TTS, embeddings, and generation each sit behind a trait; selection is via
 config. v1 = cloud STT + cloud generation + native TTS. Don't hardcode a provider
 at a call site.
 
-## Current phase
-**Phase 0 — Scaffold.** Tray icon + frameless always-on-top overlay, one hotkey
-registered, stable signing identity configured.
-*Done when:* app launches to tray and the overlay shows/hides on a hotkey.
-Do not start Phase 1+ until Phase 0 is met. Phase definitions: `docs/voice-tool-architecture.md` §7.
+## Current status
+Phases 0–3 shipped: Fn / chord dictation (cloud Groq Whisper) with clipboard-paste
+injection, Fn+Ctrl LLM refinement (OpenRouter), read-aloud TTS (ElevenLabs with an
+`AVSpeechSynthesizer` fallback; read-aloud falls back to the clipboard when nothing
+is selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
+cost), and SQLite dictation history.
+**Next: Phase 4 — knowledge-base–grounded generation** (`kb.rs` is still a stub):
+ingest → embed → LanceDB → top-k → Anthropic Messages over selected text. Phase 5
+(screen context) is optional/later. Phase definitions: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
+- First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
+  create + trust the `murmur dev` signing cert, build, and store API keys. See the
+  README "Getting Started".
 - Dev: `./scripts/dev.sh` — builds, signs (stable `murmur dev` identity), wraps
   in `Murmur.app`, launches via `open`. Use this, **not** `npm run tauri dev`:
   bare `tauri dev` ad-hoc-signs a shell-launched binary, which breaks the Fn-key
