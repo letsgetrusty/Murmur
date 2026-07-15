@@ -56,12 +56,10 @@ body {
   font-size: 15px;
   padding: 4px 8px;
 }
-.brand-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
+.brand-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+  filter: drop-shadow(0 0 7px rgba(191, 90, 242, 0.6));
 }
 
 nav {
