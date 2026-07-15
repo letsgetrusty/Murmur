@@ -420,6 +420,16 @@ select:focus {
   margin-top: 6px;
   min-height: 1em;
 }
+.key-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.key-link:hover {
+  text-decoration: underline;
+}
 
 /* History ----------------------------------------------------------------- */
 .search {

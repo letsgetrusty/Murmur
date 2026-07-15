@@ -158,6 +158,7 @@ pub fn run() {
             commands::delete_history,
             commands::clear_history,
             commands::copy_text,
+            commands::open_url,
         ])
         .setup(move |app| {
 

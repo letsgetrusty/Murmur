@@ -307,3 +307,18 @@ pub fn delete_key(id: String) -> Result<(), String> {
     log::info!("secrets: '{id}' key removed");
     Ok(())
 }
+
+/// Open an external URL in the default browser (macOS `open`). Used by the
+/// "Get a key" links in Settings. Guarded to http(s) so a stray value can't
+/// hand `open` an arbitrary scheme or local path.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("refusing to open non-http(s) url: {url}"));
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}

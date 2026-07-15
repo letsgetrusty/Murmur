@@ -269,6 +269,13 @@ function setKeyMsg(row, text, kind = "") {
   }
 }
 
+// Where to obtain each provider's API key, keyed by the id from list_keys.
+const KEY_SIGNUP_URLS = {
+  groq: "https://console.groq.com/keys",
+  openrouter: "https://openrouter.ai/keys",
+  elevenlabs: "https://elevenlabs.io/app/settings/api-keys",
+};
+
 function renderKeyRow(k) {
   const row = document.createElement("div");
   row.className = "key-row";
@@ -356,7 +363,23 @@ function renderKeyRow(k) {
   const msg = document.createElement("div");
   msg.className = "key-msg hint";
 
-  row.append(head, purpose, controls, msg);
+  row.append(head, purpose, controls);
+
+  // "Get a key" link → opens the provider's key page in the default browser.
+  const url = KEY_SIGNUP_URLS[k.id];
+  if (url) {
+    const link = document.createElement("a");
+    link.className = "key-link";
+    link.href = url;
+    link.textContent = `Get a ${k.label} API key ↗`;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (invoke) invoke("open_url", { url }).catch(() => {});
+    });
+    row.append(link);
+  }
+
+  row.append(msg);
   return row;
 }
 
