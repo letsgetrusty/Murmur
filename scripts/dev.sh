@@ -47,7 +47,11 @@ die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # 0. Preconditions -----------------------------------------------------------
 security find-certificate -c "$IDENTITY" >/dev/null 2>&1 \
-  || die "Signing identity '$IDENTITY' not in the login keychain. Create a self-signed Code Signing cert with that name (Keychain Access → Certificate Assistant → Create a Certificate → Code Signing), then re-run."
+  || die "Signing identity '$IDENTITY' not in the login keychain. Run ./scripts/setup.sh to create and trust it (first-time setup), then re-run this."
+
+# Fresh clone has no node_modules (gitignored); setup.sh normally installs them,
+# but guard here so a bare `dev.sh` still works.
+[ -d node_modules ] || { say "Installing frontend deps (npm install)…"; npm install; }
 
 # 1. Vite dev server ---------------------------------------------------------
 if curl -s -o /dev/null "$VITE_URL" 2>/dev/null; then

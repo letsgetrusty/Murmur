@@ -46,28 +46,53 @@ hardware event tap and is fixed.
 
 ## Requirements
 
-- **macOS only.** The app leans on macOS-native APIs (CoreGraphics event taps,
-  AVFoundation, the Accessibility API) with no cross-platform abstraction.
+- **macOS only** (11+). The app leans on macOS-native APIs (CoreGraphics event
+  taps, AVFoundation, the Accessibility API) with no cross-platform abstraction.
+- **Toolchain**: Xcode Command Line Tools (`xcode-select --install`), Rust via
+  [rustup](https://rustup.rs) (the pinned version installs automatically from
+  `rust-toolchain.toml`), and Node 18+ (`.nvmrc` pins 22).
 - **Accessibility permission** — the one grant Murmur needs. It authorizes both
   paste-injection and the Fn-key event tap. Grant it under *System Settings →
   Privacy & Security → Accessibility*. See
   [`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md).
 - **API keys** (stored in Keychain, never in config or source):
-  - Groq — Whisper transcription
-  - OpenRouter — refined-dictation LLM
+  - Groq — Whisper transcription (**required**)
+  - OpenRouter — refined-dictation LLM (optional)
   - ElevenLabs — read-aloud voice (optional; system voice is the fallback)
+
+The repo is private — you'll need collaborator access to clone it.
 
 ---
 
-## Setup
+## Getting Started
+
+From a fresh clone, one script does the machine setup:
 
 ```sh
-# Set API keys (each stored in the macOS Keychain). Provider defaults to groq.
-murmur set-key groq
-murmur set-key openrouter
-murmur set-key elevenlabs
-# ...or manage them in the settings window.
+git clone <repo-url> && cd murmur
+./scripts/setup.sh      # toolchain check · npm install · create+trust the
+                        # 'murmur dev' signing cert · build · store API keys
+./scripts/dev.sh        # build, sign, wrap in Murmur.app, launch
 ```
+
+`setup.sh` is idempotent and walks you through it. It handles everything that
+*can* be automated; two steps are yours to do once:
+
+1. **Grant Accessibility.** On the first `./scripts/dev.sh`, macOS won't have the
+   grant yet — enable **Murmur** under *System Settings → Privacy & Security →
+   Accessibility*, then re-run `./scripts/dev.sh`.
+2. **API keys.** `setup.sh` offers to store them; you just paste the values. The
+   Groq key is required. To (re)set one later:
+
+   ```sh
+   ./src-tauri/target/debug/murmur set-key groq        # or openrouter | elevenlabs
+   # ...or manage them in the settings window.
+   ```
+
+Why the signing dance? A stable, *trusted* self-signed identity keeps the
+Accessibility grant from re-prompting on every rebuild — see
+[`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md)
+for the full story.
 
 ## Development
 

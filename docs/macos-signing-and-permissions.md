@@ -54,6 +54,14 @@ Murmur.
 
 ## The setup
 
+> **New machine?** `./scripts/setup.sh` automates §1 and §2 below (it creates the
+> `murmur dev` cert with `openssl` and trusts it via `sudo`). The manual steps
+> here are the explanation and the fallback if you'd rather do it by hand. Each
+> developer generates their *own* `murmur dev` cert on their own machine, so the
+> specific `certificate leaf = H"…"` hash below is illustrative — yours will
+> differ, and that's fine: TCC matches per-machine on the identifier plus the
+> trusted cert.
+
 ### 1. Stable signing identity: `murmur dev`
 
 A self-signed **Code Signing** certificate named `murmur dev` lives in the login
