@@ -54,6 +54,16 @@ pub fn capture_selection() -> Result<Option<String>> {
     Ok(selected)
 }
 
+/// The current clipboard text, if any. Read-aloud falls back to this when
+/// there's no live selection — e.g. a mouse-capturing terminal TUI where you
+/// copied with the app's own command (Claude Code's `/copy`, etc.).
+/// `capture_selection` leaves the clipboard untouched when it finds no
+/// selection, so this returns whatever the user last put there.
+pub fn clipboard_text() -> Option<String> {
+    let mut clipboard = Clipboard::new().ok()?;
+    clipboard.get_text().ok().filter(|s| !s.is_empty())
+}
+
 fn send_cmd_c() -> Result<()> {
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| anyhow!("init enigo (Accessibility permission?): {e}"))?;

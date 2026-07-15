@@ -346,27 +346,12 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
         idle_after(app.clone(), Duration::from_millis(400));
         return;
     }
-    match selection::capture_selection() {
-        Ok(Some(text)) => {
-            let chars = text.chars().count();
-            log::info!("tts: speak ({} chars)", chars);
-            record_usage(app, |u| u.record_tts(chars as u64));
-            show_overlay(app);
-            emit_state(app, OverlayState::Transcribing);
-            state.speaker.speak(&text);
-            spawn_tts_idle_watcher(app.clone());
-        }
-        Ok(None) => {
-            log::info!("tts: nothing selected");
-            show_overlay(app);
-            emit_state(
-                app,
-                OverlayState::Error {
-                    message: "no selection".into(),
-                },
-            );
-            idle_after(app.clone(), Duration::from_millis(1600));
-        }
+    // Prefer the live selection; fall back to the clipboard when there's none,
+    // so text you can't mouse-select (a mouse-capturing terminal TUI, etc.) can
+    // still be read after copying it with the app's own command.
+    let text = match selection::capture_selection() {
+        Ok(Some(text)) => Some(text),
+        Ok(None) => selection::clipboard_text(),
         Err(e) => {
             log::warn!("tts: selection capture failed: {e}");
             show_overlay(app);
@@ -377,6 +362,29 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
                 },
             );
             idle_after(app.clone(), Duration::from_millis(2200));
+            return;
+        }
+    };
+    match text {
+        Some(text) => {
+            let chars = text.chars().count();
+            log::info!("tts: speak ({} chars)", chars);
+            record_usage(app, |u| u.record_tts(chars as u64));
+            show_overlay(app);
+            emit_state(app, OverlayState::Transcribing);
+            state.speaker.speak(&text);
+            spawn_tts_idle_watcher(app.clone());
+        }
+        None => {
+            log::info!("tts: nothing to read (no selection or clipboard text)");
+            show_overlay(app);
+            emit_state(
+                app,
+                OverlayState::Error {
+                    message: "nothing to read".into(),
+                },
+            );
+            idle_after(app.clone(), Duration::from_millis(1600));
         }
     }
 }
