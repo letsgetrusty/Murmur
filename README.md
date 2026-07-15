@@ -128,7 +128,7 @@ Modules (`src-tauri/src/`): `audio` (cpal capture) · `stt` (Groq Whisper) ·
 `focus` (active-window screen for overlay placement) · `history` (SQLite) ·
 `usage` · `config` · `secrets` (Keychain) · `kb` (knowledge base, planned).
 
-The full design lives in [`voice-tool-architecture.md`](voice-tool-architecture.md).
+The full design lives in [`docs/voice-tool-architecture.md`](docs/voice-tool-architecture.md).
 
 ### Stack
 

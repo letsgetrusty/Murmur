@@ -4,7 +4,7 @@ macOS desktop app (Tauri v2, Rust backend + webview) combining dictation,
 read-aloud TTS, and knowledge-base–grounded generation on selected text.
 Personal daily-driver tool; also a Rust-business content artifact.
 
-**Full design plan lives in `voice-tool-architecture.md`. Implement phase by
+**Full design plan lives in `docs/voice-tool-architecture.md`. Implement phase by
 phase from it. When this file and the architecture doc disagree, ask.**
 
 ---
@@ -54,7 +54,7 @@ at a call site.
 **Phase 0 — Scaffold.** Tray icon + frameless always-on-top overlay, one hotkey
 registered, stable signing identity configured.
 *Done when:* app launches to tray and the overlay shows/hides on a hotkey.
-Do not start Phase 1+ until Phase 0 is met. Phase definitions: `voice-tool-architecture.md` §7.
+Do not start Phase 1+ until Phase 0 is met. Phase definitions: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - Dev: `./scripts/dev.sh` — builds, signs (stable `murmur dev` identity), wraps
@@ -68,7 +68,7 @@ Do not start Phase 1+ until Phase 0 is met. Phase definitions: `voice-tool-archi
 - Release build: `npm run tauri build`
 
 ## Conventions
-- Module layout per `voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,
+- Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,
   `inject.rs`, `selection.rs`, `tts.rs`, `kb.rs`, `config.rs`, `secrets.rs`).
 - Ask before adding any dependency not in the stack list above.
 - Keep idle memory low — this exists partly to *not* be an 800MB Electron app.
