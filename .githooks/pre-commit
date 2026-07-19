@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# pre-commit — keep the Rust crate rustfmt- and clippy-clean.
+#
+# Runs only when Rust sources (or the Cargo manifest/lock) are staged, so
+# doc/frontend commits stay instant. Fast checks only — `cargo audit` and tests
+# are intentionally NOT here (see scripts/audit.sh). Bypass with:
+#   git commit --no-verify
+#
+# Enabled via `git config core.hooksPath .githooks` (scripts/setup.sh does this).
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+MANIFEST="src-tauri/Cargo.toml"
+
+say()  { printf '\033[1;36m▶ %s\033[0m\n' "$*"; }
+fail() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Skip entirely unless the commit touches Rust.
+if ! git diff --cached --name-only --diff-filter=ACM \
+     | grep -qE '\.rs$|^src-tauri/Cargo\.(toml|lock)$'; then
+  exit 0
+fi
+
+say "pre-commit: rustfmt"
+cargo fmt --manifest-path "$MANIFEST" --check \
+  || fail "Unformatted code. Run:  cargo fmt --manifest-path $MANIFEST"
+
+say "pre-commit: clippy"
+cargo clippy --manifest-path "$MANIFEST" --no-default-features --all-targets -- -D warnings \
+  || fail "Clippy found issues. Fix them, or bypass this once with:  git commit --no-verify"
+
+say "pre-commit: OK"

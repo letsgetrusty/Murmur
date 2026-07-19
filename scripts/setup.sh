@@ -62,6 +62,15 @@ else
   ok "npm install done"
 fi
 
+# ── Git hooks ────────────────────────────────────────────────────────────────
+# Enable the tracked pre-commit hook (rustfmt + clippy on Rust changes).
+if [ "$(git config core.hooksPath 2>/dev/null)" = ".githooks" ]; then
+  ok "Git hooks already enabled"
+else
+  git config core.hooksPath .githooks
+  ok "Git hooks enabled (.githooks: pre-commit rustfmt + clippy)"
+fi
+
 # ── 3. Signing certificate ──────────────────────────────────────────────────
 # A stable, self-signed "murmur dev" identity keeps the TCC designated
 # requirement constant across rebuilds. See docs/macos-signing-and-permissions.md.

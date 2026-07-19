@@ -77,6 +77,10 @@ ingest → embed → LanceDB → top-k → Anthropic Messages over selected text
 - Rust check (from `src-tauri/`): `cargo check`
 - Rust tests: `cargo test`
 - Release build: `npm run tauri build`
+- Lint/format: a pre-commit hook (`.githooks/pre-commit`) runs `cargo fmt --check`
+  + `cargo clippy -D warnings` on Rust changes. Keep the crate clean; bypass a WIP
+  commit with `git commit --no-verify`.
+- Dependency audit (on demand, not in the hook): `./scripts/audit.sh` (RustSec).
 
 ## Conventions
 - Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,

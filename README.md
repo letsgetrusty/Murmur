@@ -113,6 +113,12 @@ cd src-tauri && cargo test      # tests
 npm run tauri build             # release build
 ```
 
+A **pre-commit hook** (enabled by `setup.sh` via `git config core.hooksPath
+.githooks`) runs `cargo fmt --check` + `cargo clippy -D warnings` on any commit
+that touches Rust — bypass a WIP commit with `git commit --no-verify`. Check
+dependencies against the RustSec advisory database on demand with
+`./scripts/audit.sh` (it's intentionally not in the hook).
+
 Logs stream to `~/Library/Logs/murmur.log`.
 
 ---
