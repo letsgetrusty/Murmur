@@ -23,6 +23,7 @@
         </div>
         <nav>
           <button class="nav-item active" data-tab="settings">Settings</button>
+          <button class="nav-item" data-tab="insights">Insights</button>
           <button class="nav-item" data-tab="history">History</button>
         </nav>
       </aside>
@@ -66,45 +67,6 @@
           </div>
 
           <div class="card">
-            <h2>Usage &amp; cost</h2>
-            <p class="hint">
-              OpenRouter is exact (pulled live from their API, all-time).
-              Groq &amp; ElevenLabs don't expose usage to your keys, so those are
-              local counts since Murmur started tracking, with estimated cost.
-            </p>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Refinement · OpenRouter</span>
-                <span class="usage-cost" id="or-total">…</span>
-              </div>
-              <div class="usage-sub" id="or-sub"></div>
-            </div>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Dictation · Groq</span>
-                <span class="usage-cost" id="stt-cost">—</span>
-              </div>
-              <div class="usage-sub" id="stt-sub"></div>
-            </div>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Read-aloud · ElevenLabs</span>
-                <span class="usage-cost" id="tts-cost">—</span>
-              </div>
-              <div class="usage-sub" id="tts-sub"></div>
-            </div>
-
-            <div class="usage-actions">
-              <span id="usage-msg" class="hint"></span>
-              <button id="u-refresh" class="small-btn">Refresh</button>
-              <button id="u-reset" class="small-btn danger">Reset local</button>
-            </div>
-          </div>
-
-          <div class="card">
             <h2>Audio</h2>
             <div class="row">
               <span class="row-label">Playback speed</span>
@@ -129,7 +91,7 @@
             </div>
             <div class="row">
               <span class="row-label">Read aloud</span>
-              <button class="recorder" data-action="tts_toggle" data-default="Alt+A"></button>
+              <button class="recorder" data-action="tts_toggle" data-default="CmdOrCtrl+Shift+R"></button>
             </div>
             <div class="row">
               <span class="row-label">Cycle speed</span>
@@ -162,6 +124,86 @@
               take effect after you relaunch Murmur.
             </p>
             <div id="keys"></div>
+          </div>
+        </section>
+
+        <!-- Insights -->
+        <section id="tab-insights" class="tab">
+          <header class="tab-head">
+            <h1>Insights</h1>
+            <div class="actions">
+              <span id="usage-msg" class="hint"></span>
+              <button id="u-refresh" class="small-btn">Refresh</button>
+            </div>
+          </header>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <span class="stat-label">Dictations</span>
+              <span class="stat-value" id="ins-dictations">—</span>
+              <span class="stat-sub" id="ins-dictations-sub"></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Words dictated</span>
+              <span class="stat-value" id="ins-words">—</span>
+              <span class="stat-sub" id="ins-words-sub"></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Time speaking</span>
+              <span class="stat-value" id="ins-time">—</span>
+              <span class="stat-sub" id="ins-time-sub"></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Read-alouds</span>
+              <span class="stat-value" id="ins-reads">—</span>
+              <span class="stat-sub" id="ins-reads-sub"></span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Activity</h2>
+              <span class="hint" id="ins-activity-note">Last 14 days</span>
+            </div>
+            <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
+          </div>
+
+          <div class="card">
+            <h2>Usage &amp; cost</h2>
+            <p class="hint">
+              OpenRouter is exact (pulled live from their API, all-time).
+              Groq &amp; ElevenLabs don't expose usage to your keys, so those are
+              local counts since Murmur started tracking, with estimated cost.
+            </p>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Refinement · OpenRouter</span>
+                <span class="usage-cost" id="or-total">…</span>
+              </div>
+              <div class="usage-sub" id="or-sub"></div>
+            </div>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Dictation · Groq</span>
+                <span class="usage-cost" id="stt-cost">—</span>
+              </div>
+              <div class="usage-sub" id="stt-sub"></div>
+            </div>
+
+            <div class="usage-provider">
+              <div class="usage-provider-head">
+                <span class="row-label">Read-aloud · ElevenLabs</span>
+                <span class="usage-cost" id="tts-cost">—</span>
+              </div>
+              <div class="usage-sub" id="tts-sub"></div>
+            </div>
+
+            <div class="usage-actions">
+              <span id="usage-reset-msg" class="hint"></span>
+              <button id="u-reset" class="small-btn danger">Reset local counts</button>
+            </div>
           </div>
         </section>
 

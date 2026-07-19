@@ -203,6 +203,13 @@ pub fn clear_history(state: State<AppState>) -> Result<(), String> {
     crate::history::clear(&conn).map_err(|e| e.to_string())
 }
 
+/// Aggregate usage stats for the Insights tab (14-day activity window).
+#[tauri::command]
+pub fn history_stats(state: State<AppState>) -> Result<crate::history::Stats, String> {
+    let conn = state.history.lock().map_err(|e| e.to_string())?;
+    crate::history::stats(&conn, 14).map_err(|e| e.to_string())
+}
+
 /// Put arbitrary text on the clipboard (used by the History "Copy" button).
 #[tauri::command]
 pub fn copy_text(text: String) -> Result<(), String> {

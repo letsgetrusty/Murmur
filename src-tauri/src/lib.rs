@@ -157,6 +157,7 @@ pub fn run() {
             commands::list_history,
             commands::delete_history,
             commands::clear_history,
+            commands::history_stats,
             commands::copy_text,
             commands::open_url,
         ])

@@ -91,6 +91,84 @@ pub fn list(conn: &Connection, query: &str, limit: i64, offset: i64) -> Result<V
     Ok(out)
 }
 
+/// One day's dictation count, for the Insights activity chart.
+#[derive(Serialize)]
+pub struct DayCount {
+    /// Local date, `YYYY-MM-DD`.
+    pub date: String,
+    pub count: i64,
+}
+
+/// Aggregate stats for the Insights tab. Word counts are approximate
+/// (space-delimited) — fine for a personal usage readout.
+#[derive(Serialize)]
+pub struct Stats {
+    pub total: i64,
+    pub refined: i64,
+    pub words: i64,
+    /// Unix seconds of the earliest stored dictation, if any.
+    pub first_ts: Option<i64>,
+    /// The last `window` days, oldest first, zero-filled.
+    pub days: Vec<DayCount>,
+}
+
+/// Compute stats over the stored history. `window` = number of recent days for
+/// the activity chart. Totals reflect what's currently retained (history can be
+/// disabled or pruned), so the caller pairs them with lifetime usage counts.
+pub fn stats(conn: &Connection, window: i64) -> Result<Stats> {
+    let (total, refined, words, first_ts) = conn.query_row(
+        "SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN refined IS NOT NULL AND refined <> '' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN TRIM(raw) = '' THEN 0
+                ELSE LENGTH(TRIM(raw)) - LENGTH(REPLACE(TRIM(raw), ' ', '')) + 1 END), 0),
+            MIN(ts)
+         FROM entries",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+            ))
+        },
+    )?;
+
+    // Build the day window in SQLite (local time) so we avoid Rust date math and
+    // zero-fill days with no dictations.
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE d(day, n) AS (
+            SELECT date('now', 'localtime'), 0
+            UNION ALL
+            SELECT date('now', 'localtime', '-' || (n + 1) || ' days'), n + 1
+              FROM d WHERE n + 1 < ?1
+         )
+         SELECT d.day,
+                (SELECT COUNT(*) FROM entries e
+                  WHERE strftime('%Y-%m-%d', e.ts, 'unixepoch', 'localtime') = d.day)
+         FROM d ORDER BY d.day ASC",
+    )?;
+    let rows = stmt.query_map(params![window], |r| {
+        Ok(DayCount {
+            date: r.get(0)?,
+            count: r.get(1)?,
+        })
+    })?;
+    let mut days = Vec::new();
+    for row in rows {
+        days.push(row?);
+    }
+
+    Ok(Stats {
+        total,
+        refined,
+        words,
+        first_ts,
+        days,
+    })
+}
+
 pub fn delete(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM entries WHERE id = ?1", params![id])?;
     Ok(())

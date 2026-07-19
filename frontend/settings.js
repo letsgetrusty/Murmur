@@ -457,22 +457,104 @@ async function loadUsage() {
 }
 
 function initUsage() {
-  el("u-refresh").addEventListener("click", loadUsage);
+  el("u-refresh").addEventListener("click", loadInsights);
   el("u-reset").addEventListener("click", async () => {
     try {
       await invoke("reset_usage");
       localUsage = null;
       renderUsageAll();
-      el("usage-msg").textContent = "Local counts reset (OpenRouter total is provider-side).";
+      renderInsights();
+      el("usage-reset-msg").textContent = "Local counts reset (OpenRouter total is provider-side).";
     } catch (e) {
-      el("usage-msg").textContent = `Reset failed: ${e}`;
+      el("usage-reset-msg").textContent = `Reset failed: ${e}`;
     }
   });
-  // Live-update the local counts while the window is open.
+  // Live-update the counts while the window is open.
   window.__TAURI__?.event?.listen?.("usage", (e) => {
     localUsage = e.payload;
     renderUsageAll();
+    renderInsights();
   });
+}
+
+// --- Insights -----------------------------------------------------------------
+
+let insStats = null; // last history_stats { total, refined, words, first_ts, days[] }
+
+function fmtDuration(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function renderInsights() {
+  const u = localUsage || {};
+  const s = insStats || { total: 0, refined: 0, words: 0, days: [] };
+
+  const dictations = u.stt_count || 0;
+  el("ins-dictations").textContent = dictations.toLocaleString();
+  el("ins-dictations-sub").textContent = (u.refine_count || 0)
+    ? `${(u.refine_count || 0).toLocaleString()} refined`
+    : "";
+
+  el("ins-words").textContent = (s.words || 0).toLocaleString();
+  el("ins-words-sub").textContent = s.total ? `~${Math.round(s.words / s.total)} per dictation` : "";
+
+  el("ins-time").textContent = fmtDuration(u.stt_seconds);
+  el("ins-time-sub").textContent = dictations
+    ? `~${Math.round((u.stt_seconds || 0) / dictations)}s each`
+    : "";
+
+  el("ins-reads").textContent = (u.tts_count || 0).toLocaleString();
+  el("ins-reads-sub").textContent = (u.tts_chars || 0)
+    ? `${(u.tts_chars || 0).toLocaleString()} chars`
+    : "";
+
+  renderActivity(s);
+}
+
+function renderActivity(s) {
+  const host = el("ins-activity");
+  const note = el("ins-activity-note");
+  host.innerHTML = "";
+  const days = s.days || [];
+  const inWindow = days.reduce((a, d) => a + d.count, 0);
+
+  if (!days.length || inWindow === 0) {
+    // History off (lifetime dictations exist but nothing stored) vs simply quiet.
+    const off = (localUsage?.stt_count || 0) > 0 && (s.total || 0) === 0;
+    host.innerHTML = `<span class="act-empty">${
+      off ? "Turn on History recording to track activity." : "No dictations in the last 14 days."
+    }</span>`;
+    note.textContent = off ? "History off" : "Last 14 days";
+    return;
+  }
+
+  note.textContent = "Last 14 days";
+  const max = Math.max(...days.map((d) => d.count), 1);
+  days.forEach((d, i) => {
+    const col = document.createElement("div");
+    col.className = "act-col";
+    col.title = `${d.date}: ${d.count} dictation${d.count === 1 ? "" : "s"}`;
+    const bar = document.createElement("div");
+    bar.className = "act-bar" + (i === days.length - 1 ? " today" : "");
+    bar.style.height = `${Math.max(4, (d.count / max) * 100)}%`;
+    col.appendChild(bar);
+    host.appendChild(col);
+  });
+}
+
+async function loadInsights() {
+  if (!invoke) return;
+  try {
+    insStats = await invoke("history_stats");
+  } catch (_) {
+    insStats = null;
+  }
+  await loadUsage(); // refreshes the provider cards + OpenRouter spend
+  renderInsights();
 }
 
 // --- History ------------------------------------------------------------------
@@ -579,9 +661,10 @@ function initHistory() {
     } catch (_) {}
   });
 
-  // Refresh live when a new dictation lands and we're on the History tab.
+  // Refresh live when a new dictation lands and we're on the relevant tab.
   window.__TAURI__?.event?.listen?.("history", () => {
     if (document.getElementById("tab-history")?.classList.contains("active")) loadHistory();
+    if (document.getElementById("tab-insights")?.classList.contains("active")) loadInsights();
   });
 }
 
@@ -595,6 +678,7 @@ function switchTab(name) {
     t.classList.toggle("active", t.id === `tab-${name}`);
   }
   if (name === "history") loadHistory();
+  if (name === "insights") loadInsights();
 }
 
 async function init() {
@@ -616,7 +700,6 @@ async function init() {
   initHotkeys();
   await loadKeys();
   initUsage();
-  await loadUsage();
   initHistory();
 }
 
