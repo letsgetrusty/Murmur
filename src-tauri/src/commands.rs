@@ -140,11 +140,17 @@ pub async fn get_openrouter_spend() -> Result<OpenRouterSpend, String> {
         return Err(format!("openrouter {}", resp.status()));
     }
     let j: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let d = &j["data"];
-    Ok(OpenRouterSpend {
+    Ok(parse_openrouter_spend(&j))
+}
+
+/// All-time + this-month spend from OpenRouter's `/key` response. Missing fields
+/// default to 0 so a shape change degrades to "$0", not an error.
+fn parse_openrouter_spend(json: &serde_json::Value) -> OpenRouterSpend {
+    let d = &json["data"];
+    OpenRouterSpend {
         total_usd: d["usage"].as_f64().unwrap_or(0.0),
         month_usd: d["usage_monthly"].as_f64().unwrap_or(0.0),
-    })
+    }
 }
 
 #[tauri::command]
@@ -346,5 +352,20 @@ mod tests {
         assert!(open_url("file:///etc/passwd".into()).is_err());
         assert!(open_url("javascript:alert(1)".into()).is_err());
         assert!(open_url("ftp://example.com".into()).is_err());
+    }
+
+    #[test]
+    fn parse_openrouter_spend_reads_data() {
+        let j = serde_json::json!({"data": {"usage": 12.5, "usage_monthly": 3.25}});
+        let s = parse_openrouter_spend(&j);
+        assert!((s.total_usd - 12.5).abs() < 1e-9);
+        assert!((s.month_usd - 3.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_openrouter_spend_defaults_to_zero() {
+        let s = parse_openrouter_spend(&serde_json::json!({}));
+        assert_eq!(s.total_usd, 0.0);
+        assert_eq!(s.month_usd, 0.0);
     }
 }

@@ -120,26 +120,12 @@ impl Refiner for OpenRouterRefiner {
 
             let json: serde_json::Value =
                 resp.json().await.context("decode openrouter response")?;
-            let out = json["choices"][0]["message"]["content"]
-                .as_str()
-                .ok_or_else(|| anyhow!("openrouter response missing choices[0].message.content"))?
-                .trim()
-                .to_string();
-            if out.is_empty() {
-                return Err(anyhow!("openrouter returned empty content"));
-            }
+            let out = parse_content(&json)?;
 
             // Record token usage + cost (best-effort — never fail a refine over it).
-            if let Some(u) = json.get("usage") {
-                let field = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
-                let cost = u.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if let Some((prompt, completion, total, cost)) = parse_usage(&json) {
                 if let Ok(mut stats) = self.usage.lock() {
-                    stats.record(
-                        field("prompt_tokens"),
-                        field("completion_tokens"),
-                        field("total_tokens"),
-                        cost,
-                    );
+                    stats.record(prompt, completion, total, cost);
                     let snapshot = stats.clone();
                     drop(stats);
                     if let Err(e) = crate::usage::save(&snapshot) {
@@ -153,9 +139,71 @@ impl Refiner for OpenRouterRefiner {
     }
 }
 
+/// Pull the refined text out of an OpenRouter chat-completion response. Errors if
+/// `choices[0].message.content` is missing or the trimmed text is empty.
+fn parse_content(json: &serde_json::Value) -> Result<String> {
+    let out = json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| anyhow!("openrouter response missing choices[0].message.content"))?
+        .trim()
+        .to_string();
+    if out.is_empty() {
+        return Err(anyhow!("openrouter returned empty content"));
+    }
+    Ok(out)
+}
+
+/// `(prompt, completion, total, cost_usd)` from the `usage` object, or `None`
+/// when the response omits it. Missing numeric fields default to 0.
+fn parse_usage(json: &serde_json::Value) -> Option<(u64, u64, u64, f64)> {
+    let u = json.get("usage")?;
+    let field = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let cost = u.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    Some((
+        field("prompt_tokens"),
+        field("completion_tokens"),
+        field("total_tokens"),
+        cost,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_content_extracts_and_trims() {
+        let j = json!({"choices": [{"message": {"content": "  Cleaned up.  "}}]});
+        assert_eq!(parse_content(&j).unwrap(), "Cleaned up.");
+    }
+
+    #[test]
+    fn parse_content_errors_on_missing_or_empty() {
+        assert!(parse_content(&json!({})).is_err());
+        assert!(parse_content(&json!({"choices": []})).is_err());
+        let empty = json!({"choices": [{"message": {"content": "   "}}]});
+        assert!(parse_content(&empty).is_err());
+    }
+
+    #[test]
+    fn parse_usage_reads_fields() {
+        let j = json!({"usage": {
+            "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20, "cost": 0.0021
+        }});
+        let (p, c, t, cost) = parse_usage(&j).unwrap();
+        assert_eq!((p, c, t), (12, 8, 20));
+        assert!((cost - 0.0021).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_usage_none_when_absent_and_defaults_missing() {
+        assert!(parse_usage(&json!({})).is_none());
+        // Present but partial → missing numbers default to 0.
+        let (p, c, t, cost) = parse_usage(&json!({"usage": {"total_tokens": 5}})).unwrap();
+        assert_eq!((p, c, t), (0, 0, 5));
+        assert_eq!(cost, 0.0);
+    }
 
     #[test]
     fn user_message_wraps_transcript() {

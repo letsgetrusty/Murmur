@@ -102,7 +102,34 @@ impl Transcriber for GroqWhisper {
             }
 
             let json: serde_json::Value = resp.json().await.context("decode groq response")?;
-            Ok(json["text"].as_str().unwrap_or("").trim().to_string())
+            Ok(parse_transcript(&json))
         })
+    }
+}
+
+/// Extract the transcript from Groq's response, trimmed. A missing or non-string
+/// `text` yields an empty string — the caller treats empty as "nothing said".
+fn parse_transcript(json: &serde_json::Value) -> String {
+    json["text"].as_str().unwrap_or("").trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_and_trims_text() {
+        assert_eq!(
+            parse_transcript(&json!({"text": "  hello there  "})),
+            "hello there"
+        );
+    }
+
+    #[test]
+    fn missing_or_wrong_type_is_empty() {
+        assert_eq!(parse_transcript(&json!({})), "");
+        assert_eq!(parse_transcript(&json!({"text": 42})), "");
+        assert_eq!(parse_transcript(&json!({"text": null})), "");
     }
 }
