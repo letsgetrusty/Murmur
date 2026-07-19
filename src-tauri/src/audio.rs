@@ -65,9 +65,7 @@ impl Recorder {
                 .ok()
                 .and_then(|mut iter| iter.find(|d| d.name().ok().as_deref() == Some(name)))
                 .or_else(|| {
-                    log::warn!(
-                        "audio: input device {name:?} not found, falling back to default"
-                    );
+                    log::warn!("audio: input device {name:?} not found, falling back to default");
                     host.default_input_device()
                 })
                 .ok_or_else(|| anyhow!("no input device"))?,
@@ -126,10 +124,8 @@ impl Recorder {
                 device.build_input_stream(
                     &config,
                     move |data: &[i16], _| {
-                        let f: Vec<f32> = data
-                            .iter()
-                            .map(|s| *s as f32 / i16::MAX as f32)
-                            .collect();
+                        let f: Vec<f32> =
+                            data.iter().map(|s| *s as f32 / i16::MAX as f32).collect();
                         push_f32(&inner_cl, &f, channels);
                         maybe_emit_level(&level_cb, &throttle, &f, channels);
                     },
@@ -280,7 +276,7 @@ fn encode_wav_i16(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
     buf.write_all(&sample_rate.to_le_bytes())?;
     buf.write_all(&byte_rate.to_le_bytes())?;
     buf.write_all(&block_align.to_le_bytes())?;
-    buf.write_all(&(bytes_per_sample as u16 * 8).to_le_bytes())?;
+    buf.write_all(&(bytes_per_sample * 8).to_le_bytes())?; // bits per sample
     buf.write_all(b"data")?;
     buf.write_all(&data_size.to_le_bytes())?;
     for s in samples {
@@ -289,4 +285,50 @@ fn encode_wav_i16(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
         buf.write_all(&v.to_le_bytes())?;
     }
     Ok(buf.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wav_header_size_and_clamping() {
+        let wav = encode_wav_i16(&[0.0, 1.0, -2.0], 16_000).unwrap();
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(wav.len(), 44 + 3 * 2); // 44-byte header + 2 bytes/sample
+
+        let data_size = u32::from_le_bytes(wav[40..44].try_into().unwrap());
+        assert_eq!(data_size, 6);
+
+        // Samples: 0.0 -> 0, 1.0 -> i16::MAX, -2.0 clamps to -1.0 -> -i16::MAX.
+        let s0 = i16::from_le_bytes(wav[44..46].try_into().unwrap());
+        let s1 = i16::from_le_bytes(wav[46..48].try_into().unwrap());
+        let s2 = i16::from_le_bytes(wav[48..50].try_into().unwrap());
+        assert_eq!(s0, 0);
+        assert_eq!(s1, i16::MAX);
+        assert_eq!(s2, -i16::MAX);
+    }
+
+    #[test]
+    fn resample_same_rate_is_identity() {
+        let s = vec![0.1, 0.2, 0.3];
+        assert_eq!(resample_linear(&s, 16_000, 16_000), s);
+    }
+
+    #[test]
+    fn resample_downsamples_length() {
+        let s: Vec<f32> = (0..100).map(|i| i as f32 / 100.0).collect();
+        // 48k -> 16k is a 3:1 ratio: floor(100 / 3.0) = 33 output samples.
+        assert_eq!(resample_linear(&s, 48_000, 16_000).len(), 33);
+    }
+
+    #[test]
+    fn push_f32_averages_stereo_to_mono() {
+        let inner = Arc::new(Mutex::new(Inner { samples: vec![] }));
+        // Two stereo frames: (1.0, 0.0) -> 0.5 and (0.25, 0.75) -> 0.5.
+        push_f32(&inner, &[1.0, 0.0, 0.25, 0.75], 2);
+        assert_eq!(inner.lock().unwrap().samples, vec![0.5, 0.5]);
+    }
 }

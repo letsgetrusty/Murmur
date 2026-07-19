@@ -107,8 +107,7 @@ impl Default for Config {
 
 fn config_path() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME env var unset")?;
-    Ok(PathBuf::from(home)
-        .join("Library/Application Support/murmur/config.json"))
+    Ok(PathBuf::from(home).join("Library/Application Support/murmur/config.json"))
 }
 
 /// Read the config, returning defaults if the file is missing or unparseable.
@@ -144,4 +143,39 @@ pub fn save(config: &Config) -> Result<()> {
     let json = serde_json::to_vec_pretty(config).context("serialize config")?;
     fs::write(&path, json).context("write config")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tts_hotkey_default_is_option_free() {
+        assert_eq!(default_hotkey_tts(), DEFAULT_HOTKEY_TTS);
+        assert_eq!(DEFAULT_HOTKEY_TTS, "CmdOrCtrl+Shift+R");
+    }
+
+    #[test]
+    fn serde_defaults_fill_missing_fields() {
+        // Only tts_speed and tts_voice_id lack a serde default, so they're the
+        // one required pair; everything else must fall back to its default.
+        let c: Config = serde_json::from_str(r#"{"tts_speed":2.0,"tts_voice_id":"v"}"#).unwrap();
+        assert_eq!(c.refine_model, DEFAULT_REFINE_MODEL);
+        assert!(c.history_enabled);
+        assert_eq!(c.history_limit, 1000);
+        assert_eq!(c.hotkey_tts, DEFAULT_HOTKEY_TTS);
+        assert_eq!(c.hotkey_dictate, DEFAULT_HOTKEY_DICTATE);
+        assert_eq!(c.refine_modifier, DEFAULT_REFINE_MODIFIER);
+        assert_eq!(c.mic_name, None);
+    }
+
+    #[test]
+    fn round_trips_through_json() {
+        let c = Config::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.hotkey_tts, c.hotkey_tts);
+        assert_eq!(c2.history_limit, c.history_limit);
+        assert!((c2.tts_speed - c.tts_speed).abs() < 1e-6);
+    }
 }

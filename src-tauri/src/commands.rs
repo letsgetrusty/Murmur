@@ -11,11 +11,7 @@ use crate::AppState;
 /// Current config, for the Settings form to populate itself.
 #[tauri::command]
 pub fn get_config(state: State<AppState>) -> Config {
-    state
-        .config
-        .lock()
-        .map(|c| c.clone())
-        .unwrap_or_default()
+    state.config.lock().map(|c| c.clone()).unwrap_or_default()
 }
 
 /// Persist an edited config and apply it live. The shared `AppState.config` is
@@ -328,4 +324,27 @@ pub fn open_url(url: String) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_long_key() {
+        assert_eq!(mask("sk-abcdefghijklmnop"), "sk-a…mnop");
+    }
+
+    #[test]
+    fn mask_short_key_is_bulleted() {
+        assert_eq!(mask("abc"), "••••"); // <4 chars still shows 4 bullets
+        assert_eq!(mask("abcdefgh"), "••••••••"); // 8 chars, all bullets
+    }
+
+    #[test]
+    fn open_url_rejects_non_http() {
+        assert!(open_url("file:///etc/passwd".into()).is_err());
+        assert!(open_url("javascript:alert(1)".into()).is_err());
+        assert!(open_url("ftp://example.com".into()).is_err());
+    }
 }

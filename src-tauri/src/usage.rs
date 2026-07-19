@@ -70,3 +70,30 @@ pub fn save(stats: &UsageStats) -> Result<()> {
     let json = serde_json::to_vec_pretty(stats).context("serialize usage")?;
     std::fs::write(p, json).context("write usage")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_accumulates() {
+        let mut u = UsageStats::default();
+        u.record(10, 5, 15, 0.02);
+        u.record(2, 3, 5, 0.01);
+        assert_eq!(u.refine_count, 2);
+        assert_eq!(u.prompt_tokens, 12);
+        assert_eq!(u.completion_tokens, 8);
+        assert_eq!(u.total_tokens, 20);
+        assert!((u.cost_usd - 0.03).abs() < 1e-9);
+
+        u.record_stt(1.5);
+        u.record_stt(2.5);
+        assert_eq!(u.stt_count, 2);
+        assert!((u.stt_seconds - 4.0).abs() < 1e-9);
+
+        u.record_tts(100);
+        u.record_tts(50);
+        assert_eq!(u.tts_count, 2);
+        assert_eq!(u.tts_chars, 150);
+    }
+}

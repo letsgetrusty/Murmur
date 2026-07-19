@@ -31,6 +31,12 @@ pub fn open() -> Connection {
             log::warn!("history: on-disk db unavailable; using in-memory (not persisted)");
             Connection::open_in_memory().expect("in-memory sqlite")
         });
+    ensure_schema(&conn);
+    conn
+}
+
+/// Create the `entries` table if it's missing. Shared by `open` and tests.
+fn ensure_schema(conn: &Connection) {
     if let Err(e) = conn.execute(
         "CREATE TABLE IF NOT EXISTS entries (
             id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +48,6 @@ pub fn open() -> Connection {
     ) {
         log::warn!("history: create table failed: {e}");
     }
-    conn
 }
 
 #[derive(Serialize)]
@@ -187,4 +192,60 @@ pub fn prune(conn: &Connection, keep: u32) -> Result<()> {
         params![keep],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn);
+        conn
+    }
+
+    #[test]
+    fn insert_list_and_search() {
+        let c = mem();
+        insert(&c, "hello world", None).unwrap();
+        insert(&c, "second one", Some("Second one.")).unwrap();
+
+        let all = list(&c, "", 10, 0).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].raw, "second one"); // newest first
+        assert_eq!(all[0].refined.as_deref(), Some("Second one."));
+        assert_eq!(all[1].refined, None);
+
+        assert_eq!(list(&c, "hello", 10, 0).unwrap().len(), 1);
+        assert_eq!(list(&c, "Second", 10, 0).unwrap().len(), 1); // matches refined text
+        assert_eq!(list(&c, "nope", 10, 0).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn prune_keeps_newest() {
+        let c = mem();
+        for i in 0..5 {
+            insert(&c, &format!("row {i}"), None).unwrap();
+        }
+        prune(&c, 2).unwrap();
+        let all = list(&c, "", 10, 0).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].raw, "row 4");
+        assert_eq!(all[1].raw, "row 3");
+    }
+
+    #[test]
+    fn stats_counts_words_refined_and_today() {
+        let c = mem();
+        insert(&c, "one two three", None).unwrap(); // 3 words
+        insert(&c, "four five", Some("Four, five.")).unwrap(); // 2 words, refined
+
+        let s = stats(&c, 14).unwrap();
+        assert_eq!(s.total, 2);
+        assert_eq!(s.refined, 1);
+        assert_eq!(s.words, 5);
+        assert_eq!(s.days.len(), 14);
+        // Rows inserted "now" land in the final (today) bucket.
+        assert_eq!(s.days.last().unwrap().count, 2);
+    }
 }

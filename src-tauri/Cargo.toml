@@ -5,6 +5,15 @@ description = "Voice tool: dictation, read-aloud TTS, KB-grounded generation"
 edition = "2021"
 rust-version = "1.77"
 
+# Targeted lints for AI-authored-code failure modes — not whole groups
+# (pedantic/nursery are mostly style noise). The pre-commit hook's `-D warnings`
+# turns these into commit-blocking errors.
+[lints.clippy]
+undocumented_unsafe_blocks = "warn" # every `unsafe` must justify its soundness
+todo = "warn"                       # no leftover stubs
+unimplemented = "warn"
+dbg_macro = "warn"                  # no debug-print cruft
+
 [lib]
 name = "murmur_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

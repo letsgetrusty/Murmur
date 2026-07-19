@@ -34,7 +34,9 @@ pub enum DictationCmd {
     /// `refine` = run the transcript through the LLM refiner before pasting
     /// (Fn+Ctrl). Plain dictation sets it false. Decided at release so Ctrl
     /// can be pressed before or after Fn.
-    Stop { refine: bool },
+    Stop {
+        refine: bool,
+    },
     /// User pressed Esc — drop the in-flight recorder and don't transcribe.
     Cancel,
 }
@@ -79,8 +81,12 @@ pub enum OverlayState {
     Transcribing,
     /// Fn+Ctrl only: the transcript is being cleaned up by the LLM.
     Refining,
-    Done { chars: usize },
-    Error { message: String },
+    Done {
+        chars: usize,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Tee log output to both stderr and a file. When the app is launched as a
@@ -162,7 +168,6 @@ pub fn run() {
             commands::open_url,
         ])
         .setup(move |app| {
-
             // Shared live config: the refiner reads it on each refine and the
             // settings window edits it via IPC, so changes apply without a restart.
             let config_state = Arc::new(Mutex::new(cfg.clone()));
@@ -504,16 +509,20 @@ fn idle_after<R: Runtime>(app: AppHandle<R>, delay: Duration) {
 /// Build the tray menu. Returns the assembled menu plus parallel vectors of
 /// the speed, voice, and microphone `CheckMenuItem`s so the click handler can
 /// toggle their checked state when the user picks one.
-fn build_tray_menu(
-    app: &AppHandle<Wry>,
-    cfg: &config::Config,
-    mic_names: &[String],
-) -> tauri::Result<(
+/// The tray menu plus its checkable items, in `(menu, speed, voice, mic)` order,
+/// so callers can flip the checkmarks when the user changes a setting.
+type TrayMenu = (
     Menu<Wry>,
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
-)> {
+);
+
+fn build_tray_menu(
+    app: &AppHandle<Wry>,
+    cfg: &config::Config,
+    mic_names: &[String],
+) -> tauri::Result<TrayMenu> {
     let open_main = MenuItem::with_id(app, "open_main", "Open Murmur…", true, None::<&str>)?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
@@ -529,8 +538,10 @@ fn build_tray_menu(
             CheckMenuItem::with_id(app, id, label, true, checked, None::<&str>)
         })
         .collect::<tauri::Result<Vec<_>>>()?;
-    let speed_refs: Vec<&dyn IsMenuItem<Wry>> =
-        speed_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let speed_refs: Vec<&dyn IsMenuItem<Wry>> = speed_items
+        .iter()
+        .map(|i| i as &dyn IsMenuItem<Wry>)
+        .collect();
     let speed_menu = Submenu::with_id_and_items(app, "speed", "Speed", true, &speed_refs)?;
 
     // Voice submenu — same treatment.
@@ -542,8 +553,10 @@ fn build_tray_menu(
             CheckMenuItem::with_id(app, item_id, *name, true, checked, None::<&str>)
         })
         .collect::<tauri::Result<Vec<_>>>()?;
-    let voice_refs: Vec<&dyn IsMenuItem<Wry>> =
-        voice_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let voice_refs: Vec<&dyn IsMenuItem<Wry>> = voice_items
+        .iter()
+        .map(|i| i as &dyn IsMenuItem<Wry>)
+        .collect();
     let voice_menu = Submenu::with_id_and_items(app, "voice", "Voice", true, &voice_refs)?;
 
     // Microphone submenu — first entry is the system default, rest are
@@ -569,8 +582,10 @@ fn build_tray_menu(
             None::<&str>,
         )?);
     }
-    let mic_refs: Vec<&dyn IsMenuItem<Wry>> =
-        mic_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let mic_refs: Vec<&dyn IsMenuItem<Wry>> = mic_items
+        .iter()
+        .map(|i| i as &dyn IsMenuItem<Wry>)
+        .collect();
     let mic_menu = Submenu::with_id_and_items(app, "mic", "Microphone", true, &mic_refs)?;
 
     let sep1 = PredefinedMenuItem::separator(app)?;

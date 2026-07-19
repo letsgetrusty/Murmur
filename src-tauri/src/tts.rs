@@ -76,10 +76,14 @@ pub const SPEEDS: &[f32] = &[1.0, 1.5, 2.0];
 /// SAFETY: the held pointer is only mutated under the mutex, and methods are
 /// only message-sent from the main thread (see module comment).
 struct SynthHolder(NonNull<AnyObject>);
+// SAFETY: the pointer is only accessed under `MacSpeaker`'s mutex and messaged
+// from the main thread, so moving the holder between threads can't race.
 unsafe impl Send for SynthHolder {}
 
 impl Drop for SynthHolder {
     fn drop(&mut self) {
+        // SAFETY: `self.0` is a live AVSpeechSynthesizer from `new`; `release`
+        // is a valid selector and is sent exactly once (on drop).
         unsafe {
             let _: () = msg_send![self.0.as_ptr(), release];
         }
@@ -108,10 +112,15 @@ impl Speaker for MacSpeaker {
     fn speak(&self, text: &str) {
         let mut g = self.synth.lock().expect("speaker mutex");
         if let Some(prev) = g.take() {
+            // SAFETY: `prev.0` is a live synth from `new`; `stopSpeakingAtBoundary:`
+            // takes an NSInteger, matching the `i64` argument.
             unsafe {
                 let _: () = msg_send![prev.0.as_ptr(), stopSpeakingAtBoundary: 0i64];
             }
         }
+        // SAFETY: every selector (`new`, `alloc`, `initWithString:`,
+        // `speakUtterance:`, `release`) exists on the messaged class/instance with
+        // the argument types used; `synth` is checked non-null before it's stored.
         unsafe {
             let synth: *mut AnyObject = msg_send![class!(AVSpeechSynthesizer), new];
             let nss = NSString::from_str(text);
@@ -128,6 +137,8 @@ impl Speaker for MacSpeaker {
     fn stop(&self) {
         let mut g = self.synth.lock().expect("speaker mutex");
         if let Some(prev) = g.take() {
+            // SAFETY: `prev.0` is a live synth from `new`; the argument type
+            // matches `stopSpeakingAtBoundary:`.
             unsafe {
                 let _: () = msg_send![prev.0.as_ptr(), stopSpeakingAtBoundary: 0i64];
             }
@@ -138,6 +149,8 @@ impl Speaker for MacSpeaker {
         let g = self.synth.lock().expect("speaker mutex");
         match g.as_ref() {
             None => false,
+            // SAFETY: `h.0` is a live synth held under the mutex; `isSpeaking`
+            // returns a BOOL.
             Some(h) => unsafe {
                 let speaking: bool = msg_send![h.0.as_ptr(), isSpeaking];
                 speaking
@@ -163,10 +176,15 @@ struct PlayerHolder {
     /// MP3 we wrote for this player; deleted on Drop so we don't leak temp files.
     temp_path: PathBuf,
 }
+// SAFETY: the AVPlayer pointer is only accessed under the player mutex, and
+// AVPlayer playback methods are thread-safe (the main-thread rule is AVPlayer
+// *UI* only).
 unsafe impl Send for PlayerHolder {}
 
 impl Drop for PlayerHolder {
     fn drop(&mut self) {
+        // SAFETY: `self.player` is a retained AVPlayer; `pause`/`release` are
+        // valid selectors and `release` balances the `retain` exactly once.
         unsafe {
             let _: () = msg_send![self.player.as_ptr(), pause];
             let _: () = msg_send![self.player.as_ptr(), release];
@@ -298,6 +316,9 @@ impl Speaker for ElevenLabsSpeaker {
             }
             log::info!("tts/11labs: AVPlayer rate={speed}");
 
+            // SAFETY: the NSURL/AVPlayer selectors and argument types match their
+            // ObjC signatures; `player` is null-checked before use and retained
+            // before being stored, and its item is null-checked before use.
             unsafe {
                 let path_str = NSString::from_str(temp_path.to_str().unwrap_or_default());
                 let nsurl: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: &*path_str];
@@ -350,6 +371,8 @@ impl Speaker for ElevenLabsSpeaker {
         match g.as_ref() {
             // Active but no player yet — still fetching audio.
             None => true,
+            // SAFETY: `h.player` is a live AVPlayer held under the mutex; `rate`
+            // returns a float.
             Some(h) => unsafe {
                 let rate: f32 = msg_send![h.player.as_ptr(), rate];
                 if rate != 0.0 {
@@ -367,7 +390,10 @@ impl Speaker for ElevenLabsSpeaker {
     fn cycle_speed(&self) -> f32 {
         let new_speed = {
             let g = self.speed.lock().expect("speed mutex");
-            let i = SPEEDS.iter().position(|s| (*s - *g).abs() < 1e-3).unwrap_or(0);
+            let i = SPEEDS
+                .iter()
+                .position(|s| (*s - *g).abs() < 1e-3)
+                .unwrap_or(0);
             SPEEDS[(i + 1) % SPEEDS.len()]
         };
         self.set_speed(new_speed);
@@ -380,6 +406,8 @@ impl Speaker for ElevenLabsSpeaker {
         // immediately, not on the next utterance.
         let g = self.player.lock().expect("player mutex");
         if let Some(h) = g.as_ref() {
+            // SAFETY: `h.player` is a live AVPlayer held under the mutex;
+            // `setRate:` takes a float.
             unsafe {
                 let _: () = msg_send![h.player.as_ptr(), setRate: speed];
             }

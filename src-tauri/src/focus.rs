@@ -71,6 +71,11 @@ unsafe fn copy_attr(el: AXUIElementRef, name: &str) -> Option<CFTypeRef> {
 /// there's no focused window (e.g. desktop/Finder has focus) or Accessibility
 /// declines to answer. The caller falls back to the cursor's screen.
 pub fn focused_window_center() -> Option<(f64, f64)> {
+    // SAFETY: the AX*/CFRelease functions are called with the signatures declared
+    // for the linked ApplicationServices/CoreFoundation frameworks; every
+    // +1-retained value from `copy_attr`/`AXUIElementCreateSystemWide` is released
+    // exactly once, and `AXValueGetValue` writes into correctly-typed CGPoint/
+    // CGSize locals for the requested value type.
     unsafe {
         let system = AXUIElementCreateSystemWide();
         if system.is_null() {
@@ -108,8 +113,7 @@ pub fn focused_window_center() -> Option<(f64, f64)> {
                 .unwrap_or(false);
             CFRelease(win);
 
-            (got_pos && got_size)
-                .then(|| (point.x + size.width / 2.0, point.y + size.height / 2.0))
+            (got_pos && got_size).then(|| (point.x + size.width / 2.0, point.y + size.height / 2.0))
         })();
         CFRelease(system);
         result

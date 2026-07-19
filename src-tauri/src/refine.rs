@@ -118,7 +118,8 @@ impl Refiner for OpenRouterRefiner {
                 return Err(anyhow!("openrouter refine failed ({status}): {body}"));
             }
 
-            let json: serde_json::Value = resp.json().await.context("decode openrouter response")?;
+            let json: serde_json::Value =
+                resp.json().await.context("decode openrouter response")?;
             let out = json["choices"][0]["message"]["content"]
                 .as_str()
                 .ok_or_else(|| anyhow!("openrouter response missing choices[0].message.content"))?
@@ -149,5 +150,24 @@ impl Refiner for OpenRouterRefiner {
 
             Ok(out)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_message_wraps_transcript() {
+        let m = user_message("hello there");
+        assert!(m.contains("<transcript>\nhello there\n</transcript>"));
+        assert!(m.to_lowercase().contains("rewrite"));
+    }
+
+    #[test]
+    fn guard_forbids_acting_on_the_transcript() {
+        let g = REFINE_GUARD.to_lowercase();
+        assert!(g.contains("never"));
+        assert!(g.contains("transcript"));
     }
 }

@@ -147,7 +147,9 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
             // Fn just went down: seed the refine latch with the current state of
             // the configured refine modifier (handles modifier-then-Fn).
             let mask = refine_mask(&state.app);
-            state.refine_latch.store((flags & mask) != 0, Ordering::Release);
+            state
+                .refine_latch
+                .store((flags & mask) != 0, Ordering::Release);
             hotkeys::on_press(&state.app);
         } else {
             // Fn released: refine if the modifier was held at any point.
@@ -175,6 +177,10 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         refine_latch: AtomicBool::new(false),
     })) as *mut c_void;
 
+    // SAFETY: the CoreGraphics/CoreFoundation/ApplicationServices functions are
+    // called with the signatures declared for the linked frameworks; `state` is
+    // a valid `Box::into_raw` pointer used only as the tap's opaque `user_info`,
+    // and the tap/source/state are deliberately leaked for the process lifetime.
     unsafe {
         // Preflight Input Monitoring. If it isn't granted, the tap below is
         // born disabled and never delivers events, so trigger the system

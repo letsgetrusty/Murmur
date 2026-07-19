@@ -124,7 +124,11 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, refine: bool) {
     log::info!("hotkey: release (refine={refine})");
     unregister_escape(app);
     emit_state(app, OverlayState::Transcribing);
-    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop { refine }) {
+    if let Err(e) = app
+        .state::<AppState>()
+        .tx
+        .send(DictationCmd::Stop { refine })
+    {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }
