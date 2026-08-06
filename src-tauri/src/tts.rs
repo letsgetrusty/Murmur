@@ -565,6 +565,63 @@ async fn download_to(url: &str, dst: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// One `AVQueuePlayer` for a whole read-aloud. Chunk WAVs are appended as items
+/// as they finish synthesizing, and the OS plays them back-to-back. Every temp
+/// WAV is deleted when the holder drops (stop, or the next read replacing it).
+struct KokoroQueue {
+    player: NonNull<AnyObject>,
+    temps: Vec<PathBuf>,
+}
+// SAFETY: the AVQueuePlayer pointer is only messaged under the player mutex, and
+// AVPlayer playback methods are thread-safe (the main-thread rule is UI only).
+unsafe impl Send for KokoroQueue {}
+
+impl Drop for KokoroQueue {
+    fn drop(&mut self) {
+        // SAFETY: `self.player` is a retained AVQueuePlayer; `pause`/`release` are
+        // valid selectors and `release` balances the `new` retain exactly once.
+        unsafe {
+            let _: () = msg_send![self.player.as_ptr(), pause];
+            let _: () = msg_send![self.player.as_ptr(), release];
+        }
+        for t in &self.temps {
+            let _ = std::fs::remove_file(t);
+        }
+    }
+}
+
+/// Create an empty, retained `AVQueuePlayer` (`new` = alloc/init, +1 owned).
+fn new_queue_player() -> Option<NonNull<AnyObject>> {
+    // SAFETY: `+new` returns a retained AVQueuePlayer or nil; we null-check it.
+    unsafe {
+        let player: *mut AnyObject = msg_send![class!(AVQueuePlayer), new];
+        NonNull::new(player)
+    }
+}
+
+/// Append the WAV at `temp` to the queue as a pitch-preserving item. Returns
+/// false if the item can't be created/inserted.
+///
+/// SAFETY: `player` must be a live AVQueuePlayer; the selectors/argument types
+/// match their ObjC signatures and the item is null-checked before use.
+unsafe fn enqueue_wav(player: *mut AnyObject, temp: &std::path::Path) -> bool {
+    let path_str = NSString::from_str(temp.to_str().unwrap_or_default());
+    let url: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: &*path_str];
+    let item: *mut AnyObject = msg_send![class!(AVPlayerItem), playerItemWithURL: url];
+    if item.is_null() {
+        return false;
+    }
+    let algo = NSString::from_str(PITCH_ALG);
+    let _: () = msg_send![item, setAudioTimePitchAlgorithm: &*algo];
+    let after: *mut AnyObject = std::ptr::null_mut();
+    let can: bool = msg_send![player, canInsertItem: item, afterItem: after];
+    if !can {
+        return false;
+    }
+    let _: () = msg_send![player, insertItem: item, afterItem: after];
+    true
+}
+
 pub struct KokoroSpeaker {
     model_path: PathBuf,
     voices_path: PathBuf,
@@ -572,11 +629,14 @@ pub struct KokoroSpeaker {
     tts: Arc<AsyncMutex<Option<Arc<KokoroTts>>>>,
     voice: Mutex<String>,
     speed: Mutex<f32>,
-    player: Arc<Mutex<Option<PlayerHolder>>>,
+    /// The queue player for the current read (all chunks play through this one).
+    player: Arc<Mutex<Option<KokoroQueue>>>,
     active: Arc<AtomicBool>,
     /// Read-aloud progress × 1000 (so it fits an integer atomic).
     progress: Arc<AtomicU64>,
-    counter: AtomicU64,
+    /// Bumped per `speak`; each read tags its work with its own value so a
+    /// finishing read only cleans up its own player, never a newer read's.
+    generation: Arc<AtomicU64>,
 }
 
 impl KokoroSpeaker {
@@ -590,42 +650,73 @@ impl KokoroSpeaker {
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicU64::new(0)),
-            counter: AtomicU64::new(0),
+            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 }
 
-/// Split read-aloud text into sentence-ish chunks so a long selection can start
-/// playing almost immediately. The FIRST chunk is kept short (and may break at a
-/// comma) so audio starts fast; later chunks are larger to keep prosody natural
-/// and cut per-chunk overhead.
+/// Split read-aloud text into chunks, breaking **only at natural pauses** so a
+/// chunk boundary (where playback can seam) never lands mid-phrase:
+/// - Primarily at sentence ends (`. ! ? ; :` or newline) past `MIN`, so each
+///   chunk is a whole sentence (a short sentence isn't glued onto the next —
+///   that short→long jump would stall at Kokoro's ~1× synth speed).
+/// - Only a sentence longer than `CAP` is broken further, and then at the last
+///   **comma** before the cap (a natural pause), falling back to the last word
+///   boundary if there's no comma. Most sentences stay whole.
 fn split_for_tts(text: &str) -> Vec<String> {
     let text = text.trim();
+    const MIN: usize = 16; // keep tiny fragments merged into the next clause
+    const CAP: usize = 220; // only a long sentence is broken further, at a comma
     let mut chunks = Vec::new();
     let mut cur = String::new();
+    let mut last_comma = 0usize; // byte index just past the most recent comma
+    let mut last_space = 0usize; // byte index just past the most recent space
     for ch in text.chars() {
         cur.push(ch);
-        let first = chunks.is_empty();
-        let (min, cap) = if first { (12, 90) } else { (40, 240) };
-        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':') || (first && ch == ',');
-        // Flush at a boundary once past `min`, or hard-cap the length (byte len
-        // is a fine proxy for the char cap).
-        if (boundary && cur.trim_end().len() >= min) || cur.len() >= cap {
-            let t = cur.trim().to_string();
-            if !t.is_empty() {
-                chunks.push(t);
-            }
+        match ch {
+            ',' => last_comma = cur.len(),
+            ' ' => last_space = cur.len(),
+            _ => {}
+        }
+        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
+        if boundary && cur.trim_end().len() >= MIN {
+            push_chunk(&mut chunks, &cur);
             cur.clear();
+            last_comma = 0;
+            last_space = 0;
+        } else if cur.len() >= CAP {
+            // Too long with no sentence end: break at the last comma (natural
+            // pause), else the last word boundary — never mid-word.
+            let at = if last_comma > MIN {
+                last_comma
+            } else {
+                last_space
+            };
+            if at > MIN && at < cur.len() {
+                let carry = cur.split_off(at);
+                push_chunk(&mut chunks, &cur);
+                cur = carry;
+            } else {
+                push_chunk(&mut chunks, &cur);
+                cur.clear();
+            }
+            last_comma = 0;
+            last_space = 0;
         }
     }
-    let t = cur.trim().to_string();
-    if !t.is_empty() {
-        chunks.push(t);
-    }
+    push_chunk(&mut chunks, &cur);
     if chunks.is_empty() {
         chunks.push(text.to_string());
     }
     chunks
+}
+
+/// Push `s` (trimmed) onto `chunks` unless it's empty.
+fn push_chunk(chunks: &mut Vec<String>, s: &str) {
+    let t = s.trim();
+    if !t.is_empty() {
+        chunks.push(t.to_string());
+    }
 }
 
 /// Synthesize one chunk to a 16-bit WAV buffer; `None` on synth error.
@@ -644,13 +735,16 @@ impl Speaker for KokoroSpeaker {
         let text = text.to_string();
         let voice = Arc::new(self.voice.lock().expect("voice mutex").clone());
         let speed = *self.speed.lock().expect("speed mutex");
-        let n = self.counter.fetch_add(1, Ordering::Relaxed);
+        // This read's id; a newer speak bumps `generation` past it so we only
+        // clean up our own player.
+        let n = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         let model_path = self.model_path.clone();
         let voices_path = self.voices_path.clone();
         let tts_cell = self.tts.clone();
         let player_slot = self.player.clone();
         let active = self.active.clone();
         let progress = self.progress.clone();
+        let generation = self.generation.clone();
         // Mark active immediately so is_speaking() is true during synthesis.
         active.store(true, Ordering::Release);
         progress.store(0, Ordering::Release);
@@ -672,10 +766,6 @@ impl Speaker for KokoroSpeaker {
                 guard.as_ref().expect("just loaded").clone()
             };
 
-            // Stream sentence-by-sentence: play each chunk as it's ready, and
-            // synthesize the *next* chunk while the current one plays — so a long
-            // selection starts speaking in ~1s and the seams stay gap-free
-            // instead of waiting for the whole text to synthesize.
             let chunks = split_for_tts(&text);
             log::info!(
                 "tts/kokoro: reading {} chars in {} chunk(s) [voice {}]",
@@ -683,96 +773,196 @@ impl Speaker for KokoroSpeaker {
                 chunks.len(),
                 voice.as_str()
             );
-            // Char-weighted progress, smoothed within each chunk by elapsed
-            // playback time so the overlay fill moves continuously, not in jumps.
-            let total_chars = chunks
-                .iter()
-                .map(|c| c.chars().count())
-                .sum::<usize>()
-                .max(1) as f32;
-            let mut chars_before = 0f32;
-            let mut pending = synth_chunk_wav(&tts, &chunks[0], voice.as_str()).await;
 
-            for i in 0..chunks.len() {
+            // One AVQueuePlayer for the whole read: chunks are appended as items
+            // as they finish synthesizing and play back-to-back.
+            let qp = match new_queue_player() {
+                Some(p) => p,
+                None => {
+                    log::warn!("tts/kokoro: AVQueuePlayer init failed");
+                    active.store(false, Ordering::Release);
+                    return;
+                }
+            };
+            *player_slot.lock().expect("player mutex") = Some(KokoroQueue {
+                player: qp,
+                temps: Vec::new(),
+            });
+
+            let chunk_chars: Arc<Vec<f32>> =
+                Arc::new(chunks.iter().map(|c| c.chars().count() as f32).collect());
+            let total_chars = chunk_chars.iter().sum::<f32>().max(1.0);
+            let durations: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+            let all_enqueued = Arc::new(AtomicBool::new(false));
+
+            // Progress + completion task: follow the queue's currentItem, advance
+            // char-weighted progress smoothed by elapsed playback time, and finish
+            // once every chunk is enqueued and the last item has played out.
+            let prog = {
+                let (active, progress, player_slot) =
+                    (active.clone(), progress.clone(), player_slot.clone());
+                let (durations, all_enqueued, chunk_chars) =
+                    (durations.clone(), all_enqueued.clone(), chunk_chars.clone());
+                tauri::async_runtime::spawn(async move {
+                    let mut last_item: usize = 0; // currentItem ptr as usize (0 = nil)
+                    let mut idx: usize = 0; // currently-playing chunk index
+                    let mut chars_before = 0f32;
+                    let mut item_start = std::time::Instant::now();
+                    let mut started = false;
+                    let mut drained_polls = 0u32;
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                        if !active.load(Ordering::Acquire) {
+                            break;
+                        }
+                        let cur = {
+                            let g = player_slot.lock().expect("player mutex");
+                            match g.as_ref() {
+                                Some(h) => {
+                                    // SAFETY: live AVQueuePlayer held under the mutex.
+                                    unsafe {
+                                        let c: *mut AnyObject =
+                                            msg_send![h.player.as_ptr(), currentItem];
+                                        c as usize
+                                    }
+                                }
+                                None => break,
+                            }
+                        };
+                        let enq = durations.lock().expect("dur mutex").len();
+                        if cur != 0 {
+                            drained_polls = 0;
+                            if cur != last_item {
+                                if started {
+                                    chars_before += chunk_chars.get(idx).copied().unwrap_or(0.0);
+                                    idx += 1;
+                                }
+                                last_item = cur;
+                                item_start = std::time::Instant::now();
+                                started = true;
+                            }
+                            let dur = durations
+                                .lock()
+                                .expect("dur mutex")
+                                .get(idx)
+                                .copied()
+                                .unwrap_or(0.0);
+                            let frac = if dur > 0.0 {
+                                (item_start.elapsed().as_secs_f32() * speed / dur).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let cur_chars = chunk_chars.get(idx).copied().unwrap_or(0.0);
+                            let p =
+                                ((chars_before + cur_chars * frac) / total_chars * 1000.0) as u64;
+                            progress.store(p.min(1000), Ordering::Release);
+                        } else if started && all_enqueued.load(Ordering::Acquire) {
+                            if idx + 1 >= enq {
+                                break;
+                            }
+                            drained_polls += 1;
+                            if drained_polls > 16 {
+                                break;
+                            }
+                        }
+                    }
+                    progress.store(1000, Ordering::Release);
+                    active.store(false, Ordering::Release);
+                })
+            };
+
+            // Synthesize each chunk (one at a time — the ONNX session is the
+            // bottleneck) and append it; playback of earlier chunks overlaps.
+            //
+            // Hold playback until this many seconds of audio are buffered. Because
+            // synthesis runs at ~1× real time, there's no headroom to build a lead
+            // *after* starting — so we build it up front, which absorbs uneven
+            // chunk sizes that would otherwise stall, at the cost of a later first
+            // word.
+            const PREBUFFER_SECS: f32 = 1.8;
+            let mut playing = false;
+            let mut buffered = 0f32;
+            let chunk_count = chunks.len();
+            for (i, chunk) in chunks.iter().enumerate() {
                 if !active.load(Ordering::Acquire) {
                     break;
                 }
-                let wav = match pending.take() {
+                let wav = match synth_chunk_wav(&tts, chunk, voice.as_str()).await {
                     Some(w) => w,
-                    None => break, // synth failed
+                    None => break,
                 };
-                let chunk_chars = chunks[i].chars().count() as f32;
-                // Audio seconds for this chunk (24 kHz, 16-bit mono → 2 bytes/sample).
-                let chunk_secs =
-                    (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
-                // Kick off the next chunk's synthesis while this one plays.
-                let next_task = if i + 1 < chunks.len() {
-                    let (t, c, v) = (tts.clone(), chunks[i + 1].clone(), voice.clone());
-                    Some(tauri::async_runtime::spawn(async move {
-                        synth_chunk_wav(&t, &c, v.as_str()).await
-                    }))
-                } else {
-                    None
-                };
-
-                let temp = std::env::temp_dir().join(format!("murmur-kokoro-{n}-{i}.wav"));
-                if std::fs::write(&temp, &wav).is_err() {
-                    active.store(false, Ordering::Release);
+                if !active.load(Ordering::Acquire) {
                     break;
                 }
-                match spawn_avplayer(temp, speed) {
-                    Some(h) => *player_slot.lock().expect("player mutex") = Some(h),
-                    None => {
-                        active.store(false, Ordering::Release);
-                        break;
-                    }
+                let secs = (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
+                let temp = std::env::temp_dir().join(format!("murmur-kokoro-{n}-{i}.wav"));
+                if std::fs::write(&temp, &wav).is_err() {
+                    break;
                 }
-
-                // Play out this chunk, advancing progress by elapsed time (scaled
-                // by playback speed), until it ends or a stop() lands.
-                let started = std::time::Instant::now();
-                loop {
-                    tokio::time::sleep(Duration::from_millis(80)).await;
-                    if !active.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let frac = if chunk_secs > 0.0 {
-                        (started.elapsed().as_secs_f32() * speed / chunk_secs).clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    };
-                    let p = ((chars_before + chunk_chars * frac) / total_chars * 1000.0) as u64;
-                    progress.store(p.min(1000), Ordering::Release);
-
-                    let finished = {
-                        let g = player_slot.lock().expect("player mutex");
-                        match g.as_ref() {
-                            None => true,
-                            // SAFETY: live AVPlayer held under the mutex; `rate`
-                            // returns a float (0.0 once the clip ends).
-                            Some(h) => unsafe {
-                                let rate: f32 = msg_send![h.player.as_ptr(), rate];
-                                rate == 0.0
-                            },
+                let ok = {
+                    let mut g = player_slot.lock().expect("player mutex");
+                    match g.as_mut() {
+                        Some(h) => {
+                            // SAFETY: live AVQueuePlayer; enqueue + rate control.
+                            let ok = unsafe { enqueue_wav(h.player.as_ptr(), &temp) };
+                            if ok {
+                                h.temps.push(temp.clone());
+                                durations.lock().expect("dur mutex").push(secs);
+                                buffered += secs;
+                                // SAFETY: live AVQueuePlayer held under the mutex.
+                                unsafe {
+                                    let rate: f32 = msg_send![h.player.as_ptr(), rate];
+                                    if !playing {
+                                        if buffered >= PREBUFFER_SECS || i + 1 == chunk_count {
+                                            let _: () =
+                                                msg_send![h.player.as_ptr(), setRate: speed];
+                                            playing = true;
+                                        }
+                                    } else if rate == 0.0 {
+                                        // Queue drained mid-read (synth fell behind) → resume.
+                                        let _: () = msg_send![h.player.as_ptr(), setRate: speed];
+                                    }
+                                }
+                            }
+                            ok
                         }
-                    };
-                    if finished {
-                        break;
+                        None => false, // stopped
                     }
-                }
-
-                chars_before += chunk_chars;
-                progress.store(
-                    ((chars_before / total_chars * 1000.0) as u64).min(1000),
-                    Ordering::Release,
-                );
-
-                pending = match next_task {
-                    Some(t) => t.await.ok().flatten(),
-                    None => None,
                 };
+                if !ok {
+                    let _ = std::fs::remove_file(&temp);
+                    break;
+                }
             }
+            all_enqueued.store(true, Ordering::Release);
+            // If we buffered audio but never crossed the prebuffer threshold, start
+            // now. If nothing was enqueued (synth failed / stopped), clear `active`
+            // so the progress task ends instead of spinning.
+            if !playing {
+                let started_now = {
+                    let g = player_slot.lock().expect("player mutex");
+                    match g.as_ref() {
+                        Some(h) if !durations.lock().expect("dur mutex").is_empty() => {
+                            // SAFETY: live AVQueuePlayer held under the mutex.
+                            unsafe {
+                                let _: () = msg_send![h.player.as_ptr(), setRate: speed];
+                            }
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+                if !started_now {
+                    active.store(false, Ordering::Release);
+                }
+            }
+            // Wait for playback to finish (or stop()), then release our player and
+            // its temp files — unless a newer read already replaced it.
+            let _ = prog.await;
             active.store(false, Ordering::Release);
+            if generation.load(Ordering::Acquire) == n {
+                *player_slot.lock().expect("player mutex") = None;
+            }
         });
     }
 
@@ -813,7 +1003,7 @@ impl Speaker for KokoroSpeaker {
         *self.speed.lock().expect("speed mutex") = speed;
         let g = self.player.lock().expect("player mutex");
         if let Some(h) = g.as_ref() {
-            // SAFETY: `h.player` is a live AVPlayer held under the mutex;
+            // SAFETY: `h.player` is a live AVQueuePlayer held under the mutex;
             // `setRate:` takes a float.
             unsafe {
                 let _: () = msg_send![h.player.as_ptr(), setRate: speed];
