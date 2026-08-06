@@ -34,10 +34,20 @@ async function loadConfig() {
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("llm-provider").value = currentConfig.llm_provider ?? "local";
+    applyLlmProviderVisibility();
     el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
+}
+
+// The OpenRouter model pickers (refine + macro) only apply when the LLM runs in
+// the cloud. Hide them in the default on-device config so they don't read as
+// live settings; reveal them when the provider is OpenRouter.
+function applyLlmProviderVisibility() {
+  const cloud = el("llm-provider").value === "openrouter";
+  el("refine-model-field").hidden = !cloud;
+  el("macro-model-card").hidden = !cloud;
 }
 
 // Engine (STT/TTS) selections save immediately and prompt a relaunch, since the
@@ -854,6 +864,7 @@ async function init() {
   for (const id of ["stt-provider", "stt-model", "tts-provider", "llm-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
+  el("llm-provider").addEventListener("change", applyLlmProviderVisibility);
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
   el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {

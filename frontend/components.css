@@ -5,6 +5,12 @@
 
    Load order: tokens.css → components.css → <page>.css. */
 
+/* The `hidden` attribute must always win, even over components that set their
+   own `display` (e.g. `.field { display: block }`). */
+[hidden] {
+  display: none !important;
+}
+
 /* Text ------------------------------------------------------------------- */
 .hint {
   color: var(--text-dim);
