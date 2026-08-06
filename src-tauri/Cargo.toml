@@ -44,7 +44,10 @@ objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 # Phase B — dictation history (embedded, single-user)
 rusqlite = { version = "0.32", features = ["bundled"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
-kokoro-en = "0.1.5"
+# default-features disabled to drop the `g2p-espeak` backend, which statically
+# links GPL-3.0 espeak-ng — incompatible with our MIT license. Kokoro falls back
+# to its dictionary-based (cmudict) grapheme-to-phoneme instead.
+kokoro-en = { version = "0.1.5", default-features = false }
 llama-cpp-2 = { version = "0.1.154", features = ["metal"] }
 
 [profile.release]

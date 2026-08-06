@@ -141,3 +141,14 @@ Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · AVFoundation 
 `kokoro-en` / `ort` (neural TTS) · `reqwest` (model downloads) · `enigo` +
 `arboard` (inject/selection) · `objc2*` (native macOS FFI) · `rusqlite` (history) ·
 `tokio` (async).
+
+---
+
+## License
+
+Open Wispr is free and open source under the [MIT License](LICENSE).
+
+- Third-party components and bundled/downloaded models are attributed in
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — all permissive licenses,
+  no copyleft code linked into the binary.
+- Privacy: everything runs on-device; see [`PRIVACY.md`](PRIVACY.md).

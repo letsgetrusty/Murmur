@@ -15,6 +15,9 @@ gotchas). When this file and the architecture doc disagree, ask.**
 - **Single-user tool.** No accounts, sync, multi-user, or telemetry. (Public
   distribution as a signed/notarized DMG is now in scope — see
   `docs/releasing.md` — but the app stays single-user and phone-home-free.)
+- **Free & open source under MIT** (`LICENSE`). Keep it MIT-clean: only pull in
+  permissively-licensed deps — no GPL/AGPL code statically linked into the
+  binary. Ask before adding anything copyleft.
 - **Fully on-device.** Everything runs locally — no cloud providers, API keys, or
   network calls except model downloads. Do not re-add cloud backends (Groq,
   OpenRouter, ElevenLabs) without asking.
@@ -27,8 +30,11 @@ gotchas). When this file and the architecture doc disagree, ask.**
 - STT: local `whisper-rs` (whisper.cpp, Metal). Model name in `stt_model`.
 - Inject/selection: `enigo` + `arboard`
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
-  **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) optional.
-  Selected by `tts_provider` in config. Both on-device.
+  **Kokoro** (`kokoro-en`: ONNX via `ort`, CoreML) optional. Selected by
+  `tts_provider` in config. Both on-device. **`kokoro-en` runs with
+  `default-features = false`** — its default `g2p-espeak` backend statically
+  links GPL-3.0 espeak-ng, incompatible with our MIT license; Kokoro uses its
+  cmudict G2P instead. Do not re-enable it (see `THIRD-PARTY-NOTICES.md`).
 - Refinement (Fn+Ctrl): local Qwen3 1.7B via `llama-cpp-2` (embedded
   llama.cpp, Metal).
 - `reqwest` is used only to download models from HuggingFace.
