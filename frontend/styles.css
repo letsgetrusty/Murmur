@@ -89,13 +89,13 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Recording — red dot that grows with the live audio level. The
+/* Recording — bright white dot that grows with the live audio level. The
    --audio-level custom property is updated by main.js from the
    "audio:level" Tauri event (~15 Hz). Falls back to the pulse animation
    when no level is reported. */
 .pill[data-state="recording"] .dot {
   background: var(--state-recording);
-  box-shadow: 0 0 10px rgba(255, 91, 91, 0.7);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.55);
   transform: scale(calc(1 + var(--audio-level, 0) * 1.4));
   transition: transform 60ms ease-out;
 }
@@ -105,28 +105,29 @@ body {
   inset: 0;
   border-radius: 50%;
   animation: pulse 1.4s ease-in-out infinite;
-  background: rgba(255, 91, 91, 0.5);
+  background: rgba(255, 255, 255, 0.4);
   z-index: -1;
 }
 
-/* Transcribing — pulsing cyan dot. */
+/* Transcribing — pulsing dot (mid-gray). */
 .pill[data-state="transcribing"] .dot {
   background: var(--state-transcribing);
-  box-shadow: 0 0 10px rgba(90, 200, 250, 0.7);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
   animation: pulse 0.7s ease-in-out infinite;
 }
 
-/* Refining (Fn+Ctrl) — pulsing violet dot to distinguish from transcribing. */
+/* Refining (Fn+Ctrl) — pulsing dot, brighter than transcribing; the label
+   text is what actually distinguishes the two states. */
 .pill[data-state="refining"] .dot {
   background: var(--state-refining);
-  box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
   animation: pulse 0.7s ease-in-out infinite;
 }
 
-/* Done — solid green. */
+/* Done — solid white. */
 .pill[data-state="done"] .dot {
   background: var(--state-done);
-  box-shadow: 0 0 8px rgba(52, 199, 89, 0.55);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
 }
 
 /* Error — solid amber/red, label tinted. */

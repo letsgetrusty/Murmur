@@ -95,7 +95,7 @@ body {
 .brand-mark {
   flex: 0 0 auto;
   color: var(--accent);
-  filter: drop-shadow(0 0 7px rgba(var(--accent-rgb), 0.6));
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.3));
 }
 
 nav {
