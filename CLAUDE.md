@@ -122,6 +122,12 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - Dependency audit (on demand, not in the hook): `./scripts/audit.sh` (RustSec).
 
 ## Conventions
+- **Changing the app icon:** the icon is compiled *into* the binary by
+  `generate_context!` (not just read from the bundle's `icon.icns` at runtime),
+  so after editing `src-tauri/icons/*` you must force a recompile —
+  `cargo clean -p openwispr && ./scripts/dev.sh` — or the old icon stays baked in
+  and no macOS icon-cache clearing will fix it. `tray.png` is a monochrome
+  template macOS tints itself; don't color it.
 - Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,
   `inject.rs`, `selection.rs`, `tts.rs`, `config.rs`).
 - Ask before adding any dependency not in the stack list above.
