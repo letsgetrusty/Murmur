@@ -10,6 +10,7 @@ mod hotkeys;
 mod inject;
 mod llm;
 mod local_llm;
+mod permissions;
 mod selection;
 mod stt;
 mod tts;
@@ -164,6 +165,11 @@ pub fn run() {
             commands::history_stats,
             commands::copy_text,
             commands::relaunch_app,
+            commands::onboarding_status,
+            commands::open_accessibility_settings,
+            commands::open_microphone_settings,
+            commands::request_microphone,
+            commands::finish_onboarding,
         ])
         .setup(move |app| {
             // Shared live config: the refiner reads it on each refine and the
@@ -174,11 +180,17 @@ pub fn run() {
             let transcriber: Arc<dyn stt::Transcriber> = {
                 log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
                 // Fetch the model in the background so the first dictation isn't
-                // blocked on a ~0.5 GB download.
+                // blocked on a ~0.5 GB download. Progress is emitted for the
+                // onboarding window's download bars.
                 let model = cfg.stt_model.clone();
+                let dl_app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = stt::ensure_local_model(&model).await {
+                    let emit = |downloaded, total| {
+                        emit_download_progress(&dl_app, "whisper", downloaded, total)
+                    };
+                    if let Err(e) = stt::ensure_local_model(&model, emit).await {
                         log::warn!("stt: local model prefetch failed: {e}");
+                        emit_download_error(&dl_app, "whisper");
                     }
                 });
                 Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
@@ -201,9 +213,14 @@ pub fn run() {
                 // Download the model in the background so the first refine isn't
                 // blocked on a ~1 GB fetch; it loads on first use.
                 let model = cfg.llm_model.clone();
+                let dl_app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = local_llm::ensure_local_llm(&model).await {
+                    let emit = |downloaded, total| {
+                        emit_download_progress(&dl_app, "llm", downloaded, total)
+                    };
+                    if let Err(e) = local_llm::ensure_local_llm(&model, emit).await {
                         log::warn!("llm: model prefetch failed: {e}");
+                        emit_download_error(&dl_app, "llm");
                     }
                 });
                 let engine = Arc::new(local_llm::LocalLlm::new(
@@ -304,6 +321,12 @@ pub fn run() {
             // the chord still works.
             fn_key::install(app.handle().clone())?;
 
+            // First run: walk the user through Accessibility, microphone, and
+            // the model downloads. Shown until they finish onboarding.
+            if !cfg.onboarding_done {
+                show_onboarding_window(app.handle());
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -353,6 +376,69 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         }
         Err(e) => log::warn!("failed to create settings window: {e}"),
     }
+}
+
+/// Show the first-run onboarding window, creating it if needed. Auto-shown at
+/// startup while `config.onboarding_done` is false, and re-openable from the
+/// tray. Built here (not in `tauri.conf.json`) like the settings window.
+pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("onboarding") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        return;
+    }
+    match WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
+        .title("Welcome to Open Wispr")
+        .inner_size(640.0, 620.0)
+        .resizable(false)
+        .center()
+        .build()
+    {
+        Ok(win) => {
+            let _ = win.set_focus();
+        }
+        Err(e) => log::warn!("failed to create onboarding window: {e}"),
+    }
+}
+
+/// Progress payload for the onboarding download bars. `total` is 0 when the
+/// server didn't send a Content-Length. `failed` marks a download that errored.
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    id: &'static str,
+    downloaded: u64,
+    total: u64,
+    failed: bool,
+}
+
+fn emit_download_progress<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &'static str,
+    downloaded: u64,
+    total: u64,
+) {
+    let _ = app.emit(
+        "model-download",
+        DownloadProgress {
+            id,
+            downloaded,
+            total,
+            failed: false,
+        },
+    );
+}
+
+fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
+    let _ = app.emit(
+        "model-download",
+        DownloadProgress {
+            id,
+            downloaded: 0,
+            total: 0,
+            failed: true,
+        },
+    );
 }
 
 pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {
@@ -578,6 +664,7 @@ fn build_tray_menu(
     mic_names: &[String],
 ) -> tauri::Result<TrayMenu> {
     let open_main = MenuItem::with_id(app, "open_main", "Settings…", true, None::<&str>)?;
+    let open_setup = MenuItem::with_id(app, "open_setup", "Setup…", true, None::<&str>)?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Open Wispr", true, None::<&str>)?;
@@ -651,6 +738,7 @@ fn build_tray_menu(
         app,
         &[
             &open_main as &dyn IsMenuItem<Wry>,
+            &open_setup,
             &sep0,
             &read,
             &stop_read,
@@ -669,6 +757,7 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
     let id = event.id.as_ref();
     match id {
         "open_main" => show_main_window(app),
+        "open_setup" => show_onboarding_window(app),
         "quit" => app.exit(0),
         "tts_read" => tts_toggle(app),
         "tts_stop" => {

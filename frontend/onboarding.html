@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to Open Wispr</title>
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./components.css" />
+    <link rel="stylesheet" href="./onboarding.css" />
+  </head>
+  <body>
+    <div class="ob">
+      <!-- Progress dots -->
+      <div class="ob-dots" id="ob-dots" aria-hidden="true"></div>
+
+      <!-- Step 0: Welcome -->
+      <section class="ob-step" data-step="0">
+        <div class="ob-body ob-center">
+          <svg class="ob-logo" viewBox="0 0 24 24" width="52" height="52" aria-hidden="true">
+            <g fill="currentColor">
+              <rect x="2.2" y="8.5" width="2.6" height="7" rx="1.3" />
+              <rect x="6.9" y="5.5" width="2.6" height="13" rx="1.3" />
+              <rect x="11.6" y="3" width="2.6" height="18" rx="1.3" />
+              <rect x="16.3" y="6.5" width="2.6" height="11" rx="1.3" />
+              <rect x="19.4" y="9" width="2.6" height="6" rx="1.3" />
+            </g>
+          </svg>
+          <h1>Welcome to Open Wispr</h1>
+          <p class="ob-lead">
+            Fast, native voice dictation and read-aloud for your Mac — with
+            one-key LLM cleanup of what you say.
+          </p>
+          <p class="ob-privacy">
+            <span class="ob-lock">🔒</span> Everything runs
+            <b>100% on your device</b>. No cloud, no accounts, no API keys —
+            your voice never leaves your Mac.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <span></span>
+          <button class="primary" data-next>Get started</button>
+        </footer>
+      </section>
+
+      <!-- Step 1: Permissions -->
+      <section class="ob-step" data-step="1" hidden>
+        <div class="ob-body">
+          <h1>Grant permissions</h1>
+          <p class="ob-lead">
+            Open Wispr needs two macOS permissions to hear you and type for you.
+          </p>
+
+          <div class="perm-row" id="perm-ax">
+            <div class="perm-icon" aria-hidden="true">⌨️</div>
+            <div class="perm-text">
+              <div class="perm-name">
+                Accessibility <span class="perm-badge" data-badge>Checking…</span>
+              </div>
+              <div class="hint">
+                Lets Open Wispr paste dictated text and use the <b>Fn</b> key to
+                start recording.
+              </div>
+            </div>
+            <button class="small-btn" data-open-ax>Open Settings</button>
+          </div>
+
+          <div class="perm-row" id="perm-mic">
+            <div class="perm-icon" aria-hidden="true">🎙️</div>
+            <div class="perm-text">
+              <div class="perm-name">
+                Microphone <span class="perm-badge" data-badge>Checking…</span>
+              </div>
+              <div class="hint">Lets Open Wispr capture your voice for dictation.</div>
+            </div>
+            <button class="small-btn" data-mic-action>Enable</button>
+          </div>
+
+          <p class="hint ob-note" id="ax-relaunch-note" hidden>
+            Accessibility was just granted — Open Wispr will relaunch at the end
+            of setup to activate the Fn key.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <button class="small-btn" data-back>Back</button>
+          <button class="primary" data-next>Continue</button>
+        </footer>
+      </section>
+
+      <!-- Step 2: Models -->
+      <section class="ob-step" data-step="2" hidden>
+        <div class="ob-body">
+          <h1>Downloading models</h1>
+          <p class="ob-lead">
+            The speech and refinement models download once, then run offline
+            forever. You can continue setup while they finish.
+          </p>
+
+          <div class="dl-row" id="dl-whisper">
+            <div class="dl-head">
+              <span class="dl-name">Speech-to-text · Whisper</span>
+              <span class="dl-pct" data-pct>—</span>
+            </div>
+            <div class="dl-track"><div class="dl-fill" data-fill></div></div>
+          </div>
+
+          <div class="dl-row" id="dl-llm">
+            <div class="dl-head">
+              <span class="dl-name">Refinement · Qwen3</span>
+              <span class="dl-pct" data-pct>—</span>
+            </div>
+            <div class="dl-track"><div class="dl-fill" data-fill></div></div>
+          </div>
+
+          <p class="hint ob-note">
+            Total ~1.5 GB. Downloads continue in the background if you move on.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <button class="small-btn" data-back>Back</button>
+          <button class="primary" data-next>Continue</button>
+        </footer>
+      </section>
+
+      <!-- Step 3: Done -->
+      <section class="ob-step" data-step="3" hidden>
+        <div class="ob-body">
+          <h1>You're all set</h1>
+          <p class="ob-lead">Here's how to use Open Wispr. It lives in your menu bar.</p>
+
+          <div class="key-list">
+            <div class="key-item">
+              <kbd>Fn</kbd>
+              <span>Hold to dictate — release to paste at your cursor.</span>
+            </div>
+            <div class="key-item">
+              <kbd>Fn</kbd><span class="key-plus">+</span><kbd>Ctrl</kbd>
+              <span>Hold to dictate <b>and</b> clean it up with the LLM.</span>
+            </div>
+            <div class="key-item">
+              <kbd>⌘</kbd><span class="key-plus">+</span><kbd>⇧</kbd
+              ><span class="key-plus">+</span><kbd>R</kbd>
+              <span>Read the selected text (or clipboard) aloud.</span>
+            </div>
+          </div>
+
+          <p class="hint ob-note">
+            Change any of this later from the menu-bar icon → Settings.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <button class="small-btn" data-back>Back</button>
+          <button class="primary" id="ob-finish">Finish</button>
+        </footer>
+      </section>
+    </div>
+
+    <script type="module" src="./onboarding.js"></script>
+  </body>
+</html>

@@ -16,10 +16,12 @@ export default defineConfig({
     emptyOutDir: true,
     target: "safari15",
     rollupOptions: {
-      // Multi-page: the frameless overlay pill and the main settings window.
+      // Multi-page: the frameless overlay pill, the main settings window, and
+      // the first-run onboarding window.
       input: {
         overlay: resolve(root, "index.html"),
         settings: resolve(root, "settings.html"),
+        onboarding: resolve(root, "onboarding.html"),
       },
     },
   },

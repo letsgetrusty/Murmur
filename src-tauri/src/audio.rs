@@ -48,6 +48,18 @@ pub fn list_input_devices() -> Vec<String> {
     }
 }
 
+/// Open the default input briefly to surface the macOS microphone-permission
+/// prompt — the TCC dialog appears on first mic access. Onboarding calls this so
+/// the user grants mic access up front instead of on their first dictation.
+/// Blocks ~400 ms; the captured audio is discarded. `Recorder`'s stream is
+/// `!Send`, so this must run to completion on one thread (no `.await` across it).
+pub fn probe_microphone() -> Result<()> {
+    let rec = Recorder::start(None, None)?;
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    drop(rec);
+    Ok(())
+}
+
 /// Callback invoked roughly 15–20 Hz with a 0..1 peak-normalised amplitude
 /// while capture is running. Hand-off so audio.rs stays Tauri-free.
 pub type LevelFn = Box<dyn Fn(f32) + Send + Sync + 'static>;

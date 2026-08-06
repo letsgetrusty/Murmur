@@ -139,6 +139,78 @@ pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(
     Ok(())
 }
 
+// --- Onboarding (first-run setup) --------------------------------------------
+
+/// Live permission + model-download state for the onboarding window to poll.
+#[derive(Serialize)]
+pub struct OnboardingStatus {
+    /// Accessibility grant — the one required permission.
+    accessibility: bool,
+    /// Microphone: mirrors AVAuthorizationStatus (0 notDetermined, 1 restricted,
+    /// 2 denied, 3 authorized).
+    microphone: i64,
+    /// Whether the default Whisper + refine models are already on disk.
+    whisper_ready: bool,
+    llm_ready: bool,
+}
+
+#[tauri::command]
+pub fn onboarding_status(state: State<AppState>) -> OnboardingStatus {
+    let (stt_model, llm_model) = state
+        .config
+        .lock()
+        .map(|c| (c.stt_model.clone(), c.llm_model.clone()))
+        .unwrap_or_default();
+    let whisper_ready = crate::stt::model_path(&stt_model)
+        .map(|p| p.exists())
+        .unwrap_or(false);
+    OnboardingStatus {
+        accessibility: crate::permissions::accessibility_granted(),
+        microphone: crate::permissions::microphone_status(),
+        whisper_ready,
+        llm_ready: crate::local_llm::assets_present(&llm_model),
+    }
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() {
+    crate::permissions::open_accessibility_settings();
+}
+
+#[tauri::command]
+pub fn open_microphone_settings() {
+    crate::permissions::open_microphone_settings();
+}
+
+/// Trigger the macOS microphone-permission prompt (via a brief capture) and
+/// return the resulting authorization status. Runs the capture on a blocking
+/// thread since the cpal stream is `!Send`.
+#[tauri::command]
+pub async fn request_microphone() -> i64 {
+    let _ = tauri::async_runtime::spawn_blocking(|| {
+        if let Err(e) = crate::audio::probe_microphone() {
+            log::warn!("onboarding: mic probe failed: {e}");
+        }
+    })
+    .await;
+    crate::permissions::microphone_status()
+}
+
+/// Mark onboarding complete and persist it. The caller (onboarding JS) then
+/// either relaunches — to activate the Fn tap once Accessibility is granted —
+/// or closes the window, so we don't tear the webview down mid-call here.
+#[tauri::command]
+pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
+    let snapshot = {
+        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
+        cfg.onboarding_done = true;
+        cfg.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    log::info!("onboarding: complete");
+    Ok(())
+}
+
 // --- History -----------------------------------------------------------------
 
 #[tauri::command]

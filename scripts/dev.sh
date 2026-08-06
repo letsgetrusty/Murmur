@@ -53,16 +53,12 @@ security find-certificate -c "$IDENTITY" >/dev/null 2>&1 \
 # but guard here so a bare `dev.sh` still works.
 [ -d node_modules ] || { say "Installing frontend deps (npm install)…"; npm install; }
 
-# 1. Vite dev server ---------------------------------------------------------
-if curl -s -o /dev/null "$VITE_URL" 2>/dev/null; then
-  say "Vite already up on 1420"
-else
-  say "Starting Vite (npm run dev)…"
-  # nohup + detached stdin so the dev server survives this script exiting.
-  nohup npm run dev >"$TARGET_DIR/vite.log" 2>&1 </dev/null &
-  until curl -s -o /dev/null "$VITE_URL" 2>/dev/null; do sleep 0.3; done
-  say "Vite up on 1420"
-fi
+# 1. Build the frontend ------------------------------------------------------
+# The built binary embeds ../dist (frontendDist) at compile time — it does NOT
+# read from the Vite dev server. So we must rebuild dist here, or frontend edits
+# silently won't ship. Cheap (~100 ms) and keeps the deployed app in sync.
+say "Building frontend (npm run build)…"
+npm run build >"$TARGET_DIR/vite-build.log" 2>&1 || die "frontend build failed — see $TARGET_DIR/vite-build.log"
 
 # 2. Build the debug binary --------------------------------------------------
 # --no-default-features matches what `tauri dev` passes.

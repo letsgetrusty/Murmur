@@ -58,6 +58,10 @@ pub struct Config {
     /// Local GGUF model name (in <app-support>/openwispr/models/<name>.gguf).
     #[serde(default = "default_llm_model")]
     pub llm_model: String,
+    /// Set once the user completes the first-run onboarding flow. While false,
+    /// the onboarding window is shown on launch.
+    #[serde(default)]
+    pub onboarding_done: bool,
 }
 
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
@@ -118,6 +122,7 @@ impl Default for Config {
             stt_model: default_stt_model(),
             tts_provider: default_tts_provider(),
             llm_model: default_llm_model(),
+            onboarding_done: false,
         }
     }
 }

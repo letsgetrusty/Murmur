@@ -65,7 +65,10 @@ Phases 0–3 shipped: Fn / chord dictation (on-device Whisper, `whisper-rs` with
 Metal) with clipboard-paste injection, Fn+Ctrl LLM refinement (local Qwen3),
 read-aloud TTS (native `AVSpeechSynthesizer` by default; read-aloud falls back to
 the clipboard when nothing is selected), a settings window (hotkeys, engines,
-mic/voice, local usage insights), and SQLite dictation history. The TTS backend is
+mic/voice, local usage insights), a first-run onboarding window (Accessibility +
+microphone grants and live model-download progress; gated on the
+`onboarding_done` config flag, re-openable from the tray "Setup…" item), and
+SQLite dictation history. The TTS backend is
 chosen via `tts_provider` in config; the local Whisper model (default `small.en`,
 name in `stt_model`) auto-downloads to `<app-support>/openwispr/models/` on first
 run (and via `setup.sh`). Read-aloud can also use local neural **Kokoro**
@@ -86,8 +89,11 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
   create + trust the `openwispr dev` signing cert, build, and fetch the local
   Whisper model. See the README "Getting Started".
-- Dev: `./scripts/dev.sh` — builds, signs (stable `openwispr dev` identity), wraps
-  in `OpenWispr.app`, launches via `open`. Use this, **not** `npm run tauri dev`:
+- Dev: `./scripts/dev.sh` — rebuilds the frontend (`npm run build`, since the
+  binary embeds `../dist` at compile time — a stale dist means frontend edits
+  silently don't ship), builds + signs the Rust binary (stable `openwispr dev`
+  identity), wraps in `OpenWispr.app`, launches via `open`. Use this, **not**
+  `npm run tauri dev`:
   bare `tauri dev` ad-hoc-signs a shell-launched binary, which breaks the Fn-key
   tap and TCC grant persistence on macOS. Open Wispr needs exactly ONE permission —
   **Accessibility** (it also authorizes the Fn CGEventTap; no Input Monitoring).

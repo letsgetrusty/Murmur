@@ -1,0 +1,252 @@
+/* First-run onboarding window. Reuses tokens.css + components.css (.primary,
+   .small-btn, .hint) so it matches the settings window; layout lives here. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.ob {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Progress dots ----------------------------------------------------------- */
+.ob-dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg) 0 var(--space-xs);
+}
+.ob-dots .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  transition: background var(--transition-fast), width var(--transition-fast);
+}
+.ob-dots .dot.active {
+  background: var(--accent);
+  width: 20px;
+}
+.ob-dots .dot.done {
+  background: var(--accent-soft-border);
+}
+
+/* Step layout ------------------------------------------------------------- */
+.ob-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ob-step[hidden] {
+  display: none;
+}
+
+.ob-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg) var(--space-2xl) var(--space-md);
+}
+.ob-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.ob-logo {
+  color: var(--accent);
+  margin-bottom: var(--space-md);
+}
+
+.ob h1 {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  margin: 0 0 var(--space-sm);
+  letter-spacing: -0.01em;
+}
+
+.ob-lead {
+  font-size: var(--fs-base);
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0 0 var(--space-lg);
+  max-width: 46ch;
+}
+
+.ob-privacy {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  max-width: 46ch;
+}
+.ob-lock {
+  margin-right: 4px;
+}
+
+.ob-note {
+  margin-top: var(--space-lg);
+}
+
+/* Footer nav -------------------------------------------------------------- */
+.ob-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg) var(--space-2xl);
+  border-top: 1px solid var(--border);
+}
+
+/* Permission rows --------------------------------------------------------- */
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--border);
+}
+.perm-row:first-of-type {
+  border-top: none;
+}
+.perm-icon {
+  font-size: 22px;
+  width: 34px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.perm-text {
+  flex: 1;
+  min-width: 0;
+}
+.perm-name {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: 2px;
+}
+.perm-row .hint {
+  margin: 0;
+}
+.perm-row .small-btn {
+  flex-shrink: 0;
+}
+
+.perm-badge {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.perm-badge.ok {
+  color: var(--ok);
+  border-color: rgba(52, 199, 89, 0.4);
+  background: rgba(52, 199, 89, 0.12);
+}
+.perm-badge.warn {
+  color: var(--error);
+  border-color: rgba(255, 105, 97, 0.4);
+  background: rgba(255, 105, 97, 0.1);
+}
+
+/* Download rows ----------------------------------------------------------- */
+.dl-row {
+  padding: var(--space-md) 0;
+}
+.dl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-sm);
+}
+.dl-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+.dl-pct {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.dl-track {
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.dl-fill {
+  height: 100%;
+  width: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.dl-fill.done {
+  background: var(--ok);
+}
+.dl-fill.failed {
+  background: var(--error);
+}
+
+/* Keyboard cheat sheet ---------------------------------------------------- */
+.key-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.key-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+.key-item > span:last-child {
+  margin-left: var(--space-sm);
+  color: var(--text-dim);
+  flex: 1;
+}
+.key-plus {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+kbd {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  min-width: 26px;
+  text-align: center;
+  padding: 3px 7px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-control);
+  color: var(--text);
+}

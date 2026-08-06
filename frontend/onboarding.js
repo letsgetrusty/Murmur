@@ -1,0 +1,209 @@
+// First-run onboarding. A small stepper that walks the user through
+// permissions and the one-time model downloads, then relaunches (if needed) so
+// the Fn tap picks up a freshly granted Accessibility permission.
+
+const invoke = window.__TAURI__?.core?.invoke;
+const listen = window.__TAURI__?.event?.listen;
+const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
+
+const STEPS = 4;
+let step = 0;
+
+// True once we observe Accessibility flip to granted while the app is running —
+// that grant only takes effect for the Fn tap after a relaunch.
+let accessibilityGranted = false;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const stepEl = (n) => $(`.ob-step[data-step="${n}"]`);
+
+// --- Stepper -----------------------------------------------------------------
+
+function buildDots() {
+  const host = $("#ob-dots");
+  for (let i = 0; i < STEPS; i++) {
+    const d = document.createElement("span");
+    d.className = "dot";
+    host.appendChild(d);
+  }
+}
+
+function renderDots() {
+  $$("#ob-dots .dot").forEach((d, i) => {
+    d.classList.toggle("active", i === step);
+    d.classList.toggle("done", i < step);
+  });
+}
+
+function goTo(n) {
+  step = Math.max(0, Math.min(STEPS - 1, n));
+  $$(".ob-step").forEach((s) => {
+    s.hidden = Number(s.dataset.step) !== step;
+  });
+  renderDots();
+}
+
+// --- Permissions -------------------------------------------------------------
+
+function setBadge(rowId, text, kind) {
+  const badge = $(`#${rowId} [data-badge]`);
+  if (!badge) return;
+  badge.textContent = text;
+  badge.className = `perm-badge${kind ? " " + kind : ""}`;
+}
+
+function renderPermissions(status) {
+  // Accessibility
+  if (status.accessibility) {
+    accessibilityGranted = true;
+    setBadge("perm-ax", "Granted", "ok");
+    $("#perm-ax [data-open-ax]").disabled = true;
+  } else {
+    setBadge("perm-ax", "Not granted", "warn");
+    $("#perm-ax [data-open-ax]").disabled = false;
+  }
+  // Relaunch note appears once we know a grant happened this session.
+  $("#ax-relaunch-note").hidden = !accessibilityGranted;
+
+  // Microphone: 0 notDetermined, 1 restricted, 2 denied, 3 authorized
+  const mic = status.microphone;
+  const micBtn = $("#perm-mic [data-mic-action]");
+  if (mic === 3) {
+    setBadge("perm-mic", "Granted", "ok");
+    micBtn.disabled = true;
+    micBtn.textContent = "Enabled";
+  } else if (mic === 2 || mic === 1) {
+    setBadge("perm-mic", "Denied", "warn");
+    micBtn.disabled = false;
+    micBtn.textContent = "Open Settings";
+    micBtn.dataset.mode = "settings";
+  } else {
+    setBadge("perm-mic", "Not set", "");
+    micBtn.disabled = false;
+    micBtn.textContent = "Enable";
+    micBtn.dataset.mode = "request";
+  }
+}
+
+async function refreshStatus() {
+  if (!invoke) return;
+  try {
+    const status = await invoke("onboarding_status");
+    renderPermissions(status);
+    // Seed the download bars for anything already on disk.
+    if (status.whisper_ready) markDownloadDone("whisper");
+    if (status.llm_ready) markDownloadDone("llm");
+  } catch (e) {
+    /* transient; polled again shortly */
+  }
+}
+
+// --- Model downloads ---------------------------------------------------------
+
+const DL_EL = { whisper: "dl-whisper", llm: "dl-llm" };
+const dlDone = { whisper: false, llm: false };
+
+function markDownloadDone(id) {
+  dlDone[id] = true;
+  const row = $(`#${DL_EL[id]}`);
+  if (!row) return;
+  const fill = $("[data-fill]", row);
+  fill.style.width = "100%";
+  fill.classList.add("done");
+  fill.classList.remove("failed");
+  $("[data-pct]", row).textContent = "Ready ✓";
+}
+
+function renderDownload({ id, downloaded, total, failed }) {
+  const row = $(`#${DL_EL[id]}`);
+  if (!row) return;
+  const fill = $("[data-fill]", row);
+  const pct = $("[data-pct]", row);
+  if (failed) {
+    fill.classList.add("failed");
+    pct.textContent = "Failed — retries on next launch";
+    return;
+  }
+  if (total > 0) {
+    const frac = Math.min(1, downloaded / total);
+    fill.style.width = `${(frac * 100).toFixed(1)}%`;
+    if (frac >= 1) {
+      markDownloadDone(id);
+    } else {
+      pct.textContent = `${(frac * 100).toFixed(0)}% · ${fmtMB(downloaded)} / ${fmtMB(total)}`;
+    }
+  } else {
+    // No Content-Length — show bytes pulled so far.
+    pct.textContent = fmtMB(downloaded);
+  }
+}
+
+function fmtMB(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
+}
+
+// --- Finish ------------------------------------------------------------------
+
+async function finish() {
+  const btn = $("#ob-finish");
+  btn.disabled = true;
+  try {
+    await invoke("finish_onboarding");
+  } catch (e) {
+    btn.disabled = false;
+    return;
+  }
+  // A grant made while running only reaches the Fn tap after a relaunch.
+  if (accessibilityGranted) {
+    await invoke("relaunch_app");
+  } else if (currentWindow) {
+    await currentWindow.close();
+  }
+}
+
+// --- Wiring ------------------------------------------------------------------
+
+function init() {
+  buildDots();
+  goTo(0);
+
+  $$("[data-next]").forEach((b) => b.addEventListener("click", () => goTo(step + 1)));
+  $$("[data-back]").forEach((b) => b.addEventListener("click", () => goTo(step - 1)));
+
+  $("[data-open-ax]").addEventListener("click", () => {
+    invoke?.("open_accessibility_settings");
+  });
+
+  $("[data-mic-action]").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.mode === "settings") {
+      invoke?.("open_microphone_settings");
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Waiting…";
+    try {
+      const status = await invoke("request_microphone");
+      renderPermissions({ accessibility: accessibilityGranted, microphone: status });
+    } catch (_) {
+      btn.disabled = false;
+      btn.textContent = "Enable";
+    }
+  });
+
+  $("#ob-finish").addEventListener("click", finish);
+
+  // Model-download progress from the backend's prefetch.
+  listen?.("model-download", (e) => renderDownload(e.payload));
+
+  // Permissions change in System Settings (outside the app), so poll.
+  refreshStatus();
+  setInterval(refreshStatus, 1500);
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}

@@ -39,7 +39,7 @@ pub fn assets_present(name: &str) -> bool {
 
 /// Download the GGUF model from Hugging Face (unsloth Qwen3 repo) if missing,
 /// via a `.part` temp + rename so the final file is always complete.
-pub async fn ensure_local_llm(name: &str) -> Result<PathBuf> {
+pub async fn ensure_local_llm(name: &str, on_progress: impl Fn(u64, u64)) -> Result<PathBuf> {
     let path = model_path(name)?;
     if path.exists() {
         return Ok(path);
@@ -58,14 +58,23 @@ pub async fn ensure_local_llm(name: &str) -> Result<PathBuf> {
             resp.status()
         ));
     }
+    let total = resp.content_length().unwrap_or(0);
     let part = path.with_extension("part");
     let mut file = std::fs::File::create(&part).context("create llm .part")?;
+    let mut written: u64 = 0;
+    let mut last_emit: u64 = 0;
     while let Some(chunk) = resp.chunk().await.context("read llm chunk")? {
         file.write_all(&chunk).context("write llm chunk")?;
+        written += chunk.len() as u64;
+        if written - last_emit >= 1_000_000 {
+            on_progress(written, total);
+            last_emit = written;
+        }
     }
     file.flush().ok();
     drop(file);
     std::fs::rename(&part, &path).context("finalize llm model")?;
+    on_progress(written, total.max(written));
     log::info!("llm: local model '{name}' ready");
     Ok(path)
 }
