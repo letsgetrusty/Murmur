@@ -1,8 +1,8 @@
 # Voice Tool — Architecture & v1 Build Order
 
 A macOS-only, Tauri v2 desktop app that combines dictation (Wispr Flow–style)
-and read-aloud TTS (Speechify-style), with on-device LLM refinement and voice
-macros over your speech. Built in Rust as a daily-driver tool and a Rust-business
+and read-aloud TTS (Speechify-style), with on-device LLM refinement over your
+dictation. Built in Rust as a daily-driver tool and a Rust-business
 content artifact.
 
 > Scope for v1: **personal use, macOS only.** Cross-platform and "sellable
@@ -20,8 +20,8 @@ content artifact.
 2. **Fork, don't rebuild the dictation core.** Start from an MIT-licensed Tauri
    dictation app (Handy is a clean base) to inherit permissions flow, the
    clipboard-paste injection, and the recording overlay. Spend net-new effort on
-   the parts that are actually yours: read-aloud TTS and the refine/macro layer.
-3. **Pluggable backends behind traits.** STT, TTS, and the refine/macro LLM
+   the parts that are actually yours: read-aloud TTS and the refinement layer.
+3. **Pluggable backends behind traits.** STT, TTS, and the refine LLM
    should each sit behind a trait so you can swap cloud ↔ local without touching
    call sites. v1 leans cloud for speed; local is a later upgrade.
 4. **The overlay is where "smooth" is won.** Latency, waveform feedback, instant
@@ -64,7 +64,7 @@ flowchart TD
 | Keystroke / paste | `enigo` + `arboard` | Clipboard-paste is the only reliably cross-app injection (works in Electron apps) |
 | TTS (v1) | `AVSpeechSynthesizer` via `objc2` FFI | Free, offline, decent voices |
 | TTS (upgrade) | ElevenLabs / OpenAI TTS via `reqwest` | Speechify-grade voices, paid |
-| Refine + macros LLM | local Qwen3 via `llama-cpp-2` (Metal); OpenRouter via `reqwest` optional | On-device by default |
+| Refine LLM | local Qwen3 via `llama-cpp-2` (Metal); OpenRouter via `reqwest` optional | On-device by default |
 | Secrets | `keyring` | API keys in macOS Keychain, never plaintext |
 | Async | `tokio` | API calls |
 | Native FFI | `objc2`, `objc2-foundation`, `objc2-app-kit` | AVSpeechSynthesizer, AX API |
@@ -82,9 +82,8 @@ src-tauri/src/
   inject.rs       // clipboard save → set → Cmd+V → restore (change-count watch)
   selection.rs    // Cmd+C → read clipboard → restore (reverse of inject)
   tts.rs          // trait Speaker { async fn speak(&self, text) -> AudioStream }
-  refine.rs       // trait Refiner (Fn+Ctrl LLM cleanup)
-  macros.rs       // trait MacroMatcher (voice → canned response)
-  local_llm.rs    // embedded llama.cpp (Qwen3) shared by refine + macros
+  llm.rs          // LlmChat seam + transform (Fn+Ctrl LLM cleanup)
+  local_llm.rs    // embedded llama.cpp (Qwen3) for the refine pass
   config.rs       // JSON config in app support dir
   secrets.rs      // keyring wrappers
 frontend/         // overlay (waveform, answer panel, TTS controls) + settings window
@@ -176,14 +175,13 @@ building anything else.
   voices.
 - **Done when:** highlight text anywhere, hit hotkey, hear it read with controls.
 
-### Phase 4 — Refinement + voice macros
+### Phase 4 — Refinement
 - Fn + modifier: dictate → LLM cleanup with a user prompt → paste refined text.
-- Macro chord: dictate → LLM classifies the phrase against the user's macros →
-  paste that macro's canned response (or nothing on no clear match).
-- Both run on a shared embedded local LLM (Qwen3 via llama.cpp) by default, with
+  Runs on a shared embedded local LLM (Qwen3 via llama.cpp) by default, with
   OpenRouter as an opt-in cloud backend behind the same trait.
-- **Done when:** Fn+Ctrl cleans up messy dictation in place, and a spoken phrase
-  pastes the right saved snippet.
+- **Done when:** Fn+Ctrl cleans up messy dictation in place.
+- (A voice-macros/commands feature was prototyped here and later removed to keep
+  the app focused.)
 
 ---
 
@@ -199,5 +197,5 @@ building anything else.
 The interesting, teachable Rust surface lives in: the `cpal` capture thread and
 ring buffer, the trait-based pluggable backends, `objc2` FFI to
 AVSpeechSynthesizer, the clipboard-restore race condition, and the embedded
-on-device LLM (llama.cpp) driving refine + macros. Each is a self-contained
+on-device LLM (llama.cpp) driving the refine pass. Each is a self-contained
 build-in-public post. The webview is *not* the story — lead with the Rust engine.

@@ -16,6 +16,11 @@ function setStatus(text, kind = "") {
   s.className = `status ${kind}`;
 }
 
+function markDirty() {
+  el("save").disabled = false;
+  setStatus("");
+}
+
 async function loadConfig() {
   if (!invoke) {
     setStatus("IPC unavailable", "error");
@@ -30,18 +35,17 @@ async function loadConfig() {
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("llm-provider").value = currentConfig.llm_provider ?? "local";
     applyLlmProviderVisibility();
+    el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
 }
 
-// The OpenRouter model pickers (refine + command) only apply when the LLM runs in
-// the cloud. Hide them in the default on-device config so they don't read as
-// live settings; reveal them when the provider is OpenRouter.
+// The OpenRouter refine model only applies when the LLM runs in the cloud. Hide
+// it in the default on-device config; reveal it when the provider is OpenRouter.
 function applyLlmProviderVisibility() {
   const cloud = el("llm-provider").value === "openrouter";
   el("refine-model-field").hidden = !cloud;
-  el("command-model-card").hidden = !cloud;
 }
 
 // Engine (STT/TTS) selections save immediately and prompt a relaunch, since the
@@ -61,6 +65,26 @@ async function saveEngines() {
     el("engine-relaunch").hidden = false;
   } catch (e) {
     setStatus(`Save failed: ${e}`, "error");
+  }
+}
+
+// Save the Refinement prompt/model (the only Save-based settings on this tab).
+async function save() {
+  if (!invoke || !currentConfig) return;
+  const next = {
+    ...currentConfig,
+    refine_prompt: el("refine-prompt").value,
+    refine_model: el("refine-model").value.trim(),
+  };
+  el("save").disabled = true;
+  setStatus("Saving…");
+  try {
+    await invoke("save_config", { config: next });
+    currentConfig = next;
+    setStatus("Saved ✓", "ok");
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+    el("save").disabled = false;
   }
 }
 
@@ -116,13 +140,11 @@ const HOTKEY_FIELD = {
   dictate: "hotkey_dictate",
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
-  command: "hotkey_command",
 };
 const HOTKEY_LABEL = {
   dictate: "Dictation chord",
   tts_toggle: "Read aloud",
   tts_speed: "Cycle speed",
-  command: "Command chord",
 };
 
 function prettyShortcut(s) {
@@ -679,136 +701,6 @@ function initHistory() {
   });
 }
 
-// --- Commands -------------------------------------------------------------------
-// Edited in-memory as DOM rows, then round-tripped through save_config (same
-// whole-config save the rest of Settings uses). Kept stable across tab switches
-// so unsaved edits survive navigation — only rebuilt on load.
-
-function setCommandStatus(text, kind = "") {
-  const s = el("command-status");
-  s.textContent = text;
-  s.className = `status ${kind}`;
-}
-
-function markCommandsDirty() {
-  el("command-save").disabled = false;
-  setCommandStatus("");
-}
-
-function commandRow(m = { name: "", triggers: "", response: "" }) {
-  const row = document.createElement("div");
-  row.className = "command-row";
-
-  const head = document.createElement("div");
-  head.className = "command-head";
-  const name = document.createElement("input");
-  name.className = "command-name";
-  name.placeholder = "Name — e.g. Schedule call";
-  name.value = m.name ?? "";
-  const remove = document.createElement("button");
-  remove.className = "small-btn danger";
-  remove.textContent = "Remove";
-  remove.addEventListener("click", () => {
-    row.remove();
-    markCommandsDirty();
-  });
-  head.append(name, remove);
-
-  const triggers = document.createElement("input");
-  triggers.className = "command-triggers";
-  triggers.placeholder = "Example phrases (optional) — e.g. book a call, send my calendly";
-  triggers.value = m.triggers ?? "";
-
-  const response = document.createElement("textarea");
-  response.className = "command-response";
-  response.rows = 3;
-  response.spellcheck = false;
-  response.placeholder = "Text to paste — e.g. https://calendly.com/you/30min";
-  response.value = m.response ?? "";
-
-  for (const inp of [name, triggers, response]) inp.addEventListener("input", markCommandsDirty);
-
-  row.append(head, triggers, response);
-  return row;
-}
-
-function renderCommands() {
-  const list = el("command-list");
-  list.innerHTML = "";
-  // Only Paste commands are edited here (refinement is the pinned card above).
-  const paste = (currentConfig?.commands ?? []).filter((c) => c.action?.kind === "paste");
-  for (const c of paste) {
-    list.appendChild(commandRow({ name: c.name, triggers: c.triggers, response: c.action?.response ?? "" }));
-  }
-}
-
-// Read the command rows back out of the DOM. Fully-empty rows are dropped.
-function collectCommands() {
-  const rows = [];
-  for (const r of el("command-list").querySelectorAll(".command-row")) {
-    const name = r.querySelector(".command-name").value.trim();
-    const triggers = r.querySelector(".command-triggers").value.trim();
-    const response = r.querySelector(".command-response").value;
-    if (!name && !triggers && !response.trim()) continue;
-    rows.push({ name, triggers, response });
-  }
-  return rows;
-}
-
-async function saveCommands() {
-  if (!invoke || !currentConfig) return;
-  const rows = collectCommands();
-  for (const m of rows) {
-    if (!m.name || !m.response.trim()) {
-      setCommandStatus("Each command needs a name and a response.", "error");
-      return;
-    }
-  }
-  // Preserve any non-Paste commands the UI doesn't edit; rebuild the Paste ones
-  // from the rows. Refinement (prompt + model) saves together with the tab.
-  const others = (currentConfig.commands ?? []).filter((c) => c.action?.kind !== "paste");
-  const commands = [
-    ...others,
-    ...rows.map((m) => ({
-      name: m.name,
-      triggers: m.triggers,
-      action: { kind: "paste", response: m.response },
-    })),
-  ];
-  const next = {
-    ...currentConfig,
-    commands,
-    command_model: el("command-model").value.trim(),
-    refine_prompt: el("refine-prompt").value,
-    refine_model: el("refine-model").value.trim(),
-  };
-  el("command-save").disabled = true;
-  setCommandStatus("Saving…");
-  try {
-    await invoke("save_config", { config: next });
-    currentConfig = next;
-    setCommandStatus("Saved ✓", "ok");
-  } catch (e) {
-    setCommandStatus(`Save failed: ${e}`, "error");
-    el("command-save").disabled = false;
-  }
-}
-
-function initCommands() {
-  el("command-model").value = currentConfig?.command_model ?? "";
-  renderCommands();
-  el("command-model").addEventListener("input", markCommandsDirty);
-  // Refinement lives on this tab now, so its edits mark the tab dirty and save
-  // with it.
-  el("refine-prompt").addEventListener("input", markCommandsDirty);
-  el("refine-model").addEventListener("input", markCommandsDirty);
-  el("command-add").addEventListener("click", () => {
-    el("command-list").appendChild(commandRow());
-    markCommandsDirty();
-  });
-  el("command-save").addEventListener("click", saveCommands);
-}
-
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -864,18 +756,19 @@ async function init() {
   }
   el("llm-provider").addEventListener("change", applyLlmProviderVisibility);
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
+  el("refine-prompt").addEventListener("input", markDirty);
+  el("refine-model").addEventListener("input", markDirty);
+  el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
-    if (e.metaKey && e.key === "s" && !recording) {
+    if (e.metaKey && e.key === "s" && !recording && !el("save").disabled) {
       e.preventDefault();
-      // Commands is the only tab with a manual Save.
-      if (!el("command-save").disabled) saveCommands();
+      save();
     }
   });
 
   await loadConfig();
   await loadOptions();
   initHotkeys();
-  initCommands();
   await loadKeys();
   initUsage();
   initHistory();

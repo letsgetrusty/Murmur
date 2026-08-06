@@ -14,7 +14,6 @@ pub enum HotkeyAction {
     Dictate,
     TtsToggle,
     TtsSpeed,
-    Command,
 }
 
 impl HotkeyAction {
@@ -23,7 +22,6 @@ impl HotkeyAction {
             "dictate" => Some(Self::Dictate),
             "tts_toggle" => Some(Self::TtsToggle),
             "tts_speed" => Some(Self::TtsSpeed),
-            "command" => Some(Self::Command),
             _ => None,
         }
     }
@@ -49,13 +47,6 @@ fn register_action<R: Runtime>(
                 ShortcutState::Released => on_release(app, DictationMode::Plain),
             },
         )?,
-        HotkeyAction::Command => gs.on_shortcut(
-            sc,
-            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
-                ShortcutState::Pressed => on_press(app),
-                ShortcutState::Released => on_release(app, DictationMode::Command),
-            },
-        )?,
         HotkeyAction::TtsToggle => gs.on_shortcut(
             sc,
             move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
@@ -76,14 +67,13 @@ fn register_action<R: Runtime>(
     Ok(())
 }
 
-/// Register all three chords from config. A bad user-supplied binding is logged
-/// and skipped rather than aborting the others.
+/// Register the chords from config. A bad user-supplied binding is logged and
+/// skipped rather than aborting the others.
 pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<()> {
     for (action, sc) in [
         (HotkeyAction::Dictate, &cfg.hotkey_dictate),
         (HotkeyAction::TtsToggle, &cfg.hotkey_tts),
         (HotkeyAction::TtsSpeed, &cfg.hotkey_tts_speed),
-        (HotkeyAction::Command, &cfg.hotkey_command),
     ] {
         if let Err(e) = register_action(app, action, sc) {
             log::warn!("hotkey: register '{sc}' failed: {e}");

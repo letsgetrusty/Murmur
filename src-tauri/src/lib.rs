@@ -30,16 +30,13 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 /// What to do with a committed recording. Decided at release (not press) so the
 /// refine modifier can be pressed before or after Fn, and so the same recorder
-/// lifecycle serves plain dictation, refined dictation, and voice commands.
+/// lifecycle serves plain and refined dictation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DictationMode {
     /// Paste the transcript verbatim.
     Plain,
     /// Run the transcript through the LLM refiner, then paste (Fn+Ctrl).
     Refine,
-    /// Classify the transcript into a command and paste its response (command
-    /// chord).
-    Command,
 }
 
 pub enum DictationCmd {
@@ -93,8 +90,6 @@ pub enum OverlayState {
     Transcribing,
     /// Fn+Ctrl only: the transcript is being cleaned up by the LLM.
     Refining,
-    /// Command chord only: the spoken phrase is being matched to a command.
-    Interpreting,
     /// Read-aloud in progress; `progress` is the fraction [0.0, 1.0] spoken,
     /// used to fill the overlay pill.
     Reading {
@@ -220,13 +215,10 @@ pub fn run() {
             // Dictation history database.
             let history_state = Arc::new(Mutex::new(history::open()));
 
-            // LLM backend for Fn+Ctrl refinement + command classification,
-            // selected by config. Default is a single embedded local model (Qwen3
-            // via llama.cpp) shared by both; "openrouter" uses the cloud (key read
-            // from Keychain lazily). Prompts/commands come from the shared config.
-            // One chat seam drives both refinement (transform) and voice commands
-            // (classify). "local" shares the embedded llama.cpp engine (loaded on
-            // first use); "openrouter" is the cloud backend (key read lazily).
+            // LLM backend for the Fn+Ctrl refine pass, selected by config.
+            // "local" is the embedded llama.cpp engine (Qwen3, loaded on first
+            // use); "openrouter" is the cloud backend (key read from Keychain
+            // lazily). The prompt/model come from the shared config.
             let chat: Arc<dyn llm::LlmChat> = if cfg.llm_provider == "local" {
                 if local_llm::assets_present(&cfg.llm_model) {
                     log::info!("llm: local backend (model '{}')", cfg.llm_model);
@@ -1021,13 +1013,7 @@ fn handle_recording<R: Runtime>(
                     text.chars().count(),
                     text
                 );
-                match mode {
-                    DictationMode::Command => run_command(&app, chat.as_ref(), &text).await,
-                    _ => {
-                        run_dictation(&app, chat.as_ref(), mode == DictationMode::Refine, text)
-                            .await
-                    }
-                }
+                run_dictation(&app, chat.as_ref(), mode == DictationMode::Refine, text).await
             }
             Err(e) => {
                 log::warn!("dictation: transcribe failed: {e}");
@@ -1108,79 +1094,6 @@ async fn run_dictation<R: Runtime>(
                     message: format!("paste failed: {e}"),
                 },
                 2500,
-            )
-        }
-    }
-}
-
-/// Command-chord mode: classify the transcript into one of the user's Paste
-/// commands and paste its response. When nothing matches (or none are
-/// configured) we paste nothing and surface it — pasting a wrong snippet would
-/// be worse than pasting nothing. Command runs are intentionally not recorded to
-/// dictation history (they're canned output, not dictation).
-async fn run_command<R: Runtime>(
-    app: &AppHandle<R>,
-    chat: &dyn llm::LlmChat,
-    transcript: &str,
-) -> (OverlayState, u64) {
-    let (commands, model) = match app.state::<AppState>().config.lock() {
-        Ok(c) => (c.commands.clone(), c.command_model.clone()),
-        Err(_) => (Vec::new(), String::new()),
-    };
-    // Only Paste commands take part in voice matching (Transform commands, like
-    // refinement, are triggered by their own chord, not classified).
-    let paste: Vec<&config::Command> = commands
-        .iter()
-        .filter(|c| matches!(c.action, config::Action::Paste { .. }))
-        .collect();
-    if paste.is_empty() {
-        log::info!("command: no voice commands configured");
-        return (
-            OverlayState::Error {
-                message: "no commands configured".into(),
-            },
-            2200,
-        );
-    }
-    emit_state(app, OverlayState::Interpreting);
-    match llm::classify(chat, &model, transcript, &paste).await {
-        Ok(Some(i)) => {
-            let cmd = paste[i];
-            let response = match &cmd.action {
-                config::Action::Paste { response } => response.clone(),
-                _ => unreachable!("only Paste commands are classified"),
-            };
-            let chars = response.chars().count();
-            log::info!("command: matched '{}' → pasting {} chars", cmd.name, chars);
-            match paste_on_main_thread(app, response).await {
-                Ok(()) => (OverlayState::Done { chars }, 800),
-                Err(e) => {
-                    log::warn!("command: paste failed: {e}");
-                    (
-                        OverlayState::Error {
-                            message: format!("paste failed: {e}"),
-                        },
-                        2500,
-                    )
-                }
-            }
-        }
-        Ok(None) => {
-            log::info!("command: no match for '{transcript}'");
-            (
-                OverlayState::Error {
-                    message: "no matching command".into(),
-                },
-                2000,
-            )
-        }
-        Err(e) => {
-            log::warn!("command: classify failed: {e}");
-            (
-                OverlayState::Error {
-                    message: format!("command failed: {e}"),
-                },
-                3000,
             )
         }
     }

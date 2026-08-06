@@ -123,13 +123,6 @@ body {
   animation: pulse 0.7s ease-in-out infinite;
 }
 
-/* Interpreting (command chord) — reuses the violet refining treatment. */
-.pill[data-state="interpreting"] .dot {
-  background: var(--state-refining);
-  box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
-  animation: pulse 0.7s ease-in-out infinite;
-}
-
 /* Done — solid green. */
 .pill[data-state="done"] .dot {
   background: var(--state-done);

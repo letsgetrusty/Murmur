@@ -1,7 +1,7 @@
 # CLAUDE.md — Voice Tool
 
 macOS desktop app (Tauri v2, Rust backend + webview) combining dictation and
-read-aloud TTS, with on-device LLM refinement and voice commands over your speech.
+read-aloud TTS, with on-device LLM refinement (Fn+Ctrl) over your dictation.
 Personal daily-driver tool; also a Rust-business content artifact.
 
 **Design notes live in `docs/voice-tool-architecture.md` (build order + macOS
@@ -25,7 +25,7 @@ gotchas). When this file and the architecture doc disagree, ask.**
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
   **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) and
   ElevenLabs (cloud, `reqwest`) optional. Selected by `tts_provider` in config.
-- Refinement (Fn+Ctrl) + Commands: local Qwen3 1.7B via `llama-cpp-2` (embedded
+- Refinement (Fn+Ctrl): local Qwen3 1.7B via `llama-cpp-2` (embedded
   llama.cpp, Metal) — **default**; OpenRouter via `reqwest` optional (cloud).
   Selected by `llm_provider` in config.
 - Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
@@ -53,11 +53,11 @@ gotchas). When this file and the architecture doc disagree, ask.**
    empty audio silently and recording appears to work with a flat waveform.
 
 ## Backends behind traits
-STT, TTS, and the refine/command LLM each sit behind a trait; selection is via
-config. Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
+STT, TTS, and the refine LLM each sit behind a trait; selection is via config.
+Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
 `AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
-Refine + commands default to a shared embedded local LLM (Qwen3 via llama.cpp),
-OpenRouter optional. Don't hardcode a provider at a call site.
+Refine defaults to a shared embedded local LLM (Qwen3 via llama.cpp), OpenRouter
+optional. Don't hardcode a provider at a call site.
 
 ## Current status
 Phases 0–3 shipped: Fn / chord dictation (on-device Whisper by default, `whisper-rs`
@@ -71,22 +71,16 @@ cost), and SQLite dictation history. STT/TTS backends are chosen via
 `setup.sh`). Read-aloud can also use local neural **Kokoro** (`tts_provider =
 "kokoro"`): its ONNX model + voice packs auto-download to `…/models/` on first
 selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
-Refinement + voice commands are unified as one **Commands** concept: a command
-either *transforms* the transcript (refinement — the built-in Fn+Ctrl command) or
-*pastes* a canned response (`config::Action::{Transform,Paste}`). The command
-chord (default `Cmd+Shift+M`) records like dictation, then an LLM classifies the
-phrase against the user's Paste commands and pastes the match (or nothing on no
-clear match). Both operations run through one chat seam (`llm.rs`: `LlmChat`
-trait + `transform`/`classify`, `LocalChat`/`OpenRouterChat`). Managed in the
-Settings "Commands" tab; command runs are not recorded to dictation history. The
-three dictation paths share one recorder lifecycle via the `DictationMode` enum
-(Plain / Refine / Command). Old `{name,triggers,response}` macros auto-migrate to
-Paste commands on config load (and the old `hotkey_macro` / `macro_model` config
-keys are read via serde aliases). (Stage 2, not yet built: user-authored Transform
-commands with their own triggers.)
-The dictation / refine / read-aloud / commands feature set above is the full
-intended scope — no further phases are planned. Build order + macOS gotchas for
-the shipped work: `docs/voice-tool-architecture.md` §7.
+Refinement is a built-in feature: hold **Fn + Ctrl** (the modifier is configurable
+in Settings) while dictating and the transcript is cleaned up by the LLM using an
+editable prompt before it's pasted (falls back to the raw transcript if the LLM
+call fails). It runs through one chat seam (`llm.rs`: `LlmChat` trait +
+`transform`, `LocalChat`/`OpenRouterChat`). The two dictation paths share one
+recorder lifecycle via the `DictationMode` enum (Plain / Refine). A
+voice-macros/commands feature was prototyped and removed to keep the app focused.
+The dictation / refine / read-aloud feature set above is the full intended scope —
+no further phases are planned. Build order + macOS gotchas for the shipped work:
+`docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,

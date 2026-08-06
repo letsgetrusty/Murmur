@@ -1,14 +1,13 @@
-// Embedded local LLM (llama.cpp via `llama-cpp-2`) for the refine + command
-// passes, so both can run fully offline instead of calling OpenRouter. One
-// `LocalLlm` is shared by the refine + command passes in `llm.rs`; the GGUF model
-// is loaded lazily on first use and cached, and downloaded on first run like the
-// Whisper/Kokoro models.
+// Embedded local LLM (llama.cpp via `llama-cpp-2`) for the Fn+Ctrl refine pass,
+// so it can run fully offline instead of calling OpenRouter. Driven from `llm.rs`;
+// the GGUF model is loaded lazily on first use and cached, and downloaded on first
+// run like the Whisper/Kokoro models.
 //
 // Default model is Qwen3 1.7B (Q4_K_M) — small, fast, and strong at instruction
-// following, which is all "clean up this text" and "pick the matching command"
-// need. Qwen3 is a hybrid reasoning model: refine enables its reasoning pass
-// (`think = true`, or it just echoes the input), while command classification
-// skips it via a pre-filled empty <think></think> block for speed.
+// following, which is all "clean up this text" needs. Qwen3 is a hybrid reasoning
+// model: refine enables its reasoning pass (`think = true`, or it just echoes the
+// input); the no-think path (`think = false`) pre-fills an empty <think></think>
+// block for speed.
 
 use std::io::Write;
 use std::num::NonZeroU32;
@@ -24,8 +23,7 @@ use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 
 const REPO: &str = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main";
-/// Upper bound on generated tokens (refine output ≈ the input length; command
-/// classification output is a single number).
+/// Upper bound on generated tokens (refine output ≈ the input length).
 const MAX_TOKENS: i32 = 640;
 const N_CTX: u32 = 4096;
 
@@ -123,7 +121,7 @@ impl LocalLlm {
     /// CPU/GPU-bound and synchronous.
     ///
     /// `think` enables Qwen3's reasoning pass: editing tasks (refine) need it or
-    /// the model just echoes; classification (commands) is fine — and much faster —
+    /// the model just echoes; short pick-one tasks are fine — and much faster —
     /// without it.
     pub fn chat(&self, system: &str, user: &str, think: bool) -> Result<String> {
         let l = self.loaded()?;
@@ -230,15 +228,5 @@ mod tests {
             .unwrap();
         eprintln!("REFINE OUT: {refined:?}");
         assert!(!refined.is_empty() && !refined.contains("um so"));
-        // Command classification (pick a number) works fast without thinking.
-        let pick = llm
-            .chat(
-                "Reply with ONLY the number of the best-matching command, or 0 if none.",
-                "Spoken: \"schedule a call\"\nCommands:\n1. Schedule call\n2. Send address\nReply with the number.",
-                false,
-            )
-            .unwrap();
-        eprintln!("COMMAND PICK: {pick:?}");
-        assert!(pick.contains('1'));
     }
 }

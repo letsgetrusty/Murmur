@@ -6,7 +6,6 @@ const LABELS = {
   recording: "Recording…",
   transcribing: "Transcribing…",
   refining: "Refining…",
-  interpreting: "Interpreting…",
   reading: "Reading…",
 };
 
