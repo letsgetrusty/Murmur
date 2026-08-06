@@ -1,11 +1,11 @@
 # macOS signing & permissions (dev)
 
-How Murmur gets a stable **Accessibility** grant during development, and why the
+How Open Wispr gets a stable **Accessibility** grant during development, and why the
 dev workflow is `scripts/dev.sh` rather than plain `tauri dev`. This is
 macOS-specific plumbing; read it before touching the hotkey/injection paths or
 the dev launch flow.
 
-## TL;DR — Murmur needs exactly ONE permission: Accessibility
+## TL;DR — Open Wispr needs exactly ONE permission: Accessibility
 
 Both things that look like they need separate permissions are covered by the
 single **Accessibility** grant:
@@ -27,7 +27,7 @@ wasn't explicitly granted. That call records an explicit Input Monitoring
 coupling, so `IOHIDCheckAccess` then returns `denied` forever and the tap stays
 off. The fix: gate the tap on `AXIsProcessTrusted()` and **never call
 `IOHIDRequestAccess`**. If a stale denial is already recorded, clear it once:
-`tccutil reset ListenEvent dev.lgr.murmur`.
+`tccutil reset ListenEvent ai.openwispr.app`.
 
 ## Why grants didn't *stick* across rebuilds
 
@@ -37,7 +37,7 @@ Two macOS behaviors, both fixed by the setup below:
    `tauri.conf.json` only applies to `tauri build` bundles, so every `cargo`
    rebuild in dev produced an ad-hoc signature with a changing identity. TCC
    can't pin a grant to an ad-hoc identity across rebuilds. → Sign with the
-   stable `murmur dev` identity (below) and launch as a real `.app`.
+   stable `openwispr dev` identity (below) and launch as a real `.app`.
 
 2. **A self-signed cert that isn't *trusted* forces cdhash-based TCC matching.**
    Even correctly signed with a stable identity, an **untrusted** cert makes TCC
@@ -50,35 +50,35 @@ Two macOS behaviors, both fixed by the setup below:
 Note: the app is launched as a real **`.app` via `open`** (not a bare
 shell-launched binary) so it is its own TCC "responsible process". A bare binary
 launched from a terminal gets its grants attributed to the *terminal*, not
-Murmur.
+Open Wispr.
 
 ## The setup
 
 > **New machine?** `./scripts/setup.sh` automates §1 and §2 below (it creates the
-> `murmur dev` cert with `openssl` and trusts it via `sudo`). The manual steps
+> `openwispr dev` cert with `openssl` and trusts it via `sudo`). The manual steps
 > here are the explanation and the fallback if you'd rather do it by hand. Each
-> developer generates their *own* `murmur dev` cert on their own machine, so the
+> developer generates their *own* `openwispr dev` cert on their own machine, so the
 > specific `certificate leaf = H"…"` hash below is illustrative — yours will
 > differ, and that's fine: TCC matches per-machine on the identifier plus the
 > trusted cert.
 
-### 1. Stable signing identity: `murmur dev`
+### 1. Stable signing identity: `openwispr dev`
 
-A self-signed **Code Signing** certificate named `murmur dev` lives in the login
+A self-signed **Code Signing** certificate named `openwispr dev` lives in the login
 keychain (valid 2026–2036). It is *not* an Apple identity, so
 `security find-identity -v -p codesigning` reports "0 valid identities" — that's
-expected and fine; `codesign -s "murmur dev"` still works.
+expected and fine; `codesign -s "openwispr dev"` still works.
 
 Everything is signed with a **fixed identifier** so the designated requirement
 is constant across rebuilds:
 
 ```
-designated => identifier "dev.lgr.murmur" and certificate leaf = H"148a7574576813f28d7f08be80f4882ec9bfba87"
+designated => identifier "ai.openwispr.app" and certificate leaf = H"148a7574576813f28d7f08be80f4882ec9bfba87"
 ```
 
 **If the cert is ever lost**, recreate it via Keychain Access →
 *Certificate Assistant → Create a Certificate*:
-- Name: `murmur dev` · Identity Type: Self Signed Root · Certificate Type:
+- Name: `openwispr dev` · Identity Type: Self Signed Root · Certificate Type:
   **Code Signing**.
 
 Then re-trust it (below) and re-grant Accessibility once.
@@ -92,23 +92,23 @@ changes). Without `sudo` it fails with
 `SecCertificateAddToKeychain: Write permissions error`:
 
 ```bash
-security find-certificate -c "murmur dev" -p > /tmp/murmurdev.pem
+security find-certificate -c "openwispr dev" -p > /tmp/openwisprdev.pem
 sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-  -k /Library/Keychains/System.keychain /tmp/murmurdev.pem
+  -k /Library/Keychains/System.keychain /tmp/openwisprdev.pem
 ```
 
-Security note: this trusts *any* code signed by `murmur dev`. The private key is
+Security note: this trusts *any* code signed by `openwispr dev`. The private key is
 in your keychain and only you can sign with it, so on a personal machine the
 risk is low. Reverse with:
 
 ```bash
-sudo security remove-trusted-cert -d /tmp/murmurdev.pem
+sudo security remove-trusted-cert -d /tmp/openwisprdev.pem
 ```
 
 The clean alternative is a paid **Developer ID** cert (Apple-anchored, no
 self-trust needed) — unnecessary for a personal, locally-run tool. See the
 comparison in the project history; short version: don't bother unless you
-distribute Murmur to other Macs.
+distribute Open Wispr to other Macs.
 
 ### 3. Run via `scripts/dev.sh`, not `tauri dev`
 
@@ -116,12 +116,12 @@ distribute Murmur to other Macs.
 
 1. ensures the Vite dev server is up (frontend hot-reload still works),
 2. `cargo build` (incremental),
-3. wraps the **direct binary** in a signed **`Murmur.app`** (no launcher-script
+3. wraps the **direct binary** in a signed **`OpenWispr.app`** (no launcher-script
    indirection — that broke the TCC identity match),
-4. signs the bundle with `murmur dev` / `identifier dev.lgr.murmur`,
+4. signs the bundle with `openwispr dev` / `identifier ai.openwispr.app`,
 5. relaunches via `open` and confirms `Fn-key tap installed and enabled`.
 
-Logs: the app **tees its own logs** to `~/Library/Logs/murmur.log` (see the
+Logs: the app **tees its own logs** to `~/Library/Logs/openwispr.log` (see the
 `Tee` writer in `lib.rs`). This is why the bundle can be a clean direct binary —
 we don't need `open --stdout/--stderr` (which fails with `-10810` on a
 self-signed app because that flag takes a spawn path Gatekeeper rejects), and
@@ -129,7 +129,7 @@ env_logger's stderr does **not** reach the unified log for a bundled app.
 
 ```bash
 ./scripts/dev.sh                 # build, sign, wrap, launch
-tail -f ~/Library/Logs/murmur.log
+tail -f ~/Library/Logs/openwispr.log
 ```
 
 Editing the webview → instant (Vite). Editing Rust → re-run the script.
@@ -137,12 +137,12 @@ Editing the webview → instant (Vite). Editing Rust → re-run the script.
 ## Granting permissions (first time, or after recreating the cert)
 
 1. Run `./scripts/dev.sh`.
-2. System Settings → Privacy & Security → **Accessibility** → enable **Murmur**.
+2. System Settings → Privacy & Security → **Accessibility** → enable **Open Wispr**.
    (That's the *only* permission needed — do NOT touch Input Monitoring.)
 3. The first launch after the cert-trust change also pops a **Keychain** prompt
    to read the API keys (the new signature changed the binary hash). Click
    **Always Allow** so it doesn't recur on future rebuilds.
-4. Re-run `./scripts/dev.sh`. `~/Library/Logs/murmur.log` should show
+4. Re-run `./scripts/dev.sh`. `~/Library/Logs/openwispr.log` should show
    `Accessibility=true … InputMonitoring=0` and `Fn-key tap installed and enabled`.
 
 With the cert trusted, the Accessibility grant + Keychain "Always Allow" both
@@ -151,19 +151,19 @@ persist across rebuilds.
 ## Quick diagnostics
 
 ```bash
-# What identity is the running app signed with? (want Authority=murmur dev, not adhoc)
-codesign -dvvv src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur | grep -iE "Authority|adhoc|Identifier"
+# What identity is the running app signed with? (want Authority=openwispr dev, not adhoc)
+codesign -dvvv src-tauri/target/debug/OpenWispr.app/Contents/MacOS/openwispr | grep -iE "Authority|adhoc|Identifier"
 
 # Designated requirement (must be stable across rebuilds)
-codesign -d -r- src-tauri/target/debug/Murmur.app/Contents/MacOS/murmur | grep designated
+codesign -d -r- src-tauri/target/debug/OpenWispr.app/Contents/MacOS/openwispr | grep designated
 
 # Is the cert trusted for code signing?
-security dump-trust-settings -d 2>/dev/null | grep -iA2 murmur
+security dump-trust-settings -d 2>/dev/null | grep -iA2 openwispr
 
 # Real permission state is logged at startup:
-grep "Fn-key: Accessibility" ~/Library/Logs/murmur.log
+grep "Fn-key: Accessibility" ~/Library/Logs/openwispr.log
 
 # Clear a stuck/poisoned grant, then relaunch to re-evaluate
-tccutil reset Accessibility dev.lgr.murmur     # the one that matters
-tccutil reset ListenEvent dev.lgr.murmur       # clears any stale Input Monitoring denial
+tccutil reset Accessibility ai.openwispr.app     # the one that matters
+tccutil reset ListenEvent ai.openwispr.app       # clears any stale Input Monitoring denial
 ```

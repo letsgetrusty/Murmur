@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# setup.sh — one-command onboarding for a fresh clone of Murmur.
+# setup.sh — one-command onboarding for a fresh clone of Open Wispr.
 #
 # Gets a brand-new machine from `git clone` to "ready to run ./scripts/dev.sh":
 #   1. checks the toolchain (Xcode CLT, Rust, Node),
 #   2. installs frontend deps (npm install),
-#   3. creates the self-signed "murmur dev" Code Signing cert and trusts it
+#   3. creates the self-signed "openwispr dev" Code Signing cert and trusts it
 #      (the CLI equivalent of the Keychain Access flow in
 #      docs/macos-signing-and-permissions.md),
 #   4. builds the debug binary and optionally stores your API keys in Keychain.
@@ -21,9 +21,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-IDENTITY="murmur dev"
-BUNDLE_ID="dev.lgr.murmur"
-MURMUR_BIN="src-tauri/target/debug/murmur"
+IDENTITY="openwispr dev"
+BUNDLE_ID="ai.openwispr.app"
+OPENWISPR_BIN="src-tauri/target/debug/openwispr"
 
 say()  { printf '\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
@@ -35,7 +35,7 @@ ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; }
 
 # ── 1. Toolchain preflight ──────────────────────────────────────────────────
 say "Checking toolchain…"
-[ "$(uname)" = "Darwin" ] || die "Murmur is macOS only."
+[ "$(uname)" = "Darwin" ] || die "Open Wispr is macOS only."
 
 xcode-select -p >/dev/null 2>&1 \
   || die "Xcode Command Line Tools not found. Install them with:  xcode-select --install"
@@ -72,7 +72,7 @@ else
 fi
 
 # ── 3. Signing certificate ──────────────────────────────────────────────────
-# A stable, self-signed "murmur dev" identity keeps the TCC designated
+# A stable, self-signed "openwispr dev" identity keeps the TCC designated
 # requirement constant across rebuilds. See docs/macos-signing-and-permissions.md.
 if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
   ok "Signing cert '$IDENTITY' already in the login keychain"
@@ -88,7 +88,7 @@ distinguished_name = dn
 x509_extensions    = v3
 prompt             = no
 [ dn ]
-CN = murmur dev
+CN = openwispr dev
 [ v3 ]
 basicConstraints   = critical,CA:false
 keyUsage           = critical,digitalSignature
@@ -130,7 +130,7 @@ if security dump-trust-settings -d 2>/dev/null | grep -qi "$IDENTITY"; then
   ok "Cert already trusted for code signing"
 else
   say "Trusting the cert for code signing (needs sudo — writes a trusted root to the System keychain)…"
-  PEM="$(mktemp -t murmurdev)"
+  PEM="$(mktemp -t openwisprdev)"
   security find-certificate -c "$IDENTITY" -p > "$PEM"
   sudo security add-trusted-cert -d -r trustRoot -p codeSign \
     -k /Library/Keychains/System.keychain "$PEM"
@@ -139,7 +139,7 @@ else
 fi
 
 # ── 4. Build + API keys ─────────────────────────────────────────────────────
-say "Building the debug binary (so 'murmur set-key' is available)…"
+say "Building the debug binary (so 'openwispr set-key' is available)…"
 cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 ok "Build OK"
 
@@ -147,7 +147,7 @@ ok "Build OK"
 # Dictation defaults to on-device Whisper (whisper-rs). Fetch the default model
 # now so the first dictation works offline instead of waiting on the download.
 MODEL_NAME="small.en"
-MODELS_DIR="$HOME/Library/Application Support/murmur/models"
+MODELS_DIR="$HOME/Library/Application Support/openwispr/models"
 MODEL_FILE="$MODELS_DIR/ggml-$MODEL_NAME.bin"
 if [ -f "$MODEL_FILE" ]; then
   ok "Local Whisper model '$MODEL_NAME' already present"
@@ -160,7 +160,7 @@ else
     ok "Local Whisper model ready"
   else
     rm -f "$MODEL_FILE.part"
-    warn "Model download failed — Murmur will retry it on first launch."
+    warn "Model download failed — Open Wispr will retry it on first launch."
   fi
 fi
 
@@ -170,14 +170,14 @@ printf '   OpenRouter powers refined dictation + voice macros. Groq (cloud STT)\
 printf '   and ElevenLabs (cloud voice) are optional alternatives.\n'
 read -r -p "   Configure API keys now? [Y/n] " cfg
 case "$cfg" in
-  [nN]*) printf '   Skipped. Set later with:  %s set-key [groq|openrouter|elevenlabs]\n' "$MURMUR_BIN" ;;
+  [nN]*) printf '   Skipped. Set later with:  %s set-key [groq|openrouter|elevenlabs]\n' "$OPENWISPR_BIN" ;;
   *)
     for spec in "groq:Groq" "openrouter:OpenRouter" "elevenlabs:ElevenLabs"; do
       provider="${spec%%:*}"; label="${spec##*:}"
       read -r -p "   Set $label key now? [y/N] " yn
       case "$yn" in
-        [yY]*) "$MURMUR_BIN" set-key "$provider" || warn "set-key $provider did not complete." ;;
-        *)     printf '   Skipped — later:  %s set-key %s\n' "$MURMUR_BIN" "$provider" ;;
+        [yY]*) "$OPENWISPR_BIN" set-key "$provider" || warn "set-key $provider did not complete." ;;
+        *)     printf '   Skipped — later:  %s set-key %s\n' "$OPENWISPR_BIN" "$provider" ;;
       esac
     done
     ;;
@@ -189,6 +189,6 @@ ok "Setup complete."
 printf '\nNext:\n'
 printf '  1. Run:  \033[1m./scripts/dev.sh\033[0m\n'
 printf '  2. Grant Accessibility once: System Settings → Privacy & Security →\n'
-printf '     Accessibility → enable \033[1mMurmur\033[0m, then re-run ./scripts/dev.sh.\n'
+printf '     Accessibility → enable \033[1mOpen Wispr\033[0m, then re-run ./scripts/dev.sh.\n'
 printf '  3. Triggers: hold Fn to dictate · Cmd+Shift+R read-aloud.\n'
-printf '\nLogs: tail -f ~/Library/Logs/murmur.log\n'
+printf '\nLogs: tail -f ~/Library/Logs/openwispr.log\n'

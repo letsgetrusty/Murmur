@@ -16,7 +16,7 @@ pub struct UsageStats {
     pub completion_tokens: u64,
     pub total_tokens: u64,
     pub cost_usd: f64,
-    // Dictation (Groq) — no provider usage API, so tracked locally since Murmur
+    // Dictation (Groq) — no provider usage API, so tracked locally since Open Wispr
     // started counting. Cost is estimated in the UI from the audio duration.
     #[serde(default)]
     pub stt_count: u64,
@@ -51,7 +51,7 @@ impl UsageStats {
 
 fn path() -> Option<PathBuf> {
     let mut p = PathBuf::from(std::env::var_os("HOME")?);
-    p.push("Library/Application Support/murmur/usage.json");
+    p.push("Library/Application Support/openwispr/usage.json");
     Some(p)
 }
 

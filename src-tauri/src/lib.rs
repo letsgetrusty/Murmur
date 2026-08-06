@@ -123,10 +123,10 @@ impl std::io::Write for Tee {
     }
 }
 
-/// `~/Library/Logs/murmur.log`, truncated each launch so it stays readable.
+/// `~/Library/Logs/openwispr.log`, truncated each launch so it stays readable.
 fn open_log_file() -> Option<std::fs::File> {
     let mut path = std::path::PathBuf::from(std::env::var_os("HOME")?);
-    path.push("Library/Logs/murmur.log");
+    path.push("Library/Logs/openwispr.log");
     std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -144,11 +144,11 @@ pub fn run() {
     }
     builder.init();
 
-    // First-run setup: `murmur set-key` stores the Groq API key in Keychain.
+    // First-run setup: `openwispr set-key` stores the Groq API key in Keychain.
     // CLAUDE.md hard rule #6: secrets never live in config files or source.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("set-key") {
-        // `murmur set-key [groq|openrouter|elevenlabs]`; defaults to groq.
+        // `openwispr set-key [groq|openrouter|elevenlabs]`; defaults to groq.
         let which = args.get(2).map(String::as_str).unwrap_or("groq");
         return run_set_key(which);
     }
@@ -341,7 +341,7 @@ pub fn run() {
 
             // The main (settings/history) window is created lazily on first
             // open (tray item / dock reopen) and destroyed on close, so an
-            // idle Murmur carries no WebKit content process for a window the
+            // idle Open Wispr carries no WebKit content process for a window the
             // user may never open. See `show_main_window`.
 
             // Hotkey registration MUST happen on the main thread on macOS —
@@ -377,11 +377,11 @@ pub fn run() {
 }
 
 /// Show the main settings/history window, creating it if needed. Used by the
-/// dock-reopen handler and the tray "Open Murmur…" item.
+/// dock-reopen handler and the tray "Settings…" item.
 ///
 /// The window is not declared in `tauri.conf.json`; it's built here on first
 /// open and destroyed when the user closes it (Tauri's default), so an idle
-/// Murmur keeps no WebKit content process for a window that's rarely opened.
+/// Open Wispr keeps no WebKit content process for a window that's rarely opened.
 /// It self-populates from the backend on load (`settings.js` `init`), so a
 /// fresh instance needs no restored state.
 fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
@@ -392,7 +392,7 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     match WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
-        .title("Murmur")
+        .title("Open Wispr")
         .inner_size(900.0, 640.0)
         .min_inner_size(640.0, 460.0)
         .center()
@@ -627,10 +627,10 @@ fn build_tray_menu(
     cfg: &config::Config,
     mic_names: &[String],
 ) -> tauri::Result<TrayMenu> {
-    let open_main = MenuItem::with_id(app, "open_main", "Open Murmur…", true, None::<&str>)?;
+    let open_main = MenuItem::with_id(app, "open_main", "Settings…", true, None::<&str>)?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit murmur", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Open Wispr", true, None::<&str>)?;
 
     // Speed submenu — CheckMenuItems with the current selection pre-checked.
     let speed_items: Vec<CheckMenuItem<Wry>> = tts::SPEEDS

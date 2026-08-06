@@ -1,5 +1,5 @@
 [package]
-name = "murmur"
+name = "openwispr"
 version = "0.0.0"
 description = "Voice tool: dictation and read-aloud TTS with on-device refinement + macros"
 edition = "2021"
@@ -15,7 +15,7 @@ unimplemented = "warn"
 dbg_macro = "warn"                  # no debug-print cruft
 
 [lib]
-name = "murmur_lib"
+name = "openwispr_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

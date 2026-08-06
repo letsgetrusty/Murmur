@@ -2,7 +2,7 @@
 // every transition (recording → transcribing → done/error). We just paint it.
 
 const LABELS = {
-  idle: "murmur",
+  idle: "Open Wispr",
   recording: "Recording…",
   transcribing: "Transcribing…",
   refining: "Refining…",
@@ -36,7 +36,7 @@ function applyState(payload) {
       break;
     }
     default:
-      label.textContent = LABELS[kind] ?? "murmur";
+      label.textContent = LABELS[kind] ?? "Open Wispr";
   }
 }
 

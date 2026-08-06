@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 
-const SERVICE: &str = "murmur";
+const SERVICE: &str = "openwispr";
 
 pub const GROQ_API_KEY: &str = "groq_api_key";
 pub const ELEVENLABS_API_KEY: &str = "elevenlabs_api_key";

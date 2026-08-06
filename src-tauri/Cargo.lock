@@ -2684,33 +2684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "murmur"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "arboard",
- "cpal",
- "enigo",
- "env_logger",
- "keyring",
- "kokoro-en",
- "llama-cpp-2",
- "log",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tokio",
- "whisper-rs",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3177,6 +3150,33 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "openwispr"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "cpal",
+ "enigo",
+ "env_logger",
+ "keyring",
+ "kokoro-en",
+ "llama-cpp-2",
+ "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tokio",
+ "whisper-rs",
 ]
 
 [[package]]

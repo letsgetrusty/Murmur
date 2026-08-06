@@ -178,7 +178,9 @@ impl OpenRouterChat {
             return Ok(k.clone());
         }
         let k = secrets::get(secrets::OPENROUTER_API_KEY).map_err(|_| {
-            anyhow!("no OpenRouter API key in Keychain. Set one with:\n  murmur set-key openrouter")
+            anyhow!(
+                "no OpenRouter API key in Keychain. Set one with:\n  openwispr set-key openrouter"
+            )
         })?;
         *cached = Some(k.clone());
         Ok(k)
@@ -210,8 +212,8 @@ impl LlmChat for OpenRouterChat {
                 .post("https://openrouter.ai/api/v1/chat/completions")
                 .bearer_auth(api_key)
                 // Optional attribution headers (OpenRouter public rankings).
-                .header("HTTP-Referer", "https://github.com/local/murmur")
-                .header("X-Title", "murmur")
+                .header("HTTP-Referer", "https://github.com/local/openwispr")
+                .header("X-Title", "openwispr")
                 .json(&body)
                 .send()
                 .await

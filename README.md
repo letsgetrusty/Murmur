@@ -1,4 +1,4 @@
-# Murmur
+# Open Wispr
 
 A fast, native macOS voice tool: **dictation** and **read-aloud**, with
 on-device LLM refinement and voice commands over your speech. Built as
@@ -53,7 +53,7 @@ hardware event tap and is fixed.
 - **Toolchain**: Xcode Command Line Tools (`xcode-select --install`), Rust via
   [rustup](https://rustup.rs) (the pinned version installs automatically from
   `rust-toolchain.toml`), and Node 18+ (`.nvmrc` pins 22).
-- **Accessibility permission** — the one grant Murmur needs. It authorizes both
+- **Accessibility permission** — the one grant Open Wispr needs. It authorizes both
   paste-injection and the Fn-key event tap. Grant it under *System Settings →
   Privacy & Security → Accessibility*. See
   [`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md).
@@ -71,23 +71,23 @@ The repo is private — you'll need collaborator access to clone it.
 From a fresh clone, one script does the machine setup:
 
 ```sh
-git clone <repo-url> && cd murmur
+git clone <repo-url> && cd openwispr
 ./scripts/setup.sh      # toolchain check · npm install · create+trust the
-                        # 'murmur dev' signing cert · build · store API keys
-./scripts/dev.sh        # build, sign, wrap in Murmur.app, launch
+                        # 'openwispr dev' signing cert · build · store API keys
+./scripts/dev.sh        # build, sign, wrap in OpenWispr.app, launch
 ```
 
 `setup.sh` is idempotent and walks you through it. It handles everything that
 *can* be automated; two steps are yours to do once:
 
 1. **Grant Accessibility.** On the first `./scripts/dev.sh`, macOS won't have the
-   grant yet — enable **Murmur** under *System Settings → Privacy & Security →
+   grant yet — enable **Open Wispr** under *System Settings → Privacy & Security →
    Accessibility*, then re-run `./scripts/dev.sh`.
 2. **API keys.** `setup.sh` offers to store them; you just paste the values. The
    Groq key is required. To (re)set one later:
 
    ```sh
-   ./src-tauri/target/debug/murmur set-key groq        # or openrouter | elevenlabs
+   ./src-tauri/target/debug/openwispr set-key groq        # or openrouter | elevenlabs
    # ...or manage them in the settings window.
    ```
 
@@ -99,8 +99,8 @@ for the full story.
 ## Development
 
 ```sh
-./scripts/dev.sh        # build, sign (stable 'murmur dev' identity), wrap in
-                        # Murmur.app, and relaunch. Use this, NOT `tauri dev`.
+./scripts/dev.sh        # build, sign (stable 'openwispr dev' identity), wrap in
+                        # OpenWispr.app, and relaunch. Use this, NOT `tauri dev`.
 ```
 
 `./scripts/dev.sh` signs with a stable identity so the Accessibility grant
@@ -119,7 +119,7 @@ that touches Rust — bypass a WIP commit with `git commit --no-verify`. Check
 dependencies against the RustSec advisory database on demand with
 `./scripts/audit.sh` (it's intentionally not in the hook).
 
-Logs stream to `~/Library/Logs/murmur.log`.
+Logs stream to `~/Library/Logs/openwispr.log`.
 
 ---
 

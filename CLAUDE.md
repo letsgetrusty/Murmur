@@ -67,7 +67,7 @@ ElevenLabs optional; read-aloud falls back to the clipboard when nothing is
 selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
 cost), and SQLite dictation history. STT/TTS backends are chosen via
 `stt_provider`/`tts_provider` in config; the local Whisper model (default
-`small.en`) auto-downloads to `<app-support>/murmur/models/` on first run (and via
+`small.en`) auto-downloads to `<app-support>/openwispr/models/` on first run (and via
 `setup.sh`). Read-aloud can also use local neural **Kokoro** (`tts_provider =
 "kokoro"`): its ONNX model + voice packs auto-download to `…/models/` on first
 selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
@@ -90,14 +90,14 @@ the shipped work: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
-  create + trust the `murmur dev` signing cert, build, and store API keys. See the
+  create + trust the `openwispr dev` signing cert, build, and store API keys. See the
   README "Getting Started".
-- Dev: `./scripts/dev.sh` — builds, signs (stable `murmur dev` identity), wraps
-  in `Murmur.app`, launches via `open`. Use this, **not** `npm run tauri dev`:
+- Dev: `./scripts/dev.sh` — builds, signs (stable `openwispr dev` identity), wraps
+  in `OpenWispr.app`, launches via `open`. Use this, **not** `npm run tauri dev`:
   bare `tauri dev` ad-hoc-signs a shell-launched binary, which breaks the Fn-key
-  tap and TCC grant persistence on macOS. Murmur needs exactly ONE permission —
+  tap and TCC grant persistence on macOS. Open Wispr needs exactly ONE permission —
   **Accessibility** (it also authorizes the Fn CGEventTap; no Input Monitoring).
-  See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/murmur.log`.
+  See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/openwispr.log`.
 - Rust check (from `src-tauri/`): `cargo check`
 - Rust tests: `cargo test`
 - Release build: `npm run tauri build`

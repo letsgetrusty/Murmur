@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "murmur",
+  "productName": "OpenWispr",
   "version": "0.0.0",
-  "identifier": "dev.lgr.murmur",
+  "identifier": "ai.openwispr.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "overlay",
-        "title": "murmur",
+        "title": "Open Wispr",
         "url": "index.html",
         "width": 320,
         "height": 80,
@@ -39,7 +39,7 @@
       "iconPath": "icons/tray.png",
       "iconAsTemplate": true,
       "menuOnLeftClick": true,
-      "tooltip": "murmur"
+      "tooltip": "Open Wispr"
     }
   },
   "bundle": {
@@ -55,7 +55,7 @@
     "category": "Productivity",
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "murmur dev"
+      "signingIdentity": "openwispr dev"
     }
   }
 }

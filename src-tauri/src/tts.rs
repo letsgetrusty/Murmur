@@ -299,7 +299,7 @@ impl ElevenLabsSpeaker {
         }
         let k = secrets::get(secrets::ELEVENLABS_API_KEY).map_err(|_| {
             anyhow!(
-                "no ElevenLabs API key in Keychain. Set with:\n  security add-generic-password -A -s murmur -a elevenlabs_api_key -w"
+                "no ElevenLabs API key in Keychain. Set with:\n  security add-generic-password -A -s openwispr -a elevenlabs_api_key -w"
             )
         })?;
         *cached = Some(k.clone());
@@ -376,7 +376,7 @@ impl Speaker for ElevenLabsSpeaker {
                 }
             };
 
-            let temp_path = std::env::temp_dir().join(format!("murmur-tts-{n}.mp3"));
+            let temp_path = std::env::temp_dir().join(format!("openwispr-tts-{n}.mp3"));
             if let Err(e) = std::fs::write(&temp_path, &bytes) {
                 log::warn!("tts/11labs: write temp file failed: {e}");
                 active.store(false, Ordering::Release);
@@ -895,7 +895,7 @@ impl Speaker for KokoroSpeaker {
                     break;
                 }
                 let secs = (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
-                let temp = std::env::temp_dir().join(format!("murmur-kokoro-{n}-{i}.wav"));
+                let temp = std::env::temp_dir().join(format!("openwispr-kokoro-{n}-{i}.wav"));
                 if std::fs::write(&temp, &wav).is_err() {
                     break;
                 }
@@ -1086,10 +1086,10 @@ mod tests {
     }
 
     /// End-to-end Kokoro synthesis; needs the model + voices on disk. Ignored by
-    /// default. Run manually (writes /tmp/murmur-kokoro-test.wav to `afplay`):
+    /// default. Run manually (writes /tmp/openwispr-kokoro-test.wav to `afplay`):
     ///   cargo test --no-default-features -- --ignored kokoro_synth --nocapture
     #[test]
-    #[ignore = "needs the Kokoro model + voices in <app-support>/murmur/models"]
+    #[ignore = "needs the Kokoro model + voices in <app-support>/openwispr/models"]
     fn kokoro_synth() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1101,7 +1101,7 @@ mod tests {
                 .unwrap();
             let (samples, dur) = tts
                 .synth(
-                    "Hello from Murmur. This is a local neural voice.",
+                    "Hello from Open Wispr. This is a local neural voice.",
                     "af_heart",
                 )
                 .await
@@ -1113,7 +1113,7 @@ mod tests {
             );
             assert!(samples.len() > 1000);
             std::fs::write(
-                "/tmp/murmur-kokoro-test.wav",
+                "/tmp/openwispr-kokoro-test.wav",
                 pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE),
             )
             .unwrap();

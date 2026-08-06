@@ -348,12 +348,12 @@ pub fn open_url(url: String) -> Result<(), String> {
 /// spawning the binary as a *child* process, and macOS then attributes the TCC
 /// responsible process to the parent chain — which wedges the Fn-key tap /
 /// Accessibility grant (the exact failure dev.sh's `open` launch avoids). So we
-/// relaunch through LaunchServices (`open`) instead, matching dev.sh, so Murmur
+/// relaunch through LaunchServices (`open`) instead, matching dev.sh, so Open Wispr
 /// stays its own responsible process and the grant survives.
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
     if let Ok(exe) = std::env::current_exe() {
-        // exe = <Murmur.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
+        // exe = <OpenWispr.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
         if let Some(bundle) = exe
             .ancestors()
             .find(|p| p.extension().is_some_and(|e| e == "app"))

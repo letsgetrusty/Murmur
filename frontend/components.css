@@ -1,4 +1,4 @@
-/* Reusable UI components — the shared component library for Murmur's webviews.
+/* Reusable UI components — the shared component library for Open Wispr's webviews.
    Built entirely on the tokens in tokens.css (linked before this sheet); no raw
    colors or font sizes here. Page/feature layout lives in the per-window sheet
    (e.g. settings.css). Class names are kept stable so markup/JS need not change.
