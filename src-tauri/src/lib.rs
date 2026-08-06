@@ -95,6 +95,11 @@ pub enum OverlayState {
     Refining,
     /// Macro chord only: the spoken phrase is being matched to a macro.
     Interpreting,
+    /// Read-aloud in progress; `progress` is the fraction [0.0, 1.0] spoken,
+    /// used to fill the overlay pill.
+    Reading {
+        progress: f32,
+    },
     Done {
         chars: usize,
     },
@@ -440,7 +445,7 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             log::info!("tts: speak ({} chars)", chars);
             record_usage(app, |u| u.record_tts(chars as u64));
             show_overlay(app);
-            emit_state(app, OverlayState::Transcribing);
+            emit_state(app, OverlayState::Reading { progress: 0.0 });
             state.speaker.speak(&text);
             spawn_tts_idle_watcher(app.clone());
         }
@@ -550,12 +555,17 @@ fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        // Phase 2: wait for it to flip false (end-of-media or stop()).
+        // Phase 2: wait for it to flip false (end-of-media or stop()), emitting
+        // read-aloud progress so the overlay pill fills as it speaks.
         loop {
-            std::thread::sleep(Duration::from_millis(200));
-            if !app.state::<AppState>().speaker.is_speaking() {
+            std::thread::sleep(Duration::from_millis(120));
+            let state = app.state::<AppState>();
+            if !state.speaker.is_speaking() {
                 emit_state(&app, OverlayState::Idle);
                 return;
+            }
+            if let Some(progress) = state.speaker.progress() {
+                emit_state(&app, OverlayState::Reading { progress });
             }
         }
     });

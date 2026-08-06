@@ -7,6 +7,7 @@ const LABELS = {
   transcribing: "Transcribing…",
   refining: "Refining…",
   interpreting: "Interpreting…",
+  reading: "Reading…",
 };
 
 function applyState(payload) {
@@ -16,6 +17,13 @@ function applyState(payload) {
 
   const kind = payload?.kind ?? "idle";
   pill.dataset.state = kind;
+
+  // Read-aloud progress fill (0..1); cleared for every other state.
+  const fill = pill.querySelector(".pill-fill");
+  if (fill) {
+    const p = kind === "reading" ? (payload.progress ?? 0) : 0;
+    fill.style.transform = `scaleX(${Math.max(0, Math.min(1, p))})`;
+  }
 
   switch (kind) {
     case "done": {

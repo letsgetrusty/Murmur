@@ -49,6 +49,12 @@ pub trait Speaker: Send + Sync {
     fn current_voice(&self) -> Option<String> {
         None
     }
+
+    /// Progress of the current read-aloud in `[0.0, 1.0]`, or `None` if not
+    /// reading or the backend can't report it. Drives the overlay progress fill.
+    fn progress(&self) -> Option<f32> {
+        None
+    }
 }
 
 /// Voices the tray menu exposes for the ElevenLabs backend. Kept here so the
@@ -557,6 +563,8 @@ pub struct KokoroSpeaker {
     speed: Mutex<f32>,
     player: Arc<Mutex<Option<PlayerHolder>>>,
     active: Arc<AtomicBool>,
+    /// Read-aloud progress × 1000 (so it fits an integer atomic).
+    progress: Arc<AtomicU64>,
     counter: AtomicU64,
 }
 
@@ -570,24 +578,28 @@ impl KokoroSpeaker {
             speed: Mutex::new(1.0),
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(AtomicU64::new(0)),
             counter: AtomicU64::new(0),
         }
     }
 }
 
-/// Split read-aloud text into sentence-ish chunks (~40–240 chars) so a long
-/// selection can start playing after the first sentence instead of only once
-/// the entire text has been synthesized.
+/// Split read-aloud text into sentence-ish chunks so a long selection can start
+/// playing almost immediately. The FIRST chunk is kept short (and may break at a
+/// comma) so audio starts fast; later chunks are larger to keep prosody natural
+/// and cut per-chunk overhead.
 fn split_for_tts(text: &str) -> Vec<String> {
     let text = text.trim();
     let mut chunks = Vec::new();
     let mut cur = String::new();
     for ch in text.chars() {
         cur.push(ch);
-        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
-        // Flush at a sentence boundary once we have a reasonable amount, or hard
-        // cap the chunk length (byte len is a fine proxy for the cap).
-        if (boundary && cur.trim_end().len() >= 40) || cur.len() >= 240 {
+        let first = chunks.is_empty();
+        let (min, cap) = if first { (12, 90) } else { (40, 240) };
+        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':') || (first && ch == ',');
+        // Flush at a boundary once past `min`, or hard-cap the length (byte len
+        // is a fine proxy for the char cap).
+        if (boundary && cur.trim_end().len() >= min) || cur.len() >= cap {
             let t = cur.trim().to_string();
             if !t.is_empty() {
                 chunks.push(t);
@@ -627,8 +639,10 @@ impl Speaker for KokoroSpeaker {
         let tts_cell = self.tts.clone();
         let player_slot = self.player.clone();
         let active = self.active.clone();
+        let progress = self.progress.clone();
         // Mark active immediately so is_speaking() is true during synthesis.
         active.store(true, Ordering::Release);
+        progress.store(0, Ordering::Release);
 
         tauri::async_runtime::spawn(async move {
             // Load + cache the model on first use.
@@ -657,6 +671,14 @@ impl Speaker for KokoroSpeaker {
                 text.len(),
                 chunks.len()
             );
+            // Char-weighted progress, smoothed within each chunk by elapsed
+            // playback time so the overlay fill moves continuously, not in jumps.
+            let total_chars = chunks
+                .iter()
+                .map(|c| c.chars().count())
+                .sum::<usize>()
+                .max(1) as f32;
+            let mut chars_before = 0f32;
             let mut pending = synth_chunk_wav(&tts, &chunks[0], voice.as_str()).await;
 
             for i in 0..chunks.len() {
@@ -667,6 +689,10 @@ impl Speaker for KokoroSpeaker {
                     Some(w) => w,
                     None => break, // synth failed
                 };
+                let chunk_chars = chunks[i].chars().count() as f32;
+                // Audio seconds for this chunk (24 kHz, 16-bit mono → 2 bytes/sample).
+                let chunk_secs =
+                    (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
                 // Kick off the next chunk's synthesis while this one plays.
                 let next_task = if i + 1 < chunks.len() {
                     let (t, c, v) = (tts.clone(), chunks[i + 1].clone(), voice.clone());
@@ -690,12 +716,22 @@ impl Speaker for KokoroSpeaker {
                     }
                 }
 
-                // Wait for this chunk to finish (or a stop) before the next.
+                // Play out this chunk, advancing progress by elapsed time (scaled
+                // by playback speed), until it ends or a stop() lands.
+                let started = std::time::Instant::now();
                 loop {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(80)).await;
                     if !active.load(Ordering::Acquire) {
                         break;
                     }
+                    let frac = if chunk_secs > 0.0 {
+                        (started.elapsed().as_secs_f32() * speed / chunk_secs).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let p = ((chars_before + chunk_chars * frac) / total_chars * 1000.0) as u64;
+                    progress.store(p.min(1000), Ordering::Release);
+
                     let finished = {
                         let g = player_slot.lock().expect("player mutex");
                         match g.as_ref() {
@@ -712,6 +748,12 @@ impl Speaker for KokoroSpeaker {
                         break;
                     }
                 }
+
+                chars_before += chunk_chars;
+                progress.store(
+                    ((chars_before / total_chars * 1000.0) as u64).min(1000),
+                    Ordering::Release,
+                );
 
                 pending = match next_task {
                     Some(t) => t.await.ok().flatten(),
@@ -732,6 +774,14 @@ impl Speaker for KokoroSpeaker {
         // it clears it when the last chunk finishes or on stop(), so a brief
         // inter-chunk gap (player rate 0) isn't mistaken for "done".
         self.active.load(Ordering::Acquire)
+    }
+
+    fn progress(&self) -> Option<f32> {
+        if self.active.load(Ordering::Acquire) {
+            Some((self.progress.load(Ordering::Acquire) as f32 / 1000.0).clamp(0.0, 1.0))
+        } else {
+            None
+        }
     }
 
     fn cycle_speed(&self) -> f32 {

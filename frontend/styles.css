@@ -36,7 +36,28 @@ body {
   font-size: var(--fs-sm);
   letter-spacing: 0.2px;
   max-width: 280px;
+  position: relative;
+  overflow: hidden;
   transition: opacity 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+/* Read-aloud progress fill — scaled left→right by main.js from the "reading"
+   state's progress. Sits behind the dot + label (lifted above it) and is
+   clipped to the pill's rounded shape by overflow:hidden. */
+.pill-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--accent-rgb), 0.4);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 0.18s linear;
+  pointer-events: none;
+  z-index: 0;
+}
+.dot,
+.label {
+  position: relative;
+  z-index: 1;
 }
 
 /* The native window stays "visible" to NSApp so the process doesn't get
