@@ -1,6 +1,6 @@
+/* Design tokens live in tokens.css, linked before this sheet in index.html. */
 :root {
-  color-scheme: dark;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 html,
@@ -27,12 +27,12 @@ body {
   align-items: center;
   gap: 10px;
   padding: 10px 18px;
-  border-radius: 999px;
-  background: rgba(20, 20, 22, 0.82);
+  border-radius: var(--radius-pill);
+  background: var(--overlay-bg);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
-  color: #f5f5f7;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  box-shadow: var(--shadow-pill);
   font-size: 13px;
   letter-spacing: 0.2px;
   max-width: 280px;
@@ -47,10 +47,15 @@ body {
 }
 
 .dot {
+  /* position:relative anchors the recording pulse ring (.dot::before, which is
+     inset:0 absolute) to the dot itself — without it the ring falls back to the
+     nearest positioned ancestor and only lands correctly by accident of the
+     recording transform. */
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #8a8a90;
+  background: var(--state-idle);
   box-shadow: none;
   transition: background 160ms ease, box-shadow 160ms ease;
   flex: 0 0 auto;
@@ -68,7 +73,7 @@ body {
    "audio:level" Tauri event (~15 Hz). Falls back to the pulse animation
    when no level is reported. */
 .pill[data-state="recording"] .dot {
-  background: #ff5b5b;
+  background: var(--state-recording);
   box-shadow: 0 0 10px rgba(255, 91, 91, 0.7);
   transform: scale(calc(1 + var(--audio-level, 0) * 1.4));
   transition: transform 60ms ease-out;
@@ -85,31 +90,38 @@ body {
 
 /* Transcribing — pulsing cyan dot. */
 .pill[data-state="transcribing"] .dot {
-  background: #5ac8fa;
+  background: var(--state-transcribing);
   box-shadow: 0 0 10px rgba(90, 200, 250, 0.7);
   animation: pulse 0.7s ease-in-out infinite;
 }
 
 /* Refining (Fn+Ctrl) — pulsing violet dot to distinguish from transcribing. */
 .pill[data-state="refining"] .dot {
-  background: #bf5af2;
+  background: var(--state-refining);
+  box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
+  animation: pulse 0.7s ease-in-out infinite;
+}
+
+/* Interpreting (macro chord) — reuses the violet refining treatment. */
+.pill[data-state="interpreting"] .dot {
+  background: var(--state-refining);
   box-shadow: 0 0 10px rgba(191, 90, 242, 0.7);
   animation: pulse 0.7s ease-in-out infinite;
 }
 
 /* Done — solid green. */
 .pill[data-state="done"] .dot {
-  background: #34c759;
+  background: var(--state-done);
   box-shadow: 0 0 8px rgba(52, 199, 89, 0.55);
 }
 
 /* Error — solid amber/red, label tinted. */
 .pill[data-state="error"] {
-  background: rgba(58, 22, 26, 0.88);
-  color: #ffb4b4;
+  background: var(--overlay-error-bg);
+  color: var(--overlay-error-text);
 }
 .pill[data-state="error"] .dot {
-  background: #ff453a;
+  background: var(--state-error);
   box-shadow: 0 0 8px rgba(255, 69, 58, 0.6);
 }
 

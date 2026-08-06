@@ -788,7 +788,40 @@ function switchTab(name) {
   if (name === "insights") loadInsights();
 }
 
+// --- UI zoom (Cmd +/-/0) ------------------------------------------------------
+// WKWebView ignores Tauri's native zoom hotkeys, so scale the page with CSS
+// `zoom` and persist the level (survives the window being recreated on reopen).
+const ZOOM_KEY = "ui-zoom";
+let uiZoom = parseFloat(localStorage.getItem(ZOOM_KEY)) || 1;
+
+function applyZoom() {
+  uiZoom = Math.round(Math.min(Math.max(uiZoom, 0.6), 2.5) * 100) / 100;
+  document.documentElement.style.zoom = String(uiZoom);
+  localStorage.setItem(ZOOM_KEY, String(uiZoom));
+}
+
+function initZoom() {
+  applyZoom(); // re-apply the saved level on load
+  window.addEventListener("keydown", (e) => {
+    if (!e.metaKey) return;
+    if (e.key === "=" || e.key === "+") {
+      e.preventDefault();
+      uiZoom += 0.1;
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      uiZoom -= 0.1;
+    } else if (e.key === "0") {
+      e.preventDefault();
+      uiZoom = 1;
+    } else {
+      return;
+    }
+    applyZoom();
+  });
+}
+
 async function init() {
+  initZoom();
   for (const b of document.querySelectorAll(".nav-item")) {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   }

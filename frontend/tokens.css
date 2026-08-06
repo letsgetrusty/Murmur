@@ -1,0 +1,73 @@
+/* Design tokens — the single source of truth shared by the settings window
+   (settings.css) and the recording overlay (styles.css). Both stylesheets
+   @import this file, so the palette, radii, and motion live in exactly one
+   place instead of being copy-pasted across the two webviews.
+
+   macOS-only, dark-only by design (see CLAUDE.md scope). */
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+
+  /* Typeface -------------------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+
+  /* Surfaces & text ------------------------------------------------------- */
+  --bg: #1c1c1e;
+  --bg-elev: #2a2a2d;
+  --bg-input: #202022;
+  --bg-sidebar: #161617;
+  --border: #3a3a3e;
+  --text: #f2f2f7;
+  --text-dim: #9a9aa2;
+  --text-on-accent: #fff;
+  --overlay-hover: rgba(255, 255, 255, 0.05);
+
+  /* Accent — one hue, exposed as RGB so every tint is derived from it rather
+     than hand-written as an rgba() literal. Change the hue in one place. */
+  --accent-rgb: 191, 90, 242;
+  --accent: rgb(var(--accent-rgb));
+  --accent-press: #a840dd;
+  --accent-soft-bg: rgba(var(--accent-rgb), 0.14);
+  --accent-soft-border: rgba(var(--accent-rgb), 0.35);
+  --focus-ring: rgba(var(--accent-rgb), 0.22);
+
+  /* Status / feedback ----------------------------------------------------- */
+  --ok: #34c759;
+  --error: #ff6961;
+
+  /* Overlay pill state colors (the recording dot + error surface). ------- */
+  --state-idle: #8a8a90;
+  --state-recording: #ff5b5b;
+  --state-transcribing: #5ac8fa;
+  --state-refining: var(--accent);
+  --state-done: #34c759;
+  --state-error: #ff453a;
+  --overlay-bg: rgba(20, 20, 22, 0.82);
+  --overlay-error-bg: rgba(58, 22, 26, 0.88);
+  --overlay-error-text: #ffb4b4;
+
+  /* Radius ---------------------------------------------------------------- */
+  --radius: 10px; /* containers: cards, stats, history/macro rows */
+  --radius-control: 8px; /* inputs, buttons, selects */
+  --radius-nav: 7px;
+  --radius-pill: 999px;
+
+  /* Motion ---------------------------------------------------------------- */
+  --transition-fast: 0.12s;
+
+  /* Elevation ------------------------------------------------------------- */
+  --shadow-pill: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Respect the OS "reduce motion" setting in both windows — kills the overlay's
+   infinite pulse and all transitions for users who opt out. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

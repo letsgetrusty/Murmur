@@ -1,18 +1,5 @@
-:root {
-  --bg: #1c1c1e;
-  --bg-elev: #2a2a2d;
-  --bg-input: #202022;
-  --border: #3a3a3e;
-  --text: #f2f2f7;
-  --text-dim: #9a9aa2;
-  --accent: #bf5af2;
-  --accent-press: #a840dd;
-  --ok: #34c759;
-  --error: #ff6961;
-  --radius: 10px;
-  font-synthesis: none;
-}
-
+/* Design tokens (palette, radii, motion) live in tokens.css, linked before
+   this sheet in settings.html. */
 * {
   box-sizing: border-box;
 }
@@ -24,7 +11,7 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-family: var(--font-sans);
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -35,12 +22,17 @@ body {
 .app {
   display: grid;
   grid-template-columns: 200px 1fr;
-  height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  /* Fill the actual client box via the html/body 100% chain — NOT 100vh.
+     In WKWebView, 100vh resolves taller than the visible webview, so an
+     .app sized to it overflows and the bottom of the scroll area is
+     unreachable. html and body both carry height:100% above. */
+  height: 100%;
 }
 
 /* Sidebar ----------------------------------------------------------------- */
 .sidebar {
-  background: #161617;
+  background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   padding: 20px 12px;
   display: flex;
@@ -59,7 +51,7 @@ body {
 .brand-mark {
   flex: 0 0 auto;
   color: var(--accent);
-  filter: drop-shadow(0 0 7px rgba(191, 90, 242, 0.6));
+  filter: drop-shadow(0 0 7px rgba(var(--accent-rgb), 0.6));
 }
 
 nav {
@@ -74,30 +66,35 @@ nav {
   border: none;
   color: var(--text-dim);
   padding: 8px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-nav);
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--overlay-hover);
   color: var(--text);
 }
 .nav-item.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 /* Content ----------------------------------------------------------------- */
 .content {
+  min-height: 0;
   overflow-y: auto;
-  padding: 24px 32px;
+  /* No padding-bottom here: WKWebView drops a scroll container's bottom
+     padding from the scrollable extent, clipping the last card. Keep the
+     bottom gap on .tab instead, where it counts toward scrollHeight. */
+  padding: 24px 32px 0;
 }
 
 .tab {
   display: none;
   max-width: 620px;
+  padding-bottom: 24px;
 }
 .tab.active {
   display: block;
@@ -152,10 +149,10 @@ nav {
   font-size: 11px;
   font-weight: 600;
   color: var(--accent);
-  background: rgba(191, 90, 242, 0.14);
-  border: 1px solid rgba(191, 90, 242, 0.35);
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .hint {
@@ -179,24 +176,25 @@ nav {
 
 textarea,
 input[type="text"],
+input[type="password"],
 input:not([type]) {
   width: 100%;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--text);
   padding: 10px 12px;
   font-size: 13.5px;
   font-family: inherit;
   line-height: 1.5;
   resize: vertical;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 textarea:focus,
 input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(191, 90, 242, 0.22);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 textarea {
   min-height: 120px;
@@ -205,14 +203,14 @@ textarea {
 /* Buttons ----------------------------------------------------------------- */
 .primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 8px 18px;
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.12s, opacity 0.12s;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
 }
 .primary:hover:not(:disabled) {
   background: var(--accent-press);
@@ -220,6 +218,22 @@ textarea {
 .primary:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Keyboard focus — inputs/selects get a focus ring via :focus, but buttons and
+   the tab nav had no visible indicator for keyboard users. Scope to
+   :focus-visible so a mouse click doesn't leave a lingering ring. */
+.nav-item:focus-visible,
+.primary:focus-visible,
+.small-btn:focus-visible,
+.recorder:focus-visible,
+.key-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.toggle input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .card + .card {
@@ -248,7 +262,7 @@ select {
   min-width: 200px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--text);
   padding: 7px 10px;
   font-size: 13.5px;
@@ -258,7 +272,7 @@ select {
 select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(191, 90, 242, 0.22);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Shortcut recorder ------------------------------------------------------- */
@@ -267,7 +281,7 @@ select:focus {
   text-align: center;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--text);
   padding: 7px 14px;
   font-size: 14px;
@@ -281,7 +295,7 @@ select:focus {
 }
 .recorder.recording {
   border-color: var(--accent);
-  background: rgba(191, 90, 242, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
   color: var(--accent);
   letter-spacing: normal;
   font-weight: 500;
@@ -397,10 +411,10 @@ select:focus {
   width: 100%;
   min-height: 3px;
   border-radius: 3px 3px 2px 2px;
-  background: rgba(191, 90, 242, 0.28);
+  background: rgba(var(--accent-rgb), 0.28);
   transition: background 0.12s;
 }
-.act-col:hover .act-bar { background: rgba(191, 90, 242, 0.5); }
+.act-col:hover .act-bar { background: rgba(var(--accent-rgb), 0.5); }
 .act-bar.today { background: var(--accent); }
 .act-empty {
   color: var(--text-dim);
@@ -416,7 +430,7 @@ select:focus {
 .fn-badge {
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 7px 12px;
   font-size: 14px;
   font-weight: 600;
@@ -467,7 +481,7 @@ select:focus {
 .small-btn {
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--text);
   padding: 7px 12px;
   font-size: 12.5px;
@@ -511,7 +525,7 @@ select:focus {
   width: 200px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   color: var(--text);
   padding: 7px 12px;
   font-size: 13px;
@@ -520,7 +534,7 @@ select:focus {
 .search:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(191, 90, 242, 0.22);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .toggle {
   display: inline-flex;
@@ -537,7 +551,7 @@ select:focus {
 
 .hist-row {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 8px;
   background: var(--bg-elev);
@@ -557,11 +571,11 @@ select:focus {
   text-transform: uppercase;
   letter-spacing: 0.4px;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 .hist-badge.refined {
   color: var(--accent);
-  background: rgba(191, 90, 242, 0.14);
+  background: var(--accent-soft-bg);
 }
 .hist-badge.raw {
   color: var(--text-dim);
@@ -592,4 +606,41 @@ select:focus {
 }
 .empty p {
   margin: 4px 0;
+}
+
+/* Macros ------------------------------------------------------------------ */
+.macro-row {
+  padding: 14px;
+  margin-top: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.macro-row:first-child {
+  margin-top: 0;
+}
+.macro-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.macro-head .macro-name {
+  flex: 1;
+  font-weight: 600;
+}
+.macro-triggers {
+  margin-top: 8px;
+}
+.macro-response {
+  margin-top: 8px;
+  min-height: 64px;
+}
+/* Nested one level down (inside .macro-row on --bg-input), lift the field
+   backgrounds so they read against the row instead of blending in. */
+.macro-row input,
+.macro-row textarea {
+  background: var(--bg-elev);
+}
+#macro-add {
+  margin-top: 12px;
 }
