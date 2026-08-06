@@ -146,6 +146,57 @@ Gatekeeper path.
 
 ---
 
+## Auto-updates
+
+Open Wispr ships with `tauri-plugin-updater`. On launch (and from the tray's
+**Check for Updates…**) it fetches a manifest, and if a newer, validly-signed
+release exists, the Settings window shows an **Install & Restart** banner.
+
+Two things make this work:
+
+### The updater signing key (separate from Apple signing)
+
+Update archives are signed with a **minisign** keypair — a different trust root
+from your Developer ID. The app only installs an update whose signature matches
+the **public key baked into `tauri.conf.json` → `plugins.updater.pubkey`**. This
+proves the update came from you *before* macOS ever evaluates the new bundle.
+
+A keypair already exists at `~/.openwispr/updater.key` (public half in the
+config). It has no password. To rotate it (e.g. to set a password you alone
+control), regenerate and update the config:
+
+```sh
+npx tauri signer generate -w ~/.openwispr/updater.key -f
+# copy the printed public key into tauri.conf.json → plugins.updater.pubkey
+```
+
+**Guard the private key like the Apple cert** — losing it means you can't ship
+updates users will accept (they'd have to re-download manually). `release.sh`
+reads it from `~/.openwispr/updater.key` (override with `TAURI_SIGNING_PRIVATE_KEY`
+/ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). It's `.gitignore`d — never commit it.
+
+### The manifest + hosting  ⚠️ TODO before first release
+
+The updater endpoint is currently a **placeholder** in two places that must
+point at the same real host:
+
+- `tauri.conf.json` → `plugins.updater.endpoints`
+- `scripts/release.sh` → `ENDPOINT_HOST`
+
+Each `release.sh` run (with `createUpdaterArtifacts` on) produces:
+
+- `…/bundle/macos/OpenWispr.app.tar.gz` + `.sig` — the update archive,
+- `…/bundle/latest.json` — the manifest (version, notes, pub_date, and per-arch
+  `{ signature, url }`).
+
+To publish a release: set the real host in both places above, then upload the
+`.app.tar.gz` **and** `latest.json` to it so `endpoints` resolves to that JSON.
+The app compares its version to the manifest's and installs if newer.
+
+> This build targets Apple Silicon → the manifest's platform key is
+> `darwin-aarch64`. Add `darwin-x86_64` / `darwin-universal` entries if you ever
+> ship those.
+
 ## Notes / gotchas
 
 - **Why not sandboxed?** Open Wispr needs the Accessibility API (paste + the Fn

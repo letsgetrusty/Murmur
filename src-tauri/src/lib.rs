@@ -14,6 +14,7 @@ mod permissions;
 mod selection;
 mod stt;
 mod tts;
+mod update;
 mod usage;
 
 use std::sync::{Arc, Mutex};
@@ -149,6 +150,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
@@ -170,6 +172,8 @@ pub fn run() {
             commands::open_microphone_settings,
             commands::request_microphone,
             commands::finish_onboarding,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .setup(move |app| {
             // Shared live config: the refiner reads it on each refine and the
@@ -327,6 +331,19 @@ pub fn run() {
                 show_onboarding_window(app.handle());
             }
 
+            // Background update check — non-blocking, best-effort. If a newer
+            // signed release exists it's surfaced via the `update-available`
+            // event, which the settings window renders as an install banner (no
+            // window is forced open at startup).
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(info) = update::check(&app).await {
+                        let _ = app.emit("update-available", info);
+                    }
+                });
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -400,6 +417,36 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
         }
         Err(e) => log::warn!("failed to create onboarding window: {e}"),
     }
+}
+
+/// Relaunch Open Wispr as its own responsible process. We deliberately do NOT
+/// use `app.restart()`: on macOS Tauri relaunches by spawning the binary as a
+/// *child* process, and macOS then attributes the TCC responsible process to the
+/// parent chain — which wedges the Fn-key tap / Accessibility grant (the exact
+/// failure dev.sh's `open` launch avoids). So we relaunch through LaunchServices
+/// (`open`), matching dev.sh, so the grant survives. Used by the settings
+/// "Relaunch" button and after an auto-update installs.
+pub fn relaunch<R: Runtime>(app: &AppHandle<R>) {
+    if let Ok(exe) = std::env::current_exe() {
+        // exe = <OpenWispr.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
+        if let Some(bundle) = exe
+            .ancestors()
+            .find(|p| p.extension().is_some_and(|e| e == "app"))
+        {
+            let pid = std::process::id();
+            // Detached helper: wait for us to fully exit, then `open` the bundle
+            // (a fresh LaunchServices launch → correct responsible process).
+            let cmd = format!(
+                "while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; open '{}'",
+                bundle.display()
+            );
+            let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
+            app.exit(0);
+            return;
+        }
+    }
+    // Not inside an .app bundle (unusual) — fall back to Tauri's restart.
+    app.restart();
 }
 
 /// Progress payload for the onboarding download bars. `total` is 0 when the
@@ -665,6 +712,13 @@ fn build_tray_menu(
 ) -> tauri::Result<TrayMenu> {
     let open_main = MenuItem::with_id(app, "open_main", "Settings…", true, None::<&str>)?;
     let open_setup = MenuItem::with_id(app, "open_setup", "Setup…", true, None::<&str>)?;
+    let check_update = MenuItem::with_id(
+        app,
+        "check_update",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Open Wispr", true, None::<&str>)?;
@@ -739,6 +793,7 @@ fn build_tray_menu(
         &[
             &open_main as &dyn IsMenuItem<Wry>,
             &open_setup,
+            &check_update,
             &sep0,
             &read,
             &stop_read,
@@ -758,6 +813,23 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
     match id {
         "open_main" => show_main_window(app),
         "open_setup" => show_onboarding_window(app),
+        "check_update" => {
+            // Manual check: open Settings so the result is visible, then emit the
+            // outcome for its update banner to render.
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let info = update::check(&app).await;
+                show_main_window(&app);
+                match info {
+                    Some(info) => {
+                        let _ = app.emit("update-available", info);
+                    }
+                    None => {
+                        let _ = app.emit("update-none", ());
+                    }
+                }
+            });
+        }
         "quit" => app.exit(0),
         "tts_read" => tts_toggle(app),
         "tts_stop" => {

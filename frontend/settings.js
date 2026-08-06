@@ -538,6 +538,52 @@ function initZoom() {
   });
 }
 
+// --- Auto-update --------------------------------------------------------------
+
+function showUpdateAvailable(info) {
+  const banner = el("update-banner");
+  banner.classList.remove("neutral");
+  el("update-text").innerHTML = `<b>Open Wispr ${info.version}</b> is available — you're on ${info.current_version}.`;
+  const btn = el("update-install");
+  btn.hidden = false;
+  btn.disabled = false;
+  btn.textContent = "Install & Restart";
+  banner.hidden = false;
+}
+
+function showUpToDate() {
+  const banner = el("update-banner");
+  banner.classList.add("neutral");
+  el("update-text").innerHTML = "You're on the latest version.";
+  el("update-install").hidden = true;
+  banner.hidden = false;
+}
+
+async function installUpdate() {
+  const btn = el("update-install");
+  btn.disabled = true;
+  btn.textContent = "Downloading…";
+  try {
+    // On success the app installs + relaunches, so this never resolves.
+    await invoke("install_update");
+  } catch (e) {
+    el("update-text").textContent = `Update failed: ${e}`;
+    btn.disabled = false;
+    btn.textContent = "Retry";
+  }
+}
+
+function initUpdate() {
+  el("update-install").addEventListener("click", installUpdate);
+  const listen = window.__TAURI__?.event?.listen;
+  listen?.("update-available", (e) => showUpdateAvailable(e.payload));
+  listen?.("update-none", () => showUpToDate());
+  // Quiet check on open — only surfaces the banner if an update exists.
+  invoke?.("check_for_update").then((info) => {
+    if (info) showUpdateAvailable(info);
+  });
+}
+
 async function init() {
   initZoom();
   for (const b of document.querySelectorAll(".nav-item")) {
@@ -561,6 +607,7 @@ async function init() {
   initHotkeys();
   initUsage();
   initHistory();
+  initUpdate();
 }
 
 if (document.readyState === "loading") {

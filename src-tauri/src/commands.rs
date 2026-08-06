@@ -211,6 +211,21 @@ pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// --- Auto-update -------------------------------------------------------------
+
+/// Check the update endpoint for a newer release. `None` = up to date or the
+/// endpoint isn't reachable/configured (both non-fatal).
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> Option<crate::update::UpdateInfo> {
+    crate::update::check(&app).await
+}
+
+/// Download + install the available update (signature-verified) and relaunch.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    crate::update::install(&app).await
+}
+
 // --- History -----------------------------------------------------------------
 
 #[tauri::command]
@@ -253,33 +268,8 @@ pub fn copy_text(text: String) -> Result<(), String> {
 
 /// Relaunch the app so a startup-time change (e.g. the STT/TTS engine, built
 /// once at launch) takes effect — one click instead of re-running dev.sh.
-///
-/// We deliberately do NOT use `app.restart()`: on macOS Tauri relaunches by
-/// spawning the binary as a *child* process, and macOS then attributes the TCC
-/// responsible process to the parent chain — which wedges the Fn-key tap /
-/// Accessibility grant (the exact failure dev.sh's `open` launch avoids). So we
-/// relaunch through LaunchServices (`open`) instead, matching dev.sh, so Open Wispr
-/// stays its own responsible process and the grant survives.
+/// Delegates to `crate::relaunch` (LaunchServices `open`, not `app.restart()`).
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
-    if let Ok(exe) = std::env::current_exe() {
-        // exe = <OpenWispr.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
-        if let Some(bundle) = exe
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "app"))
-        {
-            let pid = std::process::id();
-            // Detached helper: wait for us to fully exit, then `open` the bundle
-            // (a fresh LaunchServices launch → correct responsible process).
-            let cmd = format!(
-                "while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; open '{}'",
-                bundle.display()
-            );
-            let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
-            app.exit(0);
-            return;
-        }
-    }
-    // Not inside an .app bundle (unusual) — fall back to Tauri's restart.
-    app.restart();
+    crate::relaunch(&app);
 }

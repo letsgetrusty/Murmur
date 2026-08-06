@@ -20,3 +20,6 @@ src-tauri/WixTools/
 .env
 *.p8
 *.p12
+# Updater signing private key (public key is safe + lives in tauri.conf.json)
+*.key
+!*.key.pub

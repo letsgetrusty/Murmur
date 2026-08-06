@@ -68,8 +68,10 @@ read-aloud TTS (native `AVSpeechSynthesizer` by default; read-aloud falls back t
 the clipboard when nothing is selected), a settings window (hotkeys, engines,
 mic/voice, local usage insights), a first-run onboarding window (Accessibility +
 microphone grants and live model-download progress; gated on the
-`onboarding_done` config flag, re-openable from the tray "Setup…" item), and
-SQLite dictation history. The TTS backend is
+`onboarding_done` config flag, re-openable from the tray "Setup…" item),
+auto-update (`tauri-plugin-updater` + minisign-signed artifacts; startup +
+tray "Check for Updates…" checks surface an install banner in Settings —
+`update.rs`, endpoint is a TODO placeholder), and SQLite dictation history. The TTS backend is
 chosen via `tts_provider` in config; the local Whisper model (default `small.en`,
 name in `stt_model`) auto-downloads to `<app-support>/openwispr/models/` on first
 run (and via `setup.sh`). Read-aloud can also use local neural **Kokoro**
