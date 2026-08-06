@@ -33,6 +33,7 @@ async function loadConfig() {
     el("stt-provider").value = currentConfig.stt_provider ?? "local";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
+    el("llm-provider").value = currentConfig.llm_provider ?? "local";
     el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
@@ -48,6 +49,7 @@ async function saveEngines() {
     stt_provider: el("stt-provider").value,
     stt_model: el("stt-model").value,
     tts_provider: el("tts-provider").value,
+    llm_provider: el("llm-provider").value,
   };
   try {
     await invoke("save_config", { config: next });
@@ -849,7 +851,7 @@ async function init() {
   }
   el("refine-prompt").addEventListener("input", markDirty);
   el("refine-model").addEventListener("input", markDirty);
-  for (const id of ["stt-provider", "stt-model", "tts-provider"]) {
+  for (const id of ["stt-provider", "stt-model", "tts-provider", "llm-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));

@@ -135,6 +135,35 @@ impl MacroMatcher for OpenRouterMatcher {
     }
 }
 
+/// Offline macro classifier backed by the embedded local LLM (llama.cpp).
+pub struct LocalMatcher {
+    llm: Arc<crate::local_llm::LocalLlm>,
+}
+
+impl LocalMatcher {
+    pub fn new(llm: Arc<crate::local_llm::LocalLlm>) -> Self {
+        Self { llm }
+    }
+}
+
+impl MacroMatcher for LocalMatcher {
+    fn match_macro<'a>(&'a self, transcript: &'a str, macros: &'a [Macro]) -> MatchFuture<'a> {
+        Box::pin(async move {
+            if macros.is_empty() {
+                return Ok(None);
+            }
+            let user = user_message(transcript, macros);
+            let count = macros.len();
+            let llm = self.llm.clone();
+            // Classification is fine (and fast) without the reasoning pass.
+            let out = tokio::task::spawn_blocking(move || llm.chat(SYSTEM_PROMPT, &user, false))
+                .await
+                .context("local macro task join")??;
+            Ok(parse_choice(&out, count))
+        })
+    }
+}
+
 /// Parse the classifier's reply into a 0-based macro index. Robust to stray
 /// prose: takes the first integer in the reply. `0`, an out-of-range number, or
 /// no integer at all → `None` (no confident match).

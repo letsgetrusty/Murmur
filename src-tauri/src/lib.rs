@@ -10,6 +10,7 @@ mod history;
 mod hotkeys;
 mod inject;
 mod kb;
+mod local_llm;
 mod macros;
 mod refine;
 mod secrets;
@@ -221,17 +222,42 @@ pub fn run() {
             // Dictation history database.
             let history_state = Arc::new(Mutex::new(history::open()));
 
-            // Refiner for Fn+Ctrl dictation. Reads model + prompt from the shared
-            // config; the key is read from Keychain lazily on first refine.
-            let refiner: Arc<dyn refine::Refiner> = Arc::new(refine::OpenRouterRefiner::new(
-                config_state.clone(),
-                usage_state.clone(),
-            ));
-
-            // Macro classifier for the macro chord. Reads the model + macro list
-            // from the shared config; the key is read from Keychain lazily.
-            let matcher: Arc<dyn macros::MacroMatcher> =
-                Arc::new(macros::OpenRouterMatcher::new(config_state.clone()));
+            // LLM backend for Fn+Ctrl refinement + macro classification, selected
+            // by config. Default is a single embedded local model (Qwen3 via
+            // llama.cpp) shared by both; "openrouter" uses the cloud (key read
+            // from Keychain lazily). Prompts/macros come from the shared config.
+            let (refiner, matcher): (Arc<dyn refine::Refiner>, Arc<dyn macros::MacroMatcher>) =
+                if cfg.llm_provider == "local" {
+                    if local_llm::assets_present(&cfg.llm_model) {
+                        log::info!("llm: local backend (model '{}')", cfg.llm_model);
+                    } else {
+                        log::info!("llm: local backend; model missing — downloading…");
+                    }
+                    // Download the model in the background so the first refine/macro
+                    // isn't blocked on a ~1 GB fetch; it loads on first use.
+                    let model = cfg.llm_model.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = local_llm::ensure_local_llm(&model).await {
+                            log::warn!("llm: model prefetch failed: {e}");
+                        }
+                    });
+                    let llm = Arc::new(local_llm::LocalLlm::new(
+                        local_llm::model_path(&cfg.llm_model).unwrap_or_default(),
+                    ));
+                    (
+                        Arc::new(refine::LocalRefiner::new(llm.clone(), config_state.clone())),
+                        Arc::new(macros::LocalMatcher::new(llm.clone())),
+                    )
+                } else {
+                    log::info!("llm: OpenRouter cloud backend");
+                    (
+                        Arc::new(refine::OpenRouterRefiner::new(
+                            config_state.clone(),
+                            usage_state.clone(),
+                        )),
+                        Arc::new(macros::OpenRouterMatcher::new(config_state.clone())),
+                    )
+                };
 
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut

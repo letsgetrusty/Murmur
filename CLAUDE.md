@@ -25,7 +25,9 @@ phase from it. When this file and the architecture doc disagree, ask.**
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
   **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) and
   ElevenLabs (cloud, `reqwest`) optional. Selected by `tts_provider` in config.
-- Refinement (Fn+Ctrl): OpenRouter via `reqwest`
+- Refinement (Fn+Ctrl) + Macros: local Qwen3 1.7B via `llama-cpp-2` (embedded
+  llama.cpp, Metal) — **default**; OpenRouter via `reqwest` optional (cloud).
+  Selected by `llm_provider` in config.
 - Vector store: `lancedb` · embeddings: Voyage/OpenAI via `reqwest` (or `fastembed`)
 - Generation (Phase 4, KB): Anthropic Messages API via `reqwest`
 - Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
@@ -56,7 +58,9 @@ phase from it. When this file and the architecture doc disagree, ask.**
 STT, TTS, embeddings, and generation each sit behind a trait; selection is via
 config. Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
 `AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
-Generation (Phase 4) is still cloud. Don't hardcode a provider at a call site.
+Refine + macros default to a shared embedded local LLM (Qwen3 via llama.cpp),
+OpenRouter optional. KB generation (Phase 4) is still cloud. Don't hardcode a
+provider at a call site.
 
 ## Current status
 Phases 0–3 shipped: Fn / chord dictation (on-device Whisper by default, `whisper-rs`

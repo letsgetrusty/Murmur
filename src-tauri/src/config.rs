@@ -89,6 +89,13 @@ pub struct Config {
     /// "elevenlabs" (cloud). Defaults to native.
     #[serde(default = "default_tts_provider")]
     pub tts_provider: String,
+    /// LLM backend for refinement + macros: "local" (embedded Qwen3 via
+    /// llama.cpp, offline) or "openrouter" (cloud). Defaults to local.
+    #[serde(default = "default_llm_provider")]
+    pub llm_provider: String,
+    /// Local GGUF model name (in <app-support>/murmur/models/<name>.gguf).
+    #[serde(default = "default_llm_model")]
+    pub llm_model: String,
 }
 
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
@@ -122,6 +129,8 @@ fn default_macro_model() -> String {
 pub const DEFAULT_STT_PROVIDER: &str = "local";
 pub const DEFAULT_STT_MODEL: &str = "small.en";
 pub const DEFAULT_TTS_PROVIDER: &str = "native";
+pub const DEFAULT_LLM_PROVIDER: &str = "local";
+pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
 fn default_stt_provider() -> String {
     DEFAULT_STT_PROVIDER.to_string()
 }
@@ -130,6 +139,12 @@ fn default_stt_model() -> String {
 }
 fn default_tts_provider() -> String {
     DEFAULT_TTS_PROVIDER.to_string()
+}
+fn default_llm_provider() -> String {
+    DEFAULT_LLM_PROVIDER.to_string()
+}
+fn default_llm_model() -> String {
+    DEFAULT_LLM_MODEL.to_string()
 }
 
 fn default_refine_model() -> String {
@@ -165,6 +180,8 @@ impl Default for Config {
             stt_provider: default_stt_provider(),
             stt_model: default_stt_model(),
             tts_provider: default_tts_provider(),
+            llm_provider: default_llm_provider(),
+            llm_model: default_llm_model(),
         }
     }
 }
@@ -237,6 +254,8 @@ mod tests {
         assert_eq!(c.stt_provider, DEFAULT_STT_PROVIDER);
         assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
         assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);
+        assert_eq!(c.llm_provider, DEFAULT_LLM_PROVIDER);
+        assert_eq!(c.llm_model, DEFAULT_LLM_MODEL);
     }
 
     #[test]
