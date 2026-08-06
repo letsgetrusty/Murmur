@@ -1,0 +1,297 @@
+/* Reusable UI components — the shared component library for Murmur's webviews.
+   Built entirely on the tokens in tokens.css (linked before this sheet); no raw
+   colors or font sizes here. Page/feature layout lives in the per-window sheet
+   (e.g. settings.css). Class names are kept stable so markup/JS need not change.
+
+   Load order: tokens.css → components.css → <page>.css. */
+
+/* Text ------------------------------------------------------------------- */
+.hint {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  margin: var(--space-2xs) 0 0;
+}
+.hint.ok {
+  color: var(--ok);
+}
+.hint.error {
+  color: var(--error);
+}
+
+.status {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.status.ok {
+  color: var(--ok);
+}
+.status.error {
+  color: var(--error);
+}
+
+/* Card ------------------------------------------------------------------- */
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3xl);
+}
+.card h2 {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  margin: 0 0 var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.card + .card {
+  margin-top: var(--space-2xl);
+}
+
+/* Buttons ---------------------------------------------------------------- */
+.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-control);
+  padding: var(--space-sm) 18px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent-press);
+}
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.primary.small {
+  padding: var(--control-pad-y) var(--space-xl);
+  font-size: var(--fs-xs);
+}
+
+.small-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.small-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.small-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.small-btn.danger:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* Keyboard focus — scoped to :focus-visible so a mouse click doesn't leave a
+   lingering ring. Inputs/selects get their ring via :focus below. */
+.nav-item:focus-visible,
+.primary:focus-visible,
+.small-btn:focus-visible,
+.recorder:focus-visible,
+.toggle input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Form controls ---------------------------------------------------------- */
+textarea,
+input[type="text"],
+input[type="password"],
+input:not([type]) {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--input-pad-y) var(--input-pad-x);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  line-height: var(--lh-normal);
+  resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+textarea {
+  min-height: 120px;
+}
+select {
+  min-width: 200px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--control-pad-y) var(--space-md);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+.search {
+  width: 200px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+}
+textarea:focus,
+input:focus,
+select:focus,
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.field {
+  display: block;
+  margin-top: var(--space-2xl);
+}
+.field-label {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-dim);
+  margin-bottom: var(--space-xs);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toggle input {
+  accent-color: var(--accent);
+}
+
+/* Chip / pill label ------------------------------------------------------ */
+.chip {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  color: var(--accent);
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
+  padding: var(--space-3xs) 7px;
+  border-radius: var(--radius-pill);
+}
+
+/* Nav item --------------------------------------------------------------- */
+.nav-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-nav);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.nav-item:hover {
+  background: var(--overlay-hover);
+  color: var(--text);
+}
+.nav-item.active {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* Shortcut recorder ------------------------------------------------------ */
+.recorder {
+  min-width: 140px;
+  text-align: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--control-pad-y) var(--space-xl);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.recorder:hover {
+  border-color: var(--accent);
+}
+.recorder.recording {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+  letter-spacing: normal;
+  font-weight: var(--fw-medium);
+}
+
+/* Stat tile -------------------------------------------------------------- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-lg);
+  margin-bottom: var(--space-2xl);
+}
+@media (min-width: 720px) {
+  .stat-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.stat {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-xl) var(--space-2xl);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.stat-label {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.stat-value {
+  font-size: var(--fs-3xl);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+}
+.stat-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty state ------------------------------------------------------------ */
+.empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-6xl) var(--space-4xl);
+  text-align: center;
+  color: var(--text-dim);
+}
+.empty p {
+  margin: var(--space-2xs) 0;
+}

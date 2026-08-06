@@ -57,6 +57,48 @@
 
   /* Elevation ------------------------------------------------------------- */
   --shadow-pill: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  /* Typography scale ------------------------------------------------------ */
+  /* One whole-px scale consolidating the sizes previously scattered (incl.
+     half-pixel values) across both webviews. Body defaults to --fs-base. */
+  --fs-2xs: 11px; /* uppercase micro-labels, badges */
+  --fs-xs: 12px; /* hints, field labels, captions, sub-text */
+  --fs-sm: 13px; /* body copy, inputs, list/row text */
+  --fs-base: 14px; /* default body size, controls */
+  --fs-lg: 15px; /* card titles, brand */
+  --fs-xl: 17px; /* emphasized figures (cost) */
+  --fs-2xl: 22px; /* page titles (h1) */
+  --fs-3xl: 26px; /* hero stat values */
+
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --lh-tight: 1.1; /* large numerals */
+  --lh-snug: 1.45; /* hints */
+  --lh-normal: 1.5; /* body copy */
+
+  /* Spacing scale --------------------------------------------------------- */
+  /* Used for layout rhythm (gaps, margins, padding). Component-internal
+     control padding uses the --control- and --input- tokens below. */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 6px;
+  --space-sm: 8px;
+  --space-md: 10px;
+  --space-lg: 12px;
+  --space-xl: 14px;
+  --space-2xl: 16px;
+  --space-3xl: 20px;
+  --space-4xl: 24px;
+  --space-5xl: 32px;
+  --space-6xl: 48px;
+
+  /* Control padding ------------------------------------------------------- */
+  --control-pad-y: 7px; /* compact controls: buttons, selects, recorder */
+  --control-pad-x: 12px;
+  --input-pad-y: 10px; /* text inputs / textareas */
+  --input-pad-x: 12px;
 }
 
 /* Respect the OS "reduce motion" setting in both windows — kills the overlay's

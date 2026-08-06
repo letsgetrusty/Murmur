@@ -25,15 +25,15 @@ body {
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 18px;
+  gap: var(--space-md);
+  padding: var(--space-md) 18px;
   border-radius: var(--radius-pill);
   background: var(--overlay-bg);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   color: var(--text);
   box-shadow: var(--shadow-pill);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   letter-spacing: 0.2px;
   max-width: 280px;
   transition: opacity 160ms ease, background 160ms ease, color 160ms ease;
@@ -62,7 +62,7 @@ body {
 }
 
 .label {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

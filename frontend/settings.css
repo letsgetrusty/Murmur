@@ -1,5 +1,7 @@
-/* Design tokens (palette, radii, motion) live in tokens.css, linked before
-   this sheet in settings.html. */
+/* Settings-window layout + feature modules. Design values come from tokens.css
+   and reusable primitives (buttons, card, inputs, chip, stat, nav-item, …) from
+   components.css — both linked before this sheet in settings.html.
+   Load order: tokens.css → components.css → settings.css. */
 * {
   box-sizing: border-box;
 }
@@ -15,7 +17,7 @@ body {
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-  font-size: 14px;
+  font-size: var(--fs-base);
   overflow: hidden;
 }
 
@@ -34,7 +36,7 @@ body {
 .sidebar {
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
-  padding: 20px 12px;
+  padding: var(--space-3xl) var(--space-lg);
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -43,10 +45,10 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 15px;
-  padding: 4px 8px;
+  gap: var(--space-sm);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-lg);
+  padding: var(--space-2xs) var(--space-sm);
 }
 .brand-mark {
   flex: 0 0 auto;
@@ -57,28 +59,7 @@ body {
 nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.nav-item {
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  padding: 8px 10px;
-  border-radius: var(--radius-nav);
-  font-size: 13.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.nav-item:hover {
-  background: var(--overlay-hover);
-  color: var(--text);
-}
-.nav-item.active {
-  background: var(--accent);
-  color: var(--text-on-accent);
+  gap: var(--space-3xs);
 }
 
 /* Content ----------------------------------------------------------------- */
@@ -88,13 +69,13 @@ nav {
   /* No padding-bottom here: WKWebView drops a scroll container's bottom
      padding from the scrollable extent, clipping the last card. Keep the
      bottom gap on .tab instead, where it counts toward scrollHeight. */
-  padding: 24px 32px 0;
+  padding: var(--space-4xl) var(--space-5xl) 0;
 }
 
 .tab {
   display: none;
   max-width: 620px;
-  padding-bottom: 24px;
+  padding-bottom: var(--space-4xl);
 }
 .tab.active {
   display: block;
@@ -104,140 +85,18 @@ nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-3xl);
 }
 .tab-head h1 {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
   margin: 0;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.status {
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-.status.ok {
-  color: var(--ok);
-}
-.status.error {
-  color: var(--error);
-}
-
-/* Card -------------------------------------------------------------------- */
-.card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-}
-.card h2 {
-  font-size: 15px;
-  font-weight: 600;
-  margin: 0 0 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chip {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft-bg);
-  border: 1px solid var(--accent-soft-border);
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-}
-
-.hint {
-  color: var(--text-dim);
-  font-size: 12.5px;
-  line-height: 1.45;
-  margin: 4px 0 0;
-}
-
-.field {
-  display: block;
-  margin-top: 16px;
-}
-.field-label {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-dim);
-  margin-bottom: 6px;
-}
-
-textarea,
-input[type="text"],
-input[type="password"],
-input:not([type]) {
-  width: 100%;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 10px 12px;
-  font-size: 13.5px;
-  font-family: inherit;
-  line-height: 1.5;
-  resize: vertical;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-textarea:focus,
-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-textarea {
-  min-height: 120px;
-}
-
-/* Buttons ----------------------------------------------------------------- */
-.primary {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border: none;
-  border-radius: var(--radius-control);
-  padding: 8px 18px;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--transition-fast), opacity var(--transition-fast);
-}
-.primary:hover:not(:disabled) {
-  background: var(--accent-press);
-}
-.primary:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* Keyboard focus — inputs/selects get a focus ring via :focus, but buttons and
-   the tab nav had no visible indicator for keyboard users. Scope to
-   :focus-visible so a mouse click doesn't leave a lingering ring. */
-.nav-item:focus-visible,
-.primary:focus-visible,
-.small-btn:focus-visible,
-.recorder:focus-visible,
-.key-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.toggle input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.card + .card {
-  margin-top: 16px;
+  gap: var(--space-lg);
 }
 
 /* Rows (label + control) -------------------------------------------------- */
@@ -245,77 +104,42 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 10px 0;
+  gap: var(--space-2xl);
+  padding: var(--space-md) 0;
   border-top: 1px solid var(--border);
 }
 .row:first-of-type {
   border-top: none;
-  padding-top: 6px;
+  padding-top: var(--space-xs);
 }
 .row-label {
-  font-size: 13.5px;
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 
-select {
-  min-width: 200px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 7px 10px;
-  font-size: 13.5px;
-  font-family: inherit;
-  cursor: pointer;
+/* Card head (title + trailing note) --------------------------------------- */
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+.card-head h2 {
+  margin: 0;
+}
+.card-head .hint {
+  margin: 0;
 }
 
-/* Shortcut recorder ------------------------------------------------------- */
-.recorder {
-  min-width: 140px;
-  text-align: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 7px 14px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
-}
-.recorder:hover {
-  border-color: var(--accent);
-}
-.recorder.recording {
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.16);
-  color: var(--accent);
-  letter-spacing: normal;
-  font-weight: 500;
-}
-
-.hint.ok {
-  color: var(--ok);
-}
-.hint.error {
-  color: var(--error);
-}
-
-/* Usage ------------------------------------------------------------------- */
+/* Usage & cost ------------------------------------------------------------ */
 .usage-provider {
-  padding: 12px 0;
+  padding: var(--space-lg) 0;
   border-top: 1px solid var(--border);
 }
 .usage-provider:first-of-type {
   border-top: none;
-  padding-top: 6px;
+  padding-top: var(--space-xs);
 }
 .usage-provider-head {
   display: flex;
@@ -323,13 +147,13 @@ select:focus {
   justify-content: space-between;
 }
 .usage-cost {
-  font-size: 17px;
-  font-weight: 700;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 .usage-sub {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -337,63 +161,14 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 14px;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
 }
 .usage-actions .hint {
   margin-right: auto;
 }
 
-/* Insights ---------------------------------------------------------------- */
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
-}
-@media (min-width: 720px) {
-  .stat-grid { grid-template-columns: repeat(4, 1fr); }
-}
-.stat {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.stat-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-.stat-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-.stat-sub {
-  font-size: 12px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.card-head h2 { margin: 0; }
-.card-head .hint { margin: 0; }
-
+/* Activity chart ---------------------------------------------------------- */
 .activity {
   display: flex;
   align-items: flex-end;
@@ -412,28 +187,32 @@ select:focus {
   min-height: 3px;
   border-radius: 3px 3px 2px 2px;
   background: rgba(var(--accent-rgb), 0.28);
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
 }
-.act-col:hover .act-bar { background: rgba(var(--accent-rgb), 0.5); }
-.act-bar.today { background: var(--accent); }
+.act-col:hover .act-bar {
+  background: rgba(var(--accent-rgb), 0.5);
+}
+.act-bar.today {
+  background: var(--accent);
+}
 .act-empty {
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: var(--fs-xs);
 }
 
 /* Refined-dictation combo (Fn + modifier) --------------------------------- */
 .refine-combo {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 .fn-badge {
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  padding: 7px 12px;
-  font-size: 14px;
-  font-weight: 600;
+  padding: var(--control-pad-y) var(--control-pad-x);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
 }
 .refine-combo .plus {
   color: var(--text-dim);
@@ -444,12 +223,12 @@ select:focus {
 
 /* API key rows ------------------------------------------------------------ */
 .key-row {
-  padding: 14px 0;
+  padding: var(--space-xl) 0;
   border-top: 1px solid var(--border);
 }
 .key-row:first-child {
   border-top: none;
-  padding-top: 4px;
+  padding-top: var(--space-2xs);
 }
 .key-head {
   display: flex;
@@ -457,8 +236,8 @@ select:focus {
   justify-content: space-between;
 }
 .key-status {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
 }
 .key-status.ok {
   color: var(--ok);
@@ -467,110 +246,59 @@ select:focus {
   color: var(--text-dim);
 }
 .key-purpose {
-  margin: 2px 0 8px;
+  margin: var(--space-3xs) 0 var(--space-sm);
 }
 .key-controls {
   display: flex;
-  gap: 8px;
+  gap: var(--space-sm);
   align-items: center;
 }
 .key-input {
   flex: 1;
   min-width: 0;
 }
-.small-btn {
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 7px 12px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.12s, color 0.12s;
-}
-.small-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.small-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.small-btn.danger:hover:not(:disabled) {
-  border-color: var(--error);
-  color: var(--error);
-}
-.primary.small {
-  padding: 7px 14px;
-  font-size: 12.5px;
-}
 .key-msg {
-  margin-top: 6px;
+  margin-top: var(--space-xs);
   min-height: 1em;
 }
 .key-link {
   display: inline-block;
-  margin-top: 8px;
+  margin-top: var(--space-sm);
   color: var(--accent);
-  font-size: 12.5px;
+  font-size: var(--fs-xs);
   text-decoration: none;
 }
 .key-link:hover {
   text-decoration: underline;
 }
+.key-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* History ----------------------------------------------------------------- */
-.search {
-  width: 200px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: 7px 12px;
-  font-size: 13px;
-  font-family: inherit;
-}
-.search:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
-}
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.toggle input {
-  accent-color: var(--accent);
-}
-
 .hist-row {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  padding: var(--space-lg) var(--space-xl);
+  margin-bottom: var(--space-sm);
   background: var(--bg-elev);
 }
 .hist-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
 }
 .hist-spacer {
   flex: 1;
 }
 .hist-badge {
-  font-size: 10.5px;
-  font-weight: 700;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  padding: 2px 7px;
+  padding: var(--space-3xs) 7px;
   border-radius: var(--radius-pill);
 }
 .hist-badge.refined {
@@ -582,36 +310,24 @@ select:focus {
   background: rgba(255, 255, 255, 0.06);
 }
 .hist-time {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
 }
 .hist-text {
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .hist-row .small-btn {
-  padding: 5px 10px;
-  font-size: 11.5px;
-}
-
-/* Empty state ------------------------------------------------------------- */
-.empty {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 48px 24px;
-  text-align: center;
-  color: var(--text-dim);
-}
-.empty p {
-  margin: 4px 0;
+  padding: 5px var(--space-md);
+  font-size: var(--fs-2xs);
 }
 
 /* Macros ------------------------------------------------------------------ */
 .macro-row {
-  padding: 14px;
-  margin-top: 12px;
+  padding: var(--space-xl);
+  margin-top: var(--space-lg);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -621,18 +337,18 @@ select:focus {
 }
 .macro-head {
   display: flex;
-  gap: 10px;
+  gap: var(--space-md);
   align-items: center;
 }
 .macro-head .macro-name {
   flex: 1;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .macro-triggers {
-  margin-top: 8px;
+  margin-top: var(--space-sm);
 }
 .macro-response {
-  margin-top: 8px;
+  margin-top: var(--space-sm);
   min-height: 64px;
 }
 /* Nested one level down (inside .macro-row on --bg-input), lift the field
@@ -642,5 +358,5 @@ select:focus {
   background: var(--bg-elev);
 }
 #macro-add {
-  margin-top: 12px;
+  margin-top: var(--space-lg);
 }
