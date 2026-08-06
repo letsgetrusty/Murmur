@@ -35,13 +35,13 @@ async function loadConfig() {
   }
 }
 
-// The OpenRouter model pickers (refine + macro) only apply when the LLM runs in
+// The OpenRouter model pickers (refine + command) only apply when the LLM runs in
 // the cloud. Hide them in the default on-device config so they don't read as
 // live settings; reveal them when the provider is OpenRouter.
 function applyLlmProviderVisibility() {
   const cloud = el("llm-provider").value === "openrouter";
   el("refine-model-field").hidden = !cloud;
-  el("macro-model-card").hidden = !cloud;
+  el("command-model-card").hidden = !cloud;
 }
 
 // Engine (STT/TTS) selections save immediately and prompt a relaunch, since the
@@ -116,13 +116,13 @@ const HOTKEY_FIELD = {
   dictate: "hotkey_dictate",
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
-  macro: "hotkey_macro",
+  command: "hotkey_command",
 };
 const HOTKEY_LABEL = {
   dictate: "Dictation chord",
   tts_toggle: "Read aloud",
   tts_speed: "Cycle speed",
-  macro: "Macro chord",
+  command: "Command chord",
 };
 
 function prettyShortcut(s) {
@@ -679,30 +679,30 @@ function initHistory() {
   });
 }
 
-// --- Macros -------------------------------------------------------------------
+// --- Commands -------------------------------------------------------------------
 // Edited in-memory as DOM rows, then round-tripped through save_config (same
 // whole-config save the rest of Settings uses). Kept stable across tab switches
 // so unsaved edits survive navigation — only rebuilt on load.
 
-function setMacroStatus(text, kind = "") {
-  const s = el("macro-status");
+function setCommandStatus(text, kind = "") {
+  const s = el("command-status");
   s.textContent = text;
   s.className = `status ${kind}`;
 }
 
-function markMacrosDirty() {
-  el("macro-save").disabled = false;
-  setMacroStatus("");
+function markCommandsDirty() {
+  el("command-save").disabled = false;
+  setCommandStatus("");
 }
 
-function macroRow(m = { name: "", triggers: "", response: "" }) {
+function commandRow(m = { name: "", triggers: "", response: "" }) {
   const row = document.createElement("div");
-  row.className = "macro-row";
+  row.className = "command-row";
 
   const head = document.createElement("div");
-  head.className = "macro-head";
+  head.className = "command-head";
   const name = document.createElement("input");
-  name.className = "macro-name";
+  name.className = "command-name";
   name.placeholder = "Name — e.g. Schedule call";
   name.value = m.name ?? "";
   const remove = document.createElement("button");
@@ -710,57 +710,57 @@ function macroRow(m = { name: "", triggers: "", response: "" }) {
   remove.textContent = "Remove";
   remove.addEventListener("click", () => {
     row.remove();
-    markMacrosDirty();
+    markCommandsDirty();
   });
   head.append(name, remove);
 
   const triggers = document.createElement("input");
-  triggers.className = "macro-triggers";
+  triggers.className = "command-triggers";
   triggers.placeholder = "Example phrases (optional) — e.g. book a call, send my calendly";
   triggers.value = m.triggers ?? "";
 
   const response = document.createElement("textarea");
-  response.className = "macro-response";
+  response.className = "command-response";
   response.rows = 3;
   response.spellcheck = false;
   response.placeholder = "Text to paste — e.g. https://calendly.com/you/30min";
   response.value = m.response ?? "";
 
-  for (const inp of [name, triggers, response]) inp.addEventListener("input", markMacrosDirty);
+  for (const inp of [name, triggers, response]) inp.addEventListener("input", markCommandsDirty);
 
   row.append(head, triggers, response);
   return row;
 }
 
-function renderMacros() {
-  const list = el("macro-list");
+function renderCommands() {
+  const list = el("command-list");
   list.innerHTML = "";
   // Only Paste commands are edited here (refinement is the pinned card above).
   const paste = (currentConfig?.commands ?? []).filter((c) => c.action?.kind === "paste");
   for (const c of paste) {
-    list.appendChild(macroRow({ name: c.name, triggers: c.triggers, response: c.action?.response ?? "" }));
+    list.appendChild(commandRow({ name: c.name, triggers: c.triggers, response: c.action?.response ?? "" }));
   }
 }
 
-// Read the macro rows back out of the DOM. Fully-empty rows are dropped.
-function collectMacros() {
-  const macros = [];
-  for (const r of el("macro-list").querySelectorAll(".macro-row")) {
-    const name = r.querySelector(".macro-name").value.trim();
-    const triggers = r.querySelector(".macro-triggers").value.trim();
-    const response = r.querySelector(".macro-response").value;
+// Read the command rows back out of the DOM. Fully-empty rows are dropped.
+function collectCommands() {
+  const rows = [];
+  for (const r of el("command-list").querySelectorAll(".command-row")) {
+    const name = r.querySelector(".command-name").value.trim();
+    const triggers = r.querySelector(".command-triggers").value.trim();
+    const response = r.querySelector(".command-response").value;
     if (!name && !triggers && !response.trim()) continue;
-    macros.push({ name, triggers, response });
+    rows.push({ name, triggers, response });
   }
-  return macros;
+  return rows;
 }
 
-async function saveMacros() {
+async function saveCommands() {
   if (!invoke || !currentConfig) return;
-  const rows = collectMacros();
+  const rows = collectCommands();
   for (const m of rows) {
     if (!m.name || !m.response.trim()) {
-      setMacroStatus("Each command needs a name and a response.", "error");
+      setCommandStatus("Each command needs a name and a response.", "error");
       return;
     }
   }
@@ -778,35 +778,35 @@ async function saveMacros() {
   const next = {
     ...currentConfig,
     commands,
-    macro_model: el("macro-model").value.trim(),
+    command_model: el("command-model").value.trim(),
     refine_prompt: el("refine-prompt").value,
     refine_model: el("refine-model").value.trim(),
   };
-  el("macro-save").disabled = true;
-  setMacroStatus("Saving…");
+  el("command-save").disabled = true;
+  setCommandStatus("Saving…");
   try {
     await invoke("save_config", { config: next });
     currentConfig = next;
-    setMacroStatus("Saved ✓", "ok");
+    setCommandStatus("Saved ✓", "ok");
   } catch (e) {
-    setMacroStatus(`Save failed: ${e}`, "error");
-    el("macro-save").disabled = false;
+    setCommandStatus(`Save failed: ${e}`, "error");
+    el("command-save").disabled = false;
   }
 }
 
-function initMacros() {
-  el("macro-model").value = currentConfig?.macro_model ?? "";
-  renderMacros();
-  el("macro-model").addEventListener("input", markMacrosDirty);
+function initCommands() {
+  el("command-model").value = currentConfig?.command_model ?? "";
+  renderCommands();
+  el("command-model").addEventListener("input", markCommandsDirty);
   // Refinement lives on this tab now, so its edits mark the tab dirty and save
   // with it.
-  el("refine-prompt").addEventListener("input", markMacrosDirty);
-  el("refine-model").addEventListener("input", markMacrosDirty);
-  el("macro-add").addEventListener("click", () => {
-    el("macro-list").appendChild(macroRow());
-    markMacrosDirty();
+  el("refine-prompt").addEventListener("input", markCommandsDirty);
+  el("refine-model").addEventListener("input", markCommandsDirty);
+  el("command-add").addEventListener("click", () => {
+    el("command-list").appendChild(commandRow());
+    markCommandsDirty();
   });
-  el("macro-save").addEventListener("click", saveMacros);
+  el("command-save").addEventListener("click", saveCommands);
 }
 
 // --- Tabs & init --------------------------------------------------------------
@@ -868,14 +868,14 @@ async function init() {
     if (e.metaKey && e.key === "s" && !recording) {
       e.preventDefault();
       // Commands is the only tab with a manual Save.
-      if (!el("macro-save").disabled) saveMacros();
+      if (!el("command-save").disabled) saveCommands();
     }
   });
 
   await loadConfig();
   await loadOptions();
   initHotkeys();
-  initMacros();
+  initCommands();
   await loadKeys();
   initUsage();
   initHistory();

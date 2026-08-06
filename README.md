@@ -1,7 +1,7 @@
 # Murmur
 
 A fast, native macOS voice tool: **dictation** and **read-aloud**, with
-on-device LLM refinement and voice macros over your speech. Built as
+on-device LLM refinement and voice commands over your speech. Built as
 a Tauri v2 app with a Rust engine and a thin webview for the overlay and
 settings — deliberately *not* an 800MB Electron app.
 
@@ -126,7 +126,7 @@ Logs stream to `~/Library/Logs/murmur.log`.
 ## Architecture
 
 Rust engine with each capability behind a trait (STT, TTS, refinement,
-macro-matching) so providers are chosen by config, not hardcoded at call sites. The
+command-matching) so providers are chosen by config, not hardcoded at call sites. The
 webview is only the overlay and settings UI.
 
 Modules (`src-tauri/src/`): `audio` (cpal capture) · `stt` (Groq Whisper) ·

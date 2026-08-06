@@ -339,39 +339,39 @@ nav {
   font-size: var(--fs-2xs);
 }
 
-/* Macros ------------------------------------------------------------------ */
-.macro-row {
+/* Commands ------------------------------------------------------------------ */
+.command-row {
   padding: var(--space-xl);
   margin-top: var(--space-lg);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.macro-row:first-child {
+.command-row:first-child {
   margin-top: 0;
 }
-.macro-head {
+.command-head {
   display: flex;
   gap: var(--space-md);
   align-items: center;
 }
-.macro-head .macro-name {
+.command-head .command-name {
   flex: 1;
   font-weight: var(--fw-semibold);
 }
-.macro-triggers {
+.command-triggers {
   margin-top: var(--space-sm);
 }
-.macro-response {
+.command-response {
   margin-top: var(--space-sm);
   min-height: 64px;
 }
-/* Nested one level down (inside .macro-row on --bg-input), lift the field
+/* Nested one level down (inside .command-row on --bg-input), lift the field
    backgrounds so they read against the row instead of blending in. */
-.macro-row input,
-.macro-row textarea {
+.command-row input,
+.command-row textarea {
   background: var(--bg-elev);
 }
-#macro-add {
+#command-add {
   margin-top: var(--space-lg);
 }

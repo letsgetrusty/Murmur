@@ -47,7 +47,7 @@
   --overlay-error-text: #ffb4b4;
 
   /* Radius ---------------------------------------------------------------- */
-  --radius: 10px; /* containers: cards, stats, history/macro rows */
+  --radius: 10px; /* containers: cards, stats, history/command rows */
   --radius-control: 8px; /* inputs, buttons, selects */
   --radius-nav: 7px;
   --radius-pill: 999px;

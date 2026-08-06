@@ -1,7 +1,7 @@
 # CLAUDE.md — Voice Tool
 
 macOS desktop app (Tauri v2, Rust backend + webview) combining dictation and
-read-aloud TTS, with on-device LLM refinement and voice macros over your speech.
+read-aloud TTS, with on-device LLM refinement and voice commands over your speech.
 Personal daily-driver tool; also a Rust-business content artifact.
 
 **Design notes live in `docs/voice-tool-architecture.md` (build order + macOS
@@ -25,7 +25,7 @@ gotchas). When this file and the architecture doc disagree, ask.**
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
   **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) and
   ElevenLabs (cloud, `reqwest`) optional. Selected by `tts_provider` in config.
-- Refinement (Fn+Ctrl) + Macros: local Qwen3 1.7B via `llama-cpp-2` (embedded
+- Refinement (Fn+Ctrl) + Commands: local Qwen3 1.7B via `llama-cpp-2` (embedded
   llama.cpp, Metal) — **default**; OpenRouter via `reqwest` optional (cloud).
   Selected by `llm_provider` in config.
 - Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
@@ -53,10 +53,10 @@ gotchas). When this file and the architecture doc disagree, ask.**
    empty audio silently and recording appears to work with a flat waveform.
 
 ## Backends behind traits
-STT, TTS, and the refine/macro LLM each sit behind a trait; selection is via
+STT, TTS, and the refine/command LLM each sit behind a trait; selection is via
 config. Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
 `AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
-Refine + macros default to a shared embedded local LLM (Qwen3 via llama.cpp),
+Refine + commands default to a shared embedded local LLM (Qwen3 via llama.cpp),
 OpenRouter optional. Don't hardcode a provider at a call site.
 
 ## Current status
@@ -80,10 +80,11 @@ clear match). Both operations run through one chat seam (`llm.rs`: `LlmChat`
 trait + `transform`/`classify`, `LocalChat`/`OpenRouterChat`). Managed in the
 Settings "Commands" tab; command runs are not recorded to dictation history. The
 three dictation paths share one recorder lifecycle via the `DictationMode` enum
-(Plain / Refine / Macro). Old `{name,triggers,response}` macros auto-migrate to
-Paste commands on config load. (Stage 2, not yet built: user-authored Transform
+(Plain / Refine / Command). Old `{name,triggers,response}` macros auto-migrate to
+Paste commands on config load (and the old `hotkey_macro` / `macro_model` config
+keys are read via serde aliases). (Stage 2, not yet built: user-authored Transform
 commands with their own triggers.)
-The dictation / refine / read-aloud / macros feature set above is the full
+The dictation / refine / read-aloud / commands feature set above is the full
 intended scope — no further phases are planned. Build order + macOS gotchas for
 the shipped work: `docs/voice-tool-architecture.md` §7.
 

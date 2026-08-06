@@ -100,7 +100,7 @@ pub fn set_hotkey(
             "dictate" => cfg.hotkey_dictate.clone(),
             "tts_toggle" => cfg.hotkey_tts.clone(),
             "tts_speed" => cfg.hotkey_tts_speed.clone(),
-            "macro" => cfg.hotkey_macro.clone(),
+            "command" => cfg.hotkey_command.clone(),
             _ => return Err(format!("unknown hotkey action: {action}")),
         }
     };
@@ -113,7 +113,7 @@ pub fn set_hotkey(
             "dictate" => cfg.hotkey_dictate = shortcut.clone(),
             "tts_toggle" => cfg.hotkey_tts = shortcut.clone(),
             "tts_speed" => cfg.hotkey_tts_speed = shortcut.clone(),
-            "macro" => cfg.hotkey_macro = shortcut.clone(),
+            "command" => cfg.hotkey_command = shortcut.clone(),
             _ => {}
         }
         cfg.clone()

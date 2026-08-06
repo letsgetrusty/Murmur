@@ -3,11 +3,11 @@
 //   - transform: rewrite the transcript with a prompt (the Fn+Ctrl refinement,
 //     and any `Action::Transform` command).
 //   - classify:  pick which of the user's `Paste` commands a spoken phrase means
-//     (voice macros, under the command chord).
+//     (voice commands, under the command chord).
 // Both are a single chat completion, so the local backend (embedded llama.cpp,
 // see `local_llm.rs`) and OpenRouter (cloud) implement one trait — `LlmChat` —
-// and the transform/classify logic is provider-agnostic. This replaces the old
-// `refine.rs` + `macros.rs` (one `Refiner` + one `MacroMatcher` each).
+// and the transform/classify logic is provider-agnostic. This replaces the two
+// older per-feature modules (one trait + local/cloud impl each).
 
 use std::future::Future;
 use std::pin::Pin;

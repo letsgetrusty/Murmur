@@ -116,8 +116,8 @@
               <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
             </div>
             <div class="row">
-              <span class="row-label">Macro chord</span>
-              <button class="recorder" data-action="macro" data-default="CmdOrCtrl+Shift+M"></button>
+              <span class="row-label">Command chord</span>
+              <button class="recorder" data-action="command" data-default="CmdOrCtrl+Shift+M"></button>
             </div>
             <div class="row">
               <span class="row-label">Refined dictation</span>
@@ -154,8 +154,8 @@
           <header class="tab-head">
             <h1>Commands</h1>
             <div class="actions">
-              <span id="macro-status" class="status"></span>
-              <button id="macro-save" class="primary" disabled>Save</button>
+              <span id="command-status" class="status"></span>
+              <button id="command-save" class="primary" disabled>Save</button>
             </div>
           </header>
 
@@ -195,15 +195,15 @@
               say “schedule a call” to paste your Calendly link. If nothing
               matches, Murmur pastes nothing.
             </p>
-            <div id="macro-list"></div>
-            <button id="macro-add" class="small-btn">+ Add command</button>
+            <div id="command-list"></div>
+            <button id="command-add" class="small-btn">+ Add command</button>
           </div>
 
-          <div class="card" id="macro-model-card">
+          <div class="card" id="command-model-card">
             <h2>Matching model</h2>
             <label class="field">
               <span class="field-label">Model</span>
-              <input id="macro-model" list="models" autocomplete="off" spellcheck="false" />
+              <input id="command-model" list="models" autocomplete="off" spellcheck="false" />
               <span class="hint">
                 OpenRouter model that picks the command (uses your OpenRouter key).
                 A small, fast model is best for this.

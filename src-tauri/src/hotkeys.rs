@@ -14,7 +14,7 @@ pub enum HotkeyAction {
     Dictate,
     TtsToggle,
     TtsSpeed,
-    Macro,
+    Command,
 }
 
 impl HotkeyAction {
@@ -23,7 +23,7 @@ impl HotkeyAction {
             "dictate" => Some(Self::Dictate),
             "tts_toggle" => Some(Self::TtsToggle),
             "tts_speed" => Some(Self::TtsSpeed),
-            "macro" => Some(Self::Macro),
+            "command" => Some(Self::Command),
             _ => None,
         }
     }
@@ -49,11 +49,11 @@ fn register_action<R: Runtime>(
                 ShortcutState::Released => on_release(app, DictationMode::Plain),
             },
         )?,
-        HotkeyAction::Macro => gs.on_shortcut(
+        HotkeyAction::Command => gs.on_shortcut(
             sc,
             move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
                 ShortcutState::Pressed => on_press(app),
-                ShortcutState::Released => on_release(app, DictationMode::Macro),
+                ShortcutState::Released => on_release(app, DictationMode::Command),
             },
         )?,
         HotkeyAction::TtsToggle => gs.on_shortcut(
@@ -83,7 +83,7 @@ pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<
         (HotkeyAction::Dictate, &cfg.hotkey_dictate),
         (HotkeyAction::TtsToggle, &cfg.hotkey_tts),
         (HotkeyAction::TtsSpeed, &cfg.hotkey_tts_speed),
-        (HotkeyAction::Macro, &cfg.hotkey_macro),
+        (HotkeyAction::Command, &cfg.hotkey_command),
     ] {
         if let Err(e) = register_action(app, action, sc) {
             log::warn!("hotkey: register '{sc}' failed: {e}");
@@ -130,7 +130,7 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 
 /// Commit a dictation. Keep the overlay visible — the router flips it to
 /// Done/Error and schedules the idle render once transcribe + inject return.
-/// `mode` selects plain / refined / macro handling of the transcript.
+/// `mode` selects plain / refined / command handling of the transcript.
 pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
     log::info!("hotkey: release (mode={mode:?})");
     unregister_escape(app);
