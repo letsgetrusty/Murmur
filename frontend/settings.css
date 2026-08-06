@@ -147,42 +147,6 @@ nav {
   margin: 0;
 }
 
-/* Usage & cost ------------------------------------------------------------ */
-.usage-provider {
-  padding: var(--space-lg) 0;
-  border-top: 1px solid var(--border);
-}
-.usage-provider:first-of-type {
-  border-top: none;
-  padding-top: var(--space-xs);
-}
-.usage-provider-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-.usage-cost {
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-bold);
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-.usage-sub {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  margin-top: 3px;
-}
-.usage-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-md);
-  margin-top: var(--space-xl);
-}
-.usage-actions .hint {
-  margin-right: auto;
-}
-
 /* Activity chart ---------------------------------------------------------- */
 .activity {
   display: flex;
@@ -234,61 +198,6 @@ nav {
 }
 #refine-modifier {
   min-width: 140px;
-}
-
-/* API key rows ------------------------------------------------------------ */
-.key-row {
-  padding: var(--space-xl) 0;
-  border-top: 1px solid var(--border);
-}
-.key-row:first-child {
-  border-top: none;
-  padding-top: var(--space-2xs);
-}
-.key-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-.key-status {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-}
-.key-status.ok {
-  color: var(--ok);
-}
-.key-status.off {
-  color: var(--text-dim);
-}
-.key-purpose {
-  margin: var(--space-3xs) 0 var(--space-sm);
-}
-.key-controls {
-  display: flex;
-  gap: var(--space-sm);
-  align-items: center;
-}
-.key-input {
-  flex: 1;
-  min-width: 0;
-}
-.key-msg {
-  margin-top: var(--space-xs);
-  min-height: 1em;
-}
-.key-link {
-  display: inline-block;
-  margin-top: var(--space-sm);
-  color: var(--accent);
-  font-size: var(--fs-xs);
-  text-decoration: none;
-}
-.key-link:hover {
-  text-decoration: underline;
-}
-.key-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* History ----------------------------------------------------------------- */

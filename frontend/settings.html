@@ -52,35 +52,15 @@
               <span class="field-label">Prompt</span>
               <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
             </label>
-            <label class="field" id="refine-model-field">
-              <span class="field-label">Model</span>
-              <input id="refine-model" list="models" autocomplete="off" spellcheck="false" />
-              <datalist id="models">
-                <option value="anthropic/claude-haiku-4.5"></option>
-                <option value="anthropic/claude-sonnet-4.5"></option>
-                <option value="openai/gpt-4o-mini"></option>
-                <option value="openai/gpt-4.1-mini"></option>
-                <option value="meta-llama/llama-3.3-70b-instruct"></option>
-                <option value="google/gemini-2.5-flash"></option>
-              </datalist>
-              <span class="hint">Any model slug from openrouter.ai/models.</span>
-            </label>
           </div>
 
           <div class="card">
             <h2>Engines</h2>
             <p class="hint">
-              Dictation and read-aloud run on-device by default — private,
-              offline, no API key. Switching an engine takes effect after you
-              relaunch Open Wispr.
+              Dictation, read-aloud, and refinement all run on-device —
+              private, offline, no API key. Switching an engine takes effect
+              after you relaunch Open Wispr.
             </p>
-            <div class="row">
-              <span class="row-label">Dictation (speech-to-text)</span>
-              <select id="stt-provider">
-                <option value="local">On-device · Whisper</option>
-                <option value="groq">Groq · cloud</option>
-              </select>
-            </div>
             <div class="row">
               <span class="row-label">Whisper model</span>
               <select id="stt-model">
@@ -94,14 +74,6 @@
               <select id="tts-provider">
                 <option value="native">On-device · macOS</option>
                 <option value="kokoro">On-device · Kokoro (neural)</option>
-                <option value="elevenlabs">ElevenLabs · cloud</option>
-              </select>
-            </div>
-            <div class="row">
-              <span class="row-label">Refinement &amp; commands (LLM)</span>
-              <select id="llm-provider">
-                <option value="local">On-device · Qwen3</option>
-                <option value="openrouter">OpenRouter · cloud</option>
               </select>
             </div>
             <div id="engine-relaunch" class="engine-relaunch" hidden>
@@ -161,14 +133,6 @@
             </p>
           </div>
 
-          <div class="card">
-            <h2>API Keys</h2>
-            <p class="hint">
-              Stored in your macOS Keychain — never in config files. Key changes
-              take effect after you relaunch Open Wispr.
-            </p>
-            <div id="keys"></div>
-          </div>
         </section>
 
         <!-- Insights -->
@@ -212,43 +176,6 @@
             <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
           </div>
 
-          <div class="card">
-            <h2>Usage &amp; cost</h2>
-            <p class="hint">
-              OpenRouter is exact (pulled live from their API, all-time).
-              Groq &amp; ElevenLabs don't expose usage to your keys, so those are
-              local counts since Open Wispr started tracking, with estimated cost.
-            </p>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Refinement · OpenRouter</span>
-                <span class="usage-cost" id="or-total">…</span>
-              </div>
-              <div class="usage-sub" id="or-sub"></div>
-            </div>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Dictation · Groq</span>
-                <span class="usage-cost" id="stt-cost">—</span>
-              </div>
-              <div class="usage-sub" id="stt-sub"></div>
-            </div>
-
-            <div class="usage-provider">
-              <div class="usage-provider-head">
-                <span class="row-label">Read-aloud · ElevenLabs</span>
-                <span class="usage-cost" id="tts-cost">—</span>
-              </div>
-              <div class="usage-sub" id="tts-sub"></div>
-            </div>
-
-            <div class="usage-actions">
-              <span id="usage-reset-msg" class="hint"></span>
-              <button id="u-reset" class="small-btn danger">Reset local counts</button>
-            </div>
-          </div>
         </section>
 
         <!-- History -->

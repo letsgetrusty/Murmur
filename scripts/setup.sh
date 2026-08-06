@@ -8,11 +8,11 @@
 #   3. creates the self-signed "openwispr dev" Code Signing cert and trusts it
 #      (the CLI equivalent of the Keychain Access flow in
 #      docs/macos-signing-and-permissions.md),
-#   4. builds the debug binary and optionally stores your API keys in Keychain.
+#   4. builds the debug binary and fetches the default local Whisper model.
 #
-# Idempotent: every step checks-then-acts, so re-running is safe. The only steps
-# it can't do for you are granting Accessibility and typing in key values — it
-# tells you exactly how.
+# Everything runs on-device — no API keys, no accounts. Idempotent: every step
+# checks-then-acts, so re-running is safe. The only step it can't do for you is
+# granting Accessibility — it tells you exactly how.
 #
 # Usage: ./scripts/setup.sh
 
@@ -23,7 +23,6 @@ cd "$REPO_ROOT"
 
 IDENTITY="openwispr dev"
 BUNDLE_ID="ai.openwispr.app"
-OPENWISPR_BIN="src-tauri/target/debug/openwispr"
 
 say()  { printf '\033[1;36m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
@@ -138,8 +137,8 @@ else
   ok "Cert trusted"
 fi
 
-# ── 4. Build + API keys ─────────────────────────────────────────────────────
-say "Building the debug binary (so 'openwispr set-key' is available)…"
+# ── 4. Build ─────────────────────────────────────────────────────────────────
+say "Building the debug binary…"
 cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 ok "Build OK"
 
@@ -164,24 +163,7 @@ else
   fi
 fi
 
-say "API keys (stored in macOS Keychain, never on disk)…"
-printf '   Dictation runs on-device (local Whisper) by default — no key needed.\n'
-printf '   OpenRouter powers refined dictation + voice macros. Groq (cloud STT)\n'
-printf '   and ElevenLabs (cloud voice) are optional alternatives.\n'
-read -r -p "   Configure API keys now? [Y/n] " cfg
-case "$cfg" in
-  [nN]*) printf '   Skipped. Set later with:  %s set-key [groq|openrouter|elevenlabs]\n' "$OPENWISPR_BIN" ;;
-  *)
-    for spec in "groq:Groq" "openrouter:OpenRouter" "elevenlabs:ElevenLabs"; do
-      provider="${spec%%:*}"; label="${spec##*:}"
-      read -r -p "   Set $label key now? [y/N] " yn
-      case "$yn" in
-        [yY]*) "$OPENWISPR_BIN" set-key "$provider" || warn "set-key $provider did not complete." ;;
-        *)     printf '   Skipped — later:  %s set-key %s\n' "$OPENWISPR_BIN" "$provider" ;;
-      esac
-    done
-    ;;
-esac
+ok "Everything runs on-device — no API keys or accounts to configure."
 
 # ── 5. Done ─────────────────────────────────────────────────────────────────
 echo

@@ -10,7 +10,6 @@ mod hotkeys;
 mod inject;
 mod llm;
 mod local_llm;
-mod secrets;
 mod selection;
 mod stt;
 mod tts;
@@ -139,15 +138,6 @@ pub fn run() {
     }
     builder.init();
 
-    // First-run setup: `openwispr set-key` stores the Groq API key in Keychain.
-    // CLAUDE.md hard rule #6: secrets never live in config files or source.
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("set-key") {
-        // `openwispr set-key [groq|openrouter|elevenlabs]`; defaults to groq.
-        let which = args.get(2).map(String::as_str).unwrap_or("groq");
-        return run_set_key(which);
-    }
-
     // Enumerate cpal input devices BEFORE Tauri/NSApp takes over the main
     // thread. Calling into CoreAudio HAL from inside the
     // NSApplicationDidFinishLaunching notification handler segfaults the
@@ -167,19 +157,12 @@ pub fn run() {
             commands::set_mic,
             commands::set_hotkey,
             commands::set_refine_modifier,
-            commands::list_keys,
-            commands::reveal_key,
-            commands::save_key,
-            commands::delete_key,
             commands::get_usage,
-            commands::reset_usage,
-            commands::get_openrouter_spend,
             commands::list_history,
             commands::delete_history,
             commands::clear_history,
             commands::history_stats,
             commands::copy_text,
-            commands::open_url,
             commands::relaunch_app,
         ])
         .setup(move |app| {
@@ -187,26 +170,18 @@ pub fn run() {
             // settings window edits it via IPC, so changes apply without a restart.
             let config_state = Arc::new(Mutex::new(cfg.clone()));
 
-            // Speech-to-text backend, selected by config. Default is local
-            // on-device Whisper (whisper-rs); "groq" uses the cloud endpoint,
-            // reading its key from Keychain lazily so `set-key` needs no restart.
-            let transcriber: Arc<dyn stt::Transcriber> = match cfg.stt_provider.as_str() {
-                "groq" => {
-                    log::info!("stt: Groq cloud Whisper backend");
-                    Arc::new(stt::GroqWhisper::new())
-                }
-                _ => {
-                    log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
-                    // Fetch the model in the background so the first dictation
-                    // isn't blocked on a ~0.5 GB download.
-                    let model = cfg.stt_model.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = stt::ensure_local_model(&model).await {
-                            log::warn!("stt: local model prefetch failed: {e}");
-                        }
-                    });
-                    Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
-                }
+            // Speech-to-text: local on-device Whisper (whisper-rs).
+            let transcriber: Arc<dyn stt::Transcriber> = {
+                log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
+                // Fetch the model in the background so the first dictation isn't
+                // blocked on a ~0.5 GB download.
+                let model = cfg.stt_model.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = stt::ensure_local_model(&model).await {
+                        log::warn!("stt: local model prefetch failed: {e}");
+                    }
+                });
+                Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
             };
 
             // Cumulative refinement usage, persisted across restarts.
@@ -215,18 +190,16 @@ pub fn run() {
             // Dictation history database.
             let history_state = Arc::new(Mutex::new(history::open()));
 
-            // LLM backend for the Fn+Ctrl refine pass, selected by config.
-            // "local" is the embedded llama.cpp engine (Qwen3, loaded on first
-            // use); "openrouter" is the cloud backend (key read from Keychain
-            // lazily). The prompt/model come from the shared config.
-            let chat: Arc<dyn llm::LlmChat> = if cfg.llm_provider == "local" {
+            // LLM for the Fn+Ctrl refine pass: the embedded llama.cpp engine
+            // (Qwen3), loaded on first use.
+            let chat: Arc<dyn llm::LlmChat> = {
                 if local_llm::assets_present(&cfg.llm_model) {
                     log::info!("llm: local backend (model '{}')", cfg.llm_model);
                 } else {
                     log::info!("llm: local backend; model missing — downloading…");
                 }
-                // Download the model in the background so the first refine/command
-                // isn't blocked on a ~1 GB fetch; it loads on first use.
+                // Download the model in the background so the first refine isn't
+                // blocked on a ~1 GB fetch; it loads on first use.
                 let model = cfg.llm_model.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = local_llm::ensure_local_llm(&model).await {
@@ -237,9 +210,6 @@ pub fn run() {
                     local_llm::model_path(&cfg.llm_model).unwrap_or_default(),
                 ));
                 Arc::new(llm::LocalChat::new(engine))
-            } else {
-                log::info!("llm: OpenRouter cloud backend");
-                Arc::new(llm::OpenRouterChat::new())
             };
 
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
@@ -247,17 +217,9 @@ pub fn run() {
             // callback boundary.
             let tx = spawn_dictation_worker(app.handle().clone(), transcriber, chat);
 
-            // Text-to-speech backend, selected by config. Default is the native
-            // on-device AVSpeechSynthesizer; "kokoro" is local neural TTS;
-            // "elevenlabs" is cloud (falls back to native without a key).
+            // Text-to-speech (both on-device): "kokoro" local neural, or the
+            // native macOS AVSpeechSynthesizer (default).
             let speaker: Arc<dyn tts::Speaker> = match cfg.tts_provider.as_str() {
-                "elevenlabs" if secrets::get(secrets::ELEVENLABS_API_KEY).is_ok() => {
-                    log::info!("tts: ElevenLabs backend");
-                    let s = tts::ElevenLabsSpeaker::new();
-                    s.set_speed(cfg.tts_speed);
-                    s.set_voice(&cfg.tts_voice_id);
-                    Arc::new(s)
-                }
                 "kokoro" => {
                     if tts::kokoro_assets_present() {
                         log::info!("tts: Kokoro local neural backend");
@@ -281,12 +243,8 @@ pub fn run() {
                     s.set_voice(&cfg.tts_voice_id);
                     Arc::new(s)
                 }
-                other => {
-                    if other == "elevenlabs" {
-                        log::info!("tts: ElevenLabs selected but no key in Keychain; using native");
-                    } else {
-                        log::info!("tts: native macOS AVSpeechSynthesizer backend");
-                    }
+                _ => {
+                    log::info!("tts: native macOS AVSpeechSynthesizer backend");
                     Arc::new(tts::MacSpeaker::new())
                 }
             };
@@ -807,35 +765,6 @@ fn persist_config<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn run_set_key(which: &str) {
-    use std::io::{self, Write};
-    let (key_name, label) = match which {
-        "groq" => (secrets::GROQ_API_KEY, "Groq"),
-        "openrouter" => (secrets::OPENROUTER_API_KEY, "OpenRouter"),
-        "elevenlabs" => (secrets::ELEVENLABS_API_KEY, "ElevenLabs"),
-        other => {
-            eprintln!("unknown key '{other}'. Use: groq | openrouter | elevenlabs");
-            return;
-        }
-    };
-    eprint!("Enter {label} API key: ");
-    let _ = io::stderr().flush();
-    let mut key = String::new();
-    if let Err(e) = io::stdin().read_line(&mut key) {
-        eprintln!("read failed: {e}");
-        return;
-    }
-    let key = key.trim();
-    if key.is_empty() {
-        eprintln!("empty key, aborting");
-        return;
-    }
-    match secrets::set(key_name, key) {
-        Ok(()) => eprintln!("{label} key saved to Keychain."),
-        Err(e) => eprintln!("save failed: {e}"),
-    }
-}
-
 fn spawn_dictation_worker<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -998,7 +927,7 @@ fn handle_recording<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let secs = recording.duration_ms as f64 / 1000.0;
         let transcribe_result = transcriber.transcribe(&recording.wav).await;
-        // Groq billed us for the audio if the request succeeded.
+        // Count the audio toward usage stats once it transcribes cleanly.
         if transcribe_result.is_ok() {
             record_usage(&app, |u| u.record_stt(secs));
         }
@@ -1044,28 +973,23 @@ async fn run_dictation<R: Runtime>(
     let mut was_refined = false;
     let final_text = if refine {
         emit_state(app, OverlayState::Refining);
-        // The refine prompt + cloud model come from live config (local ignores
-        // the model). Refinement is the built-in Transform command.
-        let (prompt, model) = match app.state::<AppState>().config.lock() {
-            Ok(c) => (c.refine_prompt.clone(), c.refine_model.clone()),
-            Err(_) => (String::new(), String::new()),
+        // The refine prompt comes from live config so edits apply without restart.
+        let prompt = match app.state::<AppState>().config.lock() {
+            Ok(c) => c.refine_prompt.clone(),
+            Err(_) => String::new(),
         };
-        match llm::transform(chat, &model, &prompt, &text).await {
-            Ok(res) => {
+        match llm::transform(chat, &prompt, &text).await {
+            Ok(refined) => {
                 log::info!(
                     "dictation: refined ({} chars): {}",
-                    res.content.chars().count(),
-                    res.content
+                    refined.chars().count(),
+                    refined
                 );
-                // Record OpenRouter token/cost usage (local reports none); either
-                // way refresh the settings window's usage view if it's open.
-                if let Some((p, c, t, cost)) = res.usage {
-                    record_usage(app, |u| u.record(p, c, t, cost));
-                } else if let Ok(u) = app.state::<AppState>().usage.lock() {
-                    let _ = app.emit("usage", u.clone());
-                }
+                // Count the refined dictation and refresh the settings window's
+                // usage view if it's open.
+                record_usage(app, |u| u.record_refine());
                 was_refined = true;
-                res.content
+                refined
             }
             Err(e) => {
                 log::warn!("dictation: refine failed, pasting raw transcript: {e}");

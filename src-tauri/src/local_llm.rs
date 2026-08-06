@@ -1,7 +1,7 @@
 // Embedded local LLM (llama.cpp via `llama-cpp-2`) for the Fn+Ctrl refine pass,
-// so it can run fully offline instead of calling OpenRouter. Driven from `llm.rs`;
-// the GGUF model is loaded lazily on first use and cached, and downloaded on first
-// run like the Whisper/Kokoro models.
+// so it runs fully offline. Driven from `llm.rs`; the GGUF model is loaded lazily
+// on first use and cached, and downloaded on first run like the Whisper/Kokoro
+// models.
 //
 // Default model is Qwen3 1.7B (Q4_K_M) — small, fast, and strong at instruction
 // following, which is all "clean up this text" needs. Qwen3 is a hybrid reasoning

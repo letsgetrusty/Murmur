@@ -8,11 +8,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM"; // Rachel
-
-/// OpenRouter model slug used to refine dictation (Fn+Ctrl). Any slug from
-/// openrouter.ai/models works; edit `refine_model` in config.json to change it.
-pub const DEFAULT_REFINE_MODEL: &str = "anthropic/claude-haiku-4.5";
+// Default TTS voice id. The native (AVSpeechSynthesizer) backend ignores this;
+// the Kokoro backend maps it to one of its voices. `af_heart` is Kokoro's
+// default US female voice.
+const DEFAULT_VOICE_ID: &str = "af_heart";
 
 /// System prompt for the refine pass. Deliberately treats the transcript as
 /// text-to-clean, not instructions, so dictated questions/commands aren't
@@ -26,9 +25,6 @@ pub struct Config {
     /// cpal device name used for dictation. `None` means the system default.
     #[serde(default)]
     pub mic_name: Option<String>,
-    /// OpenRouter model for the Fn+Ctrl refine pass.
-    #[serde(default = "default_refine_model")]
-    pub refine_model: String,
     /// System prompt for the refine pass.
     #[serde(default = "default_refine_prompt")]
     pub refine_prompt: String,
@@ -51,22 +47,14 @@ pub struct Config {
     /// One of "Ctrl" | "Shift" | "Alt" | "Cmd".
     #[serde(default = "default_refine_modifier")]
     pub refine_modifier: String,
-    /// Speech-to-text backend: "local" (whisper-rs, on-device) or "groq"
-    /// (cloud Whisper). Defaults to local.
-    #[serde(default = "default_stt_provider")]
-    pub stt_provider: String,
     /// Local Whisper model name (a whisper.cpp ggml model, e.g. "small.en").
     /// The GGML file is fetched to <app-support>/openwispr/models/ggml-<name>.bin.
     #[serde(default = "default_stt_model")]
     pub stt_model: String,
-    /// Text-to-speech backend: "native" (AVSpeechSynthesizer, on-device) or
-    /// "elevenlabs" (cloud). Defaults to native.
+    /// Text-to-speech backend: "native" (AVSpeechSynthesizer) or "kokoro" (local
+    /// neural). Both on-device. Defaults to native.
     #[serde(default = "default_tts_provider")]
     pub tts_provider: String,
-    /// LLM backend for refinement + commands: "local" (embedded Qwen3 via
-    /// llama.cpp, offline) or "openrouter" (cloud). Defaults to local.
-    #[serde(default = "default_llm_provider")]
-    pub llm_provider: String,
     /// Local GGUF model name (in <app-support>/openwispr/models/<name>.gguf).
     #[serde(default = "default_llm_model")]
     pub llm_model: String,
@@ -92,29 +80,17 @@ fn default_hotkey_tts() -> String {
 fn default_hotkey_tts_speed() -> String {
     DEFAULT_HOTKEY_TTS_SPEED.to_string()
 }
-pub const DEFAULT_STT_PROVIDER: &str = "local";
 pub const DEFAULT_STT_MODEL: &str = "small.en";
 pub const DEFAULT_TTS_PROVIDER: &str = "native";
-pub const DEFAULT_LLM_PROVIDER: &str = "local";
 pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
-fn default_stt_provider() -> String {
-    DEFAULT_STT_PROVIDER.to_string()
-}
 fn default_stt_model() -> String {
     DEFAULT_STT_MODEL.to_string()
 }
 fn default_tts_provider() -> String {
     DEFAULT_TTS_PROVIDER.to_string()
 }
-fn default_llm_provider() -> String {
-    DEFAULT_LLM_PROVIDER.to_string()
-}
 fn default_llm_model() -> String {
     DEFAULT_LLM_MODEL.to_string()
-}
-
-fn default_refine_model() -> String {
-    DEFAULT_REFINE_MODEL.to_string()
 }
 fn default_refine_prompt() -> String {
     DEFAULT_REFINE_PROMPT.to_string()
@@ -132,7 +108,6 @@ impl Default for Config {
             tts_speed: 1.0,
             tts_voice_id: DEFAULT_VOICE_ID.to_string(),
             mic_name: None,
-            refine_model: default_refine_model(),
             refine_prompt: default_refine_prompt(),
             history_enabled: default_history_enabled(),
             history_limit: default_history_limit(),
@@ -140,10 +115,8 @@ impl Default for Config {
             hotkey_tts: default_hotkey_tts(),
             hotkey_tts_speed: default_hotkey_tts_speed(),
             refine_modifier: default_refine_modifier(),
-            stt_provider: default_stt_provider(),
             stt_model: default_stt_model(),
             tts_provider: default_tts_provider(),
-            llm_provider: default_llm_provider(),
             llm_model: default_llm_model(),
         }
     }
@@ -204,17 +177,14 @@ mod tests {
         // Only tts_speed and tts_voice_id lack a serde default, so they're the
         // one required pair; everything else must fall back to its default.
         let c: Config = serde_json::from_str(r#"{"tts_speed":2.0,"tts_voice_id":"v"}"#).unwrap();
-        assert_eq!(c.refine_model, DEFAULT_REFINE_MODEL);
         assert!(c.history_enabled);
         assert_eq!(c.history_limit, 1000);
         assert_eq!(c.hotkey_tts, DEFAULT_HOTKEY_TTS);
         assert_eq!(c.hotkey_dictate, DEFAULT_HOTKEY_DICTATE);
         assert_eq!(c.refine_modifier, DEFAULT_REFINE_MODIFIER);
         assert_eq!(c.mic_name, None);
-        assert_eq!(c.stt_provider, DEFAULT_STT_PROVIDER);
         assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
         assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);
-        assert_eq!(c.llm_provider, DEFAULT_LLM_PROVIDER);
         assert_eq!(c.llm_model, DEFAULT_LLM_MODEL);
     }
 

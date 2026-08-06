@@ -14,21 +14,23 @@ gotchas). When this file and the architecture doc disagree, ask.**
   layers. Pick the simplest macOS-native path every time.
 - **Personal tool.** No accounts, sync, multi-user, telemetry, or distribution
   packaging.
+- **Fully on-device.** Everything runs locally — no cloud providers, API keys, or
+  network calls except model downloads. Do not re-add cloud backends (Groq,
+  OpenRouter, ElevenLabs) without asking.
 - Lead with the Rust engine; the webview is just overlay + settings UI.
 
 ## Stack — use these, don't substitute without asking
 - App: Tauri v2 · hotkeys: `tauri-plugin-global-shortcut`
 - Audio in: `cpal` · audio out: `rodio`
-- STT: local `whisper-rs` (whisper.cpp, Metal) — **default**; Groq/OpenAI Whisper
-  via `reqwest` optional (cloud). Selected by `stt_provider` in config.
+- STT: local `whisper-rs` (whisper.cpp, Metal). Model name in `stt_model`.
 - Inject/selection: `enigo` + `arboard`
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
-  **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) and
-  ElevenLabs (cloud, `reqwest`) optional. Selected by `tts_provider` in config.
+  **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) optional.
+  Selected by `tts_provider` in config. Both on-device.
 - Refinement (Fn+Ctrl): local Qwen3 1.7B via `llama-cpp-2` (embedded
-  llama.cpp, Metal) — **default**; OpenRouter via `reqwest` optional (cloud).
-  Selected by `llm_provider` in config.
-- Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
+  llama.cpp, Metal).
+- `reqwest` is used only to download models from HuggingFace.
+- async: `tokio` · native FFI: `objc2*`
 
 ## Hard rules — these prevent silent, hard-to-debug failures
 1. **Register global hotkeys on the main thread** or they silently fail on macOS.
@@ -47,45 +49,42 @@ gotchas). When this file and the architecture doc disagree, ask.**
 5. **Use a stable signing identity** so Accessibility/Screen Recording grants
    survive rebuilds. Never produce a flow that re-prompts the user to grant
    Accessibility on every build.
-6. **Secrets go in Keychain via `keyring`.** Never write API keys to config files,
-   source, or logs.
-7. **Surface microphone-permission failure explicitly** — without it macOS feeds
+6. **Surface microphone-permission failure explicitly** — without it macOS feeds
    empty audio silently and recording appears to work with a flat waveform.
 
 ## Backends behind traits
-STT, TTS, and the refine LLM each sit behind a trait; selection is via config.
-Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
-`AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
-Refine defaults to a shared embedded local LLM (Qwen3 via llama.cpp), OpenRouter
-optional. Don't hardcode a provider at a call site.
+STT, TTS, and the refine LLM each sit behind a trait (`Transcriber`, `Speaker`,
+`LlmChat`); all implementations are **on-device**. TTS has two backends selected
+by `tts_provider` (native `AVSpeechSynthesizer` default, local neural Kokoro
+optional); STT and refine are single-impl but keep the seam. Don't hardcode a
+provider at a call site.
 
 ## Current status
-Phases 0–3 shipped: Fn / chord dictation (on-device Whisper by default, `whisper-rs`
-with Metal; Groq cloud optional) with clipboard-paste injection, Fn+Ctrl LLM
-refinement (OpenRouter), read-aloud TTS (native `AVSpeechSynthesizer` by default,
-ElevenLabs optional; read-aloud falls back to the clipboard when nothing is
-selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
-cost), and SQLite dictation history. STT/TTS backends are chosen via
-`stt_provider`/`tts_provider` in config; the local Whisper model (default
-`small.en`) auto-downloads to `<app-support>/openwispr/models/` on first run (and via
-`setup.sh`). Read-aloud can also use local neural **Kokoro** (`tts_provider =
-"kokoro"`): its ONNX model + voice packs auto-download to `…/models/` on first
-selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
+Phases 0–3 shipped: Fn / chord dictation (on-device Whisper, `whisper-rs` with
+Metal) with clipboard-paste injection, Fn+Ctrl LLM refinement (local Qwen3),
+read-aloud TTS (native `AVSpeechSynthesizer` by default; read-aloud falls back to
+the clipboard when nothing is selected), a settings window (hotkeys, engines,
+mic/voice, local usage insights), and SQLite dictation history. The TTS backend is
+chosen via `tts_provider` in config; the local Whisper model (default `small.en`,
+name in `stt_model`) auto-downloads to `<app-support>/openwispr/models/` on first
+run (and via `setup.sh`). Read-aloud can also use local neural **Kokoro**
+(`tts_provider = "kokoro"`): its ONNX model + voice packs auto-download to
+`…/models/` on first selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
 Refinement is a built-in feature: hold **Fn + Ctrl** (the modifier is configurable
 in Settings) while dictating and the transcript is cleaned up by the LLM using an
 editable prompt before it's pasted (falls back to the raw transcript if the LLM
 call fails). It runs through one chat seam (`llm.rs`: `LlmChat` trait +
-`transform`, `LocalChat`/`OpenRouterChat`). The two dictation paths share one
-recorder lifecycle via the `DictationMode` enum (Plain / Refine). A
-voice-macros/commands feature was prototyped and removed to keep the app focused.
-The dictation / refine / read-aloud feature set above is the full intended scope —
-no further phases are planned. Build order + macOS gotchas for the shipped work:
-`docs/voice-tool-architecture.md` §7.
+`transform`, `LocalChat`). The two dictation paths share one recorder lifecycle via
+the `DictationMode` enum (Plain / Refine). A voice-macros/commands feature and the
+cloud provider backends were prototyped and removed to keep the app focused and
+fully on-device. The dictation / refine / read-aloud feature set above is the full
+intended scope — no further phases are planned. Build order + macOS gotchas for the
+shipped work: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
-  create + trust the `openwispr dev` signing cert, build, and store API keys. See the
-  README "Getting Started".
+  create + trust the `openwispr dev` signing cert, build, and fetch the local
+  Whisper model. See the README "Getting Started".
 - Dev: `./scripts/dev.sh` — builds, signs (stable `openwispr dev` identity), wraps
   in `OpenWispr.app`, launches via `open`. Use this, **not** `npm run tauri dev`:
   bare `tauri dev` ad-hoc-signs a shell-launched binary, which breaks the Fn-key
@@ -102,7 +101,7 @@ no further phases are planned. Build order + macOS gotchas for the shipped work:
 
 ## Conventions
 - Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,
-  `inject.rs`, `selection.rs`, `tts.rs`, `config.rs`, `secrets.rs`).
+  `inject.rs`, `selection.rs`, `tts.rs`, `config.rs`).
 - Ask before adding any dependency not in the stack list above.
 - Keep idle memory low — this exists partly to *not* be an 800MB Electron app.
 - Prefer small, reviewable commits per phase milestone.

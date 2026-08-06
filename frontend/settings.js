@@ -29,35 +29,23 @@ async function loadConfig() {
   try {
     currentConfig = await invoke("get_config");
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
-    el("refine-model").value = currentConfig.refine_model ?? "";
-    el("stt-provider").value = currentConfig.stt_provider ?? "local";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
-    el("llm-provider").value = currentConfig.llm_provider ?? "local";
-    applyLlmProviderVisibility();
     el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
 }
 
-// The OpenRouter refine model only applies when the LLM runs in the cloud. Hide
-// it in the default on-device config; reveal it when the provider is OpenRouter.
-function applyLlmProviderVisibility() {
-  const cloud = el("llm-provider").value === "openrouter";
-  el("refine-model-field").hidden = !cloud;
-}
-
-// Engine (STT/TTS) selections save immediately and prompt a relaunch, since the
-// backends are built once at startup — a plain config save wouldn't swap them.
+// Engine (STT model / TTS backend) selections save immediately and prompt a
+// relaunch, since the backends are built once at startup — a plain config save
+// wouldn't swap them.
 async function saveEngines() {
   if (!invoke || !currentConfig) return;
   const next = {
     ...currentConfig,
-    stt_provider: el("stt-provider").value,
     stt_model: el("stt-model").value,
     tts_provider: el("tts-provider").value,
-    llm_provider: el("llm-provider").value,
   };
   try {
     await invoke("save_config", { config: next });
@@ -68,13 +56,12 @@ async function saveEngines() {
   }
 }
 
-// Save the Refinement prompt/model (the only Save-based settings on this tab).
+// Save the Refinement prompt (the only Save-based setting on this tab).
 async function save() {
   if (!invoke || !currentConfig) return;
   const next = {
     ...currentConfig,
     refine_prompt: el("refine-prompt").value,
-    refine_model: el("refine-model").value.trim(),
   };
   el("save").disabled = true;
   setStatus("Saving…");
@@ -292,191 +279,9 @@ function initHotkeys() {
   }
 }
 
-// --- API keys -----------------------------------------------------------------
-
-function setKeyMsg(row, text, kind = "") {
-  const m = row.querySelector(".key-msg");
-  if (m) {
-    m.textContent = text;
-    m.className = `key-msg hint ${kind}`;
-  }
-}
-
-// Where to obtain each provider's API key, keyed by the id from list_keys.
-const KEY_SIGNUP_URLS = {
-  groq: "https://console.groq.com/keys",
-  openrouter: "https://openrouter.ai/keys",
-  elevenlabs: "https://elevenlabs.io/app/settings/api-keys",
-};
-
-function renderKeyRow(k) {
-  const row = document.createElement("div");
-  row.className = "key-row";
-
-  const head = document.createElement("div");
-  head.className = "key-head";
-  const label = document.createElement("span");
-  label.className = "row-label";
-  label.textContent = k.label;
-  const status = document.createElement("span");
-  status.className = `key-status ${k.present ? "ok" : "off"}`;
-  status.textContent = k.present ? `Set · ${k.masked}` : "Not set";
-  head.append(label, status);
-
-  const purpose = document.createElement("div");
-  purpose.className = "hint key-purpose";
-  purpose.textContent = k.purpose;
-
-  const controls = document.createElement("div");
-  controls.className = "key-controls";
-
-  const input = document.createElement("input");
-  input.type = "password";
-  input.className = "key-input";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  input.placeholder = k.present ? "•••• set — paste to replace" : "paste key…";
-
-  const reveal = document.createElement("button");
-  reveal.className = "small-btn";
-  reveal.textContent = "Reveal";
-  reveal.disabled = !k.present;
-  let revealed = false;
-  reveal.addEventListener("click", async () => {
-    if (revealed) {
-      input.type = "password";
-      input.value = "";
-      reveal.textContent = "Reveal";
-      revealed = false;
-      return;
-    }
-    try {
-      input.value = await invoke("reveal_key", { id: k.id });
-      input.type = "text";
-      reveal.textContent = "Hide";
-      revealed = true;
-    } catch (e) {
-      setKeyMsg(row, `Reveal failed: ${e}`, "error");
-    }
-  });
-
-  const save = document.createElement("button");
-  save.className = "primary small";
-  save.textContent = "Save";
-  save.addEventListener("click", async () => {
-    const v = input.value.trim();
-    if (!v) {
-      setKeyMsg(row, "Enter a key first.", "error");
-      return;
-    }
-    try {
-      await invoke("save_key", { id: k.id, value: v });
-      setKeyMsg(row, "Saved ✓ — relaunch to apply.", "ok");
-      await loadKeys();
-    } catch (e) {
-      setKeyMsg(row, `Save failed: ${e}`, "error");
-    }
-  });
-
-  const remove = document.createElement("button");
-  remove.className = "small-btn danger";
-  remove.textContent = "Remove";
-  remove.disabled = !k.present;
-  remove.addEventListener("click", async () => {
-    try {
-      await invoke("delete_key", { id: k.id });
-      await loadKeys();
-    } catch (e) {
-      setKeyMsg(row, `Remove failed: ${e}`, "error");
-    }
-  });
-
-  controls.append(input, reveal, save, remove);
-
-  const msg = document.createElement("div");
-  msg.className = "key-msg hint";
-
-  row.append(head, purpose, controls);
-
-  // "Get a key" link → opens the provider's key page in the default browser.
-  const url = KEY_SIGNUP_URLS[k.id];
-  if (url) {
-    const link = document.createElement("a");
-    link.className = "key-link";
-    link.href = url;
-    link.textContent = `Get a ${k.label} API key ↗`;
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (invoke) invoke("open_url", { url }).catch(() => {});
-    });
-    row.append(link);
-  }
-
-  row.append(msg);
-  return row;
-}
-
-async function loadKeys() {
-  if (!invoke) return;
-  let keys;
-  try {
-    keys = await invoke("list_keys");
-  } catch (e) {
-    return;
-  }
-  const container = el("keys");
-  container.innerHTML = "";
-  for (const k of keys) container.appendChild(renderKeyRow(k));
-}
-
 // --- Usage --------------------------------------------------------------------
 
-// Groq whisper-large-v3-turbo list price (per hour of audio) for the estimate.
-const GROQ_USD_PER_SEC = 0.04 / 3600;
-
-let localUsage = null; // from get_usage (STT/TTS counts, refine tokens)
-let orSpend = null; // from get_openrouter_spend (real $), or null on error
-
-function fmtCost(usd) {
-  const n = usd || 0;
-  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
-}
-
-function renderUsageAll() {
-  const u = localUsage || {};
-
-  // Refinement · OpenRouter — cost is exact from the API; tokens/count local.
-  el("or-total").textContent = orSpend ? fmtCost(orSpend.total_usd) : "n/a";
-  el("or-sub").textContent = [
-    orSpend ? `${fmtCost(orSpend.month_usd)} this month` : null,
-    `${(u.total_tokens || 0).toLocaleString()} tokens`,
-    `${u.refine_count || 0} refinements`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  // Dictation · Groq — estimated from audio duration.
-  const groqCost = (u.stt_seconds || 0) * GROQ_USD_PER_SEC;
-  el("stt-cost").textContent = `~${fmtCost(groqCost)}`;
-  el("stt-sub").textContent = `${u.stt_count || 0} clips · ${((u.stt_seconds || 0) / 60).toFixed(
-    1
-  )} min · est. @ $0.04/hr`;
-
-  // Read-aloud · ElevenLabs — characters (cost varies by plan).
-  el("tts-cost").textContent = `${(u.tts_chars || 0).toLocaleString()} chars`;
-  el("tts-sub").textContent = `${u.tts_count || 0} reads · $ varies by plan`;
-}
-
-async function fetchOpenRouterSpend() {
-  try {
-    orSpend = await invoke("get_openrouter_spend");
-    el("usage-msg").textContent = "";
-  } catch (e) {
-    orSpend = null;
-    el("usage-msg").textContent = `OpenRouter usage unavailable: ${e}`;
-  }
-  renderUsageAll();
-}
+let localUsage = null; // from get_usage (dictation/refine/read-aloud counts)
 
 async function loadUsage() {
   if (!invoke) return;
@@ -485,27 +290,14 @@ async function loadUsage() {
   } catch (e) {
     /* ignore */
   }
-  renderUsageAll();
-  fetchOpenRouterSpend();
+  renderInsights();
 }
 
 function initUsage() {
   el("u-refresh").addEventListener("click", loadInsights);
-  el("u-reset").addEventListener("click", async () => {
-    try {
-      await invoke("reset_usage");
-      localUsage = null;
-      renderUsageAll();
-      renderInsights();
-      el("usage-reset-msg").textContent = "Local counts reset (OpenRouter total is provider-side).";
-    } catch (e) {
-      el("usage-reset-msg").textContent = `Reset failed: ${e}`;
-    }
-  });
   // Live-update the counts while the window is open.
   window.__TAURI__?.event?.listen?.("usage", (e) => {
     localUsage = e.payload;
-    renderUsageAll();
     renderInsights();
   });
 }
@@ -586,7 +378,7 @@ async function loadInsights() {
   } catch (_) {
     insStats = null;
   }
-  await loadUsage(); // refreshes the provider cards + OpenRouter spend
+  await loadUsage(); // refreshes the local usage counts, then re-renders
   renderInsights();
 }
 
@@ -751,13 +543,11 @@ async function init() {
   for (const b of document.querySelectorAll(".nav-item")) {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   }
-  for (const id of ["stt-provider", "stt-model", "tts-provider", "llm-provider"]) {
+  for (const id of ["stt-model", "tts-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
-  el("llm-provider").addEventListener("change", applyLlmProviderVisibility);
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
   el("refine-prompt").addEventListener("input", markDirty);
-  el("refine-model").addEventListener("input", markDirty);
   el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
     if (e.metaKey && e.key === "s" && !recording && !el("save").disabled) {
@@ -769,7 +559,6 @@ async function init() {
   await loadConfig();
   await loadOptions();
   initHotkeys();
-  await loadKeys();
   initUsage();
   initHistory();
 }
