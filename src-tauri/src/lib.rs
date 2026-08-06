@@ -1,6 +1,5 @@
 // Module layout per docs/voice-tool-architecture.md §4. lib.rs is the action router:
-// hotkey → recorder lifecycle → transcribe → inject. selection / tts / kb land
-// in subsequent phases and remain stubs.
+// hotkey → recorder lifecycle → transcribe → inject.
 mod audio;
 mod commands;
 mod config;
@@ -9,7 +8,6 @@ mod focus;
 mod history;
 mod hotkeys;
 mod inject;
-mod kb;
 mod local_llm;
 mod macros;
 mod refine;

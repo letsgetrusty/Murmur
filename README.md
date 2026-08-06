@@ -1,7 +1,7 @@
 # Murmur
 
-A fast, native macOS voice tool: **dictation**, **read-aloud**, and (soon)
-knowledge-base–grounded generation on whatever text you have selected. Built as
+A fast, native macOS voice tool: **dictation** and **read-aloud**, with
+on-device LLM refinement and voice macros over your speech. Built as
 a Tauri v2 app with a Rust engine and a thin webview for the overlay and
 settings — deliberately *not* an 800MB Electron app.
 
@@ -125,8 +125,8 @@ Logs stream to `~/Library/Logs/murmur.log`.
 
 ## Architecture
 
-Rust engine with each capability behind a trait (STT, TTS, embeddings,
-generation) so providers are chosen by config, not hardcoded at call sites. The
+Rust engine with each capability behind a trait (STT, TTS, refinement,
+macro-matching) so providers are chosen by config, not hardcoded at call sites. The
 webview is only the overlay and settings UI.
 
 Modules (`src-tauri/src/`): `audio` (cpal capture) · `stt` (Groq Whisper) ·
@@ -134,7 +134,7 @@ Modules (`src-tauri/src/`): `audio` (cpal capture) · `stt` (Groq Whisper) ·
 `inject` (clipboard-paste injection) · `selection` (clipboard-based capture) ·
 `fn_key` (CGEventTap Fn trigger) · `hotkeys` (global-shortcut chords) ·
 `focus` (active-window screen for overlay placement) · `history` (SQLite) ·
-`usage` · `config` · `secrets` (Keychain) · `kb` (knowledge base, planned).
+`usage` · `config` · `secrets` (Keychain).
 
 The full design lives in [`docs/voice-tool-architecture.md`](docs/voice-tool-architecture.md).
 
@@ -144,9 +144,3 @@ Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · `rodio` (audi
 out) · `reqwest` (cloud APIs) · `enigo` + `arboard` (inject/selection) ·
 `objc2*` (native macOS FFI) · `rusqlite` (history) · `keyring` (secrets) ·
 `tokio` (async).
-
-## Roadmap
-
-- Knowledge-base–grounded generation: ingest → embed → LanceDB → top-k →
-  Anthropic Messages, run over selected text.
-- Local Whisper transcription (`whisper-rs`) as an offline STT option.

@@ -1,9 +1,9 @@
 # Voice Tool — Architecture & v1 Build Order
 
-A macOS-only, Tauri v2 desktop app that combines dictation (Wispr Flow–style),
-read-aloud TTS (Speechify-style), and knowledge-base–grounded generation on
-selected text. Built in Rust as a daily-driver tool and a Rust-business content
-artifact.
+A macOS-only, Tauri v2 desktop app that combines dictation (Wispr Flow–style)
+and read-aloud TTS (Speechify-style), with on-device LLM refinement and voice
+macros over your speech. Built in Rust as a daily-driver tool and a Rust-business
+content artifact.
 
 > Scope for v1: **personal use, macOS only.** Cross-platform and "sellable
 > product" concerns are explicitly out of scope and should not drive any design
@@ -20,8 +20,8 @@ artifact.
 2. **Fork, don't rebuild the dictation core.** Start from an MIT-licensed Tauri
    dictation app (Handy is a clean base) to inherit permissions flow, the
    clipboard-paste injection, and the recording overlay. Spend net-new effort on
-   the parts that are actually yours: KB generation and TTS.
-3. **Pluggable backends behind traits.** STT, TTS, embeddings, and generation
+   the parts that are actually yours: read-aloud TTS and the refine/macro layer.
+3. **Pluggable backends behind traits.** STT, TTS, and the refine/macro LLM
    should each sit behind a trait so you can swap cloud ↔ local without touching
    call sites. v1 leans cloud for speed; local is a later upgrade.
 4. **The overlay is where "smooth" is won.** Latency, waveform feedback, instant
@@ -44,15 +44,7 @@ flowchart TD
     SELT --> TTS[TTS backend trait<br/>AVSpeechSynthesizer → ElevenLabs later]
     TTS --> OUT[Audio playback<br/>rodio]
 
-    ROUTER -->|ask KB| SELK[Selection capture]
-    SELK --> RAG[KB / RAG<br/>embed query → LanceDB top-k → Anthropic Messages]
-    RAG --> OVERLAY[Overlay window<br/>answer + actions: insert / copy / read aloud]
-
-    ROUTER -->|screen context, last| SCAP[ScreenCaptureKit + Vision OCR<br/>explicit trigger only]
-    SCAP --> RAG
-
     INJECT --> CURSOR[(Active app at cursor)]
-    OVERLAY --> CURSOR
     CFG[Config JSON + Keychain secrets] -.-> ROUTER
 ```
 
@@ -72,13 +64,10 @@ flowchart TD
 | Keystroke / paste | `enigo` + `arboard` | Clipboard-paste is the only reliably cross-app injection (works in Electron apps) |
 | TTS (v1) | `AVSpeechSynthesizer` via `objc2` FFI | Free, offline, decent voices |
 | TTS (upgrade) | ElevenLabs / OpenAI TTS via `reqwest` | Speechify-grade voices, paid |
-| Vector store | `lancedb` | Rust-native, embedded, single-user friendly. (`rusqlite` + `sqlite-vec` is a lighter alt.) |
-| Embeddings | `reqwest` to Voyage/OpenAI, or `fastembed` local | |
-| Generation | Anthropic Messages API via `reqwest` | Pass retrieved chunks as context |
-| Screen capture | ScreenCaptureKit + Vision OCR via `objc2` FFI | Last feature; needs Screen Recording permission |
+| Refine + macros LLM | local Qwen3 via `llama-cpp-2` (Metal); OpenRouter via `reqwest` optional | On-device by default |
 | Secrets | `keyring` | API keys in macOS Keychain, never plaintext |
 | Async | `tokio` | API calls |
-| Native FFI | `objc2`, `objc2-foundation`, `objc2-app-kit` | AVSpeechSynthesizer, ScreenCaptureKit, Vision, AX API |
+| Native FFI | `objc2`, `objc2-foundation`, `objc2-app-kit` | AVSpeechSynthesizer, AX API |
 
 ---
 
@@ -93,8 +82,9 @@ src-tauri/src/
   inject.rs       // clipboard save → set → Cmd+V → restore (change-count watch)
   selection.rs    // Cmd+C → read clipboard → restore (reverse of inject)
   tts.rs          // trait Speaker { async fn speak(&self, text) -> AudioStream }
-  kb.rs           // ingest/chunk/embed → LanceDB; query → top-k → prompt → generate
-  screen.rs       // (phase 5) ScreenCaptureKit + Vision OCR
+  refine.rs       // trait Refiner (Fn+Ctrl LLM cleanup)
+  macros.rs       // trait MacroMatcher (voice → canned response)
+  local_llm.rs    // embedded llama.cpp (Qwen3) shared by refine + macros
   config.rs       // JSON config in app support dir
   secrets.rs      // keyring wrappers
 frontend/         // overlay (waveform, answer panel, TTS controls) + settings window
@@ -148,7 +138,6 @@ trait Transcriber {
 | Microphone | Dictation capture | Phase 1, on first record |
 | Accessibility | `Cmd+V` inject, `Cmd+C` selection | Phase 1, guide user to System Settings |
 | Input Monitoring | Fn-key event tap (only if you do Fn) | Stretch goal |
-| Screen Recording | Screen-context capture | Phase 5 only, on first use |
 
 Each request should fail gracefully with a one-click "Open System Settings" deep
 link and a clear explanation in the overlay/settings.
@@ -187,22 +176,14 @@ building anything else.
   voices.
 - **Done when:** highlight text anywhere, hit hotkey, hear it read with controls.
 
-### Phase 4 — KB-grounded generation (your differentiator)
-- KB ingest as a separate command/CLI: load your business docs → chunk → embed →
-  write to LanceDB. Re-runnable to refresh.
-- Hotkey: selection → embed query → top-k retrieve → Anthropic Messages with
-  retrieved context → render answer in the overlay with actions: **Insert at
-  cursor / Copy / Read aloud** (reuses phase 1 inject + phase 3 TTS).
-- **Done when:** highlight a customer message, hit hotkey, get a KB-grounded draft
-  you can insert in one click.
-
-### Phase 5 — Screen context (last, optional)
-- ScreenCaptureKit screenshot → Vision OCR (or send image to a vision model) →
-  feed as additional context to phase 4.
-- **Privacy:** explicit hotkey trigger only, never always-on, and show a preview of
-  exactly what was captured before sending. (Wispr's always-on screenshotting is
-  its biggest user complaint — don't copy that.)
-- **Done when:** you can pull on-screen context into a KB query on demand.
+### Phase 4 — Refinement + voice macros
+- Fn + modifier: dictate → LLM cleanup with a user prompt → paste refined text.
+- Macro chord: dictate → LLM classifies the phrase against the user's macros →
+  paste that macro's canned response (or nothing on no clear match).
+- Both run on a shared embedded local LLM (Qwen3 via llama.cpp) by default, with
+  OpenRouter as an opt-in cloud backend behind the same trait.
+- **Done when:** Fn+Ctrl cleans up messy dictation in place, and a spoken phrase
+  pastes the right saved snippet.
 
 ---
 
@@ -216,7 +197,7 @@ building anything else.
 
 ## 9. Content angle (why this is worth the time)
 The interesting, teachable Rust surface lives in: the `cpal` capture thread and
-ring buffer, the trait-based pluggable backends, `objc2` FFI to AVSpeechSynthesizer
-/ ScreenCaptureKit / Vision, the clipboard-restore race condition, and the async
-RAG pipeline. Each is a self-contained build-in-public post. The webview is *not*
-the story — lead with the Rust engine.
+ring buffer, the trait-based pluggable backends, `objc2` FFI to
+AVSpeechSynthesizer, the clipboard-restore race condition, and the embedded
+on-device LLM (llama.cpp) driving refine + macros. Each is a self-contained
+build-in-public post. The webview is *not* the story — lead with the Rust engine.

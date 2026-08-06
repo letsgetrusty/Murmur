@@ -1,11 +1,11 @@
 # CLAUDE.md — Voice Tool
 
-macOS desktop app (Tauri v2, Rust backend + webview) combining dictation,
-read-aloud TTS, and knowledge-base–grounded generation on selected text.
+macOS desktop app (Tauri v2, Rust backend + webview) combining dictation and
+read-aloud TTS, with on-device LLM refinement and voice macros over your speech.
 Personal daily-driver tool; also a Rust-business content artifact.
 
-**Full design plan lives in `docs/voice-tool-architecture.md`. Implement phase by
-phase from it. When this file and the architecture doc disagree, ask.**
+**Design notes live in `docs/voice-tool-architecture.md` (build order + macOS
+gotchas). When this file and the architecture doc disagree, ask.**
 
 ---
 
@@ -28,8 +28,6 @@ phase from it. When this file and the architecture doc disagree, ask.**
 - Refinement (Fn+Ctrl) + Macros: local Qwen3 1.7B via `llama-cpp-2` (embedded
   llama.cpp, Metal) — **default**; OpenRouter via `reqwest` optional (cloud).
   Selected by `llm_provider` in config.
-- Vector store: `lancedb` · embeddings: Voyage/OpenAI via `reqwest` (or `fastembed`)
-- Generation (Phase 4, KB): Anthropic Messages API via `reqwest`
 - Secrets: `keyring` · async: `tokio` · native FFI: `objc2*`
 
 ## Hard rules — these prevent silent, hard-to-debug failures
@@ -55,12 +53,11 @@ phase from it. When this file and the architecture doc disagree, ask.**
    empty audio silently and recording appears to work with a flat waveform.
 
 ## Backends behind traits
-STT, TTS, embeddings, and generation each sit behind a trait; selection is via
+STT, TTS, and the refine/macro LLM each sit behind a trait; selection is via
 config. Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
 `AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
 Refine + macros default to a shared embedded local LLM (Qwen3 via llama.cpp),
-OpenRouter optional. KB generation (Phase 4) is still cloud. Don't hardcode a
-provider at a call site.
+OpenRouter optional. Don't hardcode a provider at a call site.
 
 ## Current status
 Phases 0–3 shipped: Fn / chord dictation (on-device Whisper by default, `whisper-rs`
@@ -81,9 +78,9 @@ user's configured macros and pastes that macro's canned response (or nothing whe
 no macro clearly matches). Managed in the Settings "Macros" tab; macro runs are not
 recorded to dictation history. The three dictation paths share one recorder
 lifecycle via the `DictationMode` enum (Plain / Refine / Macro).
-**Next: Phase 4 — knowledge-base–grounded generation** (`kb.rs` is still a stub):
-ingest → embed → LanceDB → top-k → Anthropic Messages over selected text. Phase 5
-(screen context) is optional/later. Phase definitions: `docs/voice-tool-architecture.md` §7.
+The dictation / refine / read-aloud / macros feature set above is the full
+intended scope — no further phases are planned. Build order + macOS gotchas for
+the shipped work: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
@@ -105,7 +102,7 @@ ingest → embed → LanceDB → top-k → Anthropic Messages over selected text
 
 ## Conventions
 - Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,
-  `inject.rs`, `selection.rs`, `tts.rs`, `kb.rs`, `config.rs`, `secrets.rs`).
+  `inject.rs`, `selection.rs`, `tts.rs`, `config.rs`, `secrets.rs`).
 - Ask before adding any dependency not in the stack list above.
 - Keep idle memory low — this exists partly to *not* be an 800MB Electron app.
 - Prefer small, reviewable commits per phase milestone.
