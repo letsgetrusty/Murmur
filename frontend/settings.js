@@ -30,6 +30,9 @@ async function loadConfig() {
     currentConfig = await invoke("get_config");
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
     el("refine-model").value = currentConfig.refine_model ?? "";
+    el("stt-provider").value = currentConfig.stt_provider ?? "local";
+    el("stt-model").value = currentConfig.stt_model ?? "small.en";
+    el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
@@ -42,6 +45,9 @@ async function save() {
     ...currentConfig,
     refine_prompt: el("refine-prompt").value,
     refine_model: el("refine-model").value.trim(),
+    stt_provider: el("stt-provider").value,
+    stt_model: el("stt-model").value,
+    tts_provider: el("tts-provider").value,
   };
   el("save").disabled = true;
   setStatus("Saving…");
@@ -827,6 +833,9 @@ async function init() {
   }
   el("refine-prompt").addEventListener("input", markDirty);
   el("refine-model").addEventListener("input", markDirty);
+  for (const id of ["stt-provider", "stt-model", "tts-provider"]) {
+    el(id).addEventListener("change", markDirty);
+  }
   el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
     if (e.metaKey && e.key === "s" && !recording) {

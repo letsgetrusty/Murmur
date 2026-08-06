@@ -70,6 +70,37 @@
           </div>
 
           <div class="card">
+            <h2>Engines</h2>
+            <p class="hint">
+              Dictation and read-aloud run on-device by default — private,
+              offline, no API key. Switching an engine takes effect after you
+              relaunch Murmur.
+            </p>
+            <div class="row">
+              <span class="row-label">Dictation (speech-to-text)</span>
+              <select id="stt-provider">
+                <option value="local">On-device · Whisper</option>
+                <option value="groq">Groq · cloud</option>
+              </select>
+            </div>
+            <div class="row">
+              <span class="row-label">Whisper model</span>
+              <select id="stt-model">
+                <option value="base.en">base.en — fastest (~142 MB)</option>
+                <option value="small.en">small.en — balanced (~466 MB)</option>
+                <option value="medium.en">medium.en — most accurate (~1.5 GB)</option>
+              </select>
+            </div>
+            <div class="row">
+              <span class="row-label">Read-aloud (text-to-speech)</span>
+              <select id="tts-provider">
+                <option value="native">On-device · macOS</option>
+                <option value="elevenlabs">ElevenLabs · cloud</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card">
             <h2>Audio</h2>
             <div class="row">
               <span class="row-label">Playback speed</span>
