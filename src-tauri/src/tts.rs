@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use kokoro_en::KokoroTts;
@@ -574,10 +575,51 @@ impl KokoroSpeaker {
     }
 }
 
+/// Split read-aloud text into sentence-ish chunks (~40–240 chars) so a long
+/// selection can start playing after the first sentence instead of only once
+/// the entire text has been synthesized.
+fn split_for_tts(text: &str) -> Vec<String> {
+    let text = text.trim();
+    let mut chunks = Vec::new();
+    let mut cur = String::new();
+    for ch in text.chars() {
+        cur.push(ch);
+        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
+        // Flush at a sentence boundary once we have a reasonable amount, or hard
+        // cap the chunk length (byte len is a fine proxy for the cap).
+        if (boundary && cur.trim_end().len() >= 40) || cur.len() >= 240 {
+            let t = cur.trim().to_string();
+            if !t.is_empty() {
+                chunks.push(t);
+            }
+            cur.clear();
+        }
+    }
+    let t = cur.trim().to_string();
+    if !t.is_empty() {
+        chunks.push(t);
+    }
+    if chunks.is_empty() {
+        chunks.push(text.to_string());
+    }
+    chunks
+}
+
+/// Synthesize one chunk to a 16-bit WAV buffer; `None` on synth error.
+async fn synth_chunk_wav(tts: &KokoroTts, text: &str, voice: &str) -> Option<Vec<u8>> {
+    match tts.synth(text, voice).await {
+        Ok((samples, _)) => Some(pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE)),
+        Err(e) => {
+            log::warn!("tts/kokoro: synth chunk failed: {e}");
+            None
+        }
+    }
+}
+
 impl Speaker for KokoroSpeaker {
     fn speak(&self, text: &str) {
         let text = text.to_string();
-        let voice = self.voice.lock().expect("voice mutex").clone();
+        let voice = Arc::new(self.voice.lock().expect("voice mutex").clone());
         let speed = *self.speed.lock().expect("speed mutex");
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         let model_path = self.model_path.clone();
@@ -605,29 +647,78 @@ impl Speaker for KokoroSpeaker {
                 guard.as_ref().expect("just loaded").clone()
             };
 
-            let samples = match tts.synth(&text, voice.as_str()).await {
-                Ok((s, dur)) => {
-                    log::info!("tts/kokoro: synthesized {:.1}s audio", dur.as_secs_f32());
-                    s
-                }
-                Err(e) => {
-                    log::warn!("tts/kokoro: synth failed: {e}");
-                    active.store(false, Ordering::Release);
-                    return;
-                }
-            };
+            // Stream sentence-by-sentence: play each chunk as it's ready, and
+            // synthesize the *next* chunk while the current one plays — so a long
+            // selection starts speaking in ~1s and the seams stay gap-free
+            // instead of waiting for the whole text to synthesize.
+            let chunks = split_for_tts(&text);
+            log::info!(
+                "tts/kokoro: reading {} chars in {} chunk(s)",
+                text.len(),
+                chunks.len()
+            );
+            let mut pending = synth_chunk_wav(&tts, &chunks[0], voice.as_str()).await;
 
-            let wav = pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE);
-            let temp_path = std::env::temp_dir().join(format!("murmur-kokoro-{n}.wav"));
-            if let Err(e) = std::fs::write(&temp_path, &wav) {
-                log::warn!("tts/kokoro: write temp wav failed: {e}");
-                active.store(false, Ordering::Release);
-                return;
+            for i in 0..chunks.len() {
+                if !active.load(Ordering::Acquire) {
+                    break;
+                }
+                let wav = match pending.take() {
+                    Some(w) => w,
+                    None => break, // synth failed
+                };
+                // Kick off the next chunk's synthesis while this one plays.
+                let next_task = if i + 1 < chunks.len() {
+                    let (t, c, v) = (tts.clone(), chunks[i + 1].clone(), voice.clone());
+                    Some(tauri::async_runtime::spawn(async move {
+                        synth_chunk_wav(&t, &c, v.as_str()).await
+                    }))
+                } else {
+                    None
+                };
+
+                let temp = std::env::temp_dir().join(format!("murmur-kokoro-{n}-{i}.wav"));
+                if std::fs::write(&temp, &wav).is_err() {
+                    active.store(false, Ordering::Release);
+                    break;
+                }
+                match spawn_avplayer(temp, speed) {
+                    Some(h) => *player_slot.lock().expect("player mutex") = Some(h),
+                    None => {
+                        active.store(false, Ordering::Release);
+                        break;
+                    }
+                }
+
+                // Wait for this chunk to finish (or a stop) before the next.
+                loop {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if !active.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let finished = {
+                        let g = player_slot.lock().expect("player mutex");
+                        match g.as_ref() {
+                            None => true,
+                            // SAFETY: live AVPlayer held under the mutex; `rate`
+                            // returns a float (0.0 once the clip ends).
+                            Some(h) => unsafe {
+                                let rate: f32 = msg_send![h.player.as_ptr(), rate];
+                                rate == 0.0
+                            },
+                        }
+                    };
+                    if finished {
+                        break;
+                    }
+                }
+
+                pending = match next_task {
+                    Some(t) => t.await.ok().flatten(),
+                    None => None,
+                };
             }
-            match spawn_avplayer(temp_path, speed) {
-                Some(holder) => *player_slot.lock().expect("player mutex") = Some(holder),
-                None => active.store(false, Ordering::Release),
-            }
+            active.store(false, Ordering::Release);
         });
     }
 
@@ -637,24 +728,10 @@ impl Speaker for KokoroSpeaker {
     }
 
     fn is_speaking(&self) -> bool {
-        if !self.active.load(Ordering::Acquire) {
-            return false;
-        }
-        let g = self.player.lock().expect("player mutex");
-        match g.as_ref() {
-            None => true, // still synthesizing
-            // SAFETY: `h.player` is a live AVPlayer held under the mutex; `rate`
-            // returns a float.
-            Some(h) => unsafe {
-                let rate: f32 = msg_send![h.player.as_ptr(), rate];
-                if rate != 0.0 {
-                    true
-                } else {
-                    self.active.store(false, Ordering::Release);
-                    false
-                }
-            },
-        }
+        // The speak task owns `active` for the whole (possibly multi-chunk) read:
+        // it clears it when the last chunk finishes or on stop(), so a brief
+        // inter-chunk gap (player rate 0) isn't mistaken for "done".
+        self.active.load(Ordering::Acquire)
     }
 
     fn cycle_speed(&self) -> f32 {
@@ -707,6 +784,32 @@ mod tests {
         assert_eq!(&wav[0..4], b"RIFF");
         assert_eq!(&wav[8..12], b"WAVE");
         assert_eq!(wav.len(), 44 + 4 * 2);
+    }
+
+    #[test]
+    fn splits_long_text_into_chunks() {
+        // Several sentences → multiple chunks, each reassembling to the input.
+        let text = "This is the first sentence about something. Here is a second \
+                    one that continues. And a third sentence to be sure it splits. \
+                    Finally a fourth to push past the threshold.";
+        let chunks = split_for_tts(text);
+        assert!(
+            chunks.len() >= 2,
+            "expected multiple chunks, got {chunks:?}"
+        );
+        assert_eq!(
+            chunks.join(" ").split_whitespace().count(),
+            text.split_whitespace().count()
+        );
+    }
+
+    #[test]
+    fn short_text_is_one_chunk() {
+        assert_eq!(split_for_tts("Hi there."), vec!["Hi there.".to_string()]);
+        assert_eq!(
+            split_for_tts("no punctuation just a few words"),
+            vec!["no punctuation just a few words".to_string()]
+        );
     }
 
     /// End-to-end Kokoro synthesis; needs the model + voices on disk. Ignored by
