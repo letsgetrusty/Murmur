@@ -117,6 +117,21 @@ nav {
   color: var(--text);
 }
 
+/* Engines: "relaunch to apply" prompt shown after an engine change ---------- */
+.engine-relaunch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--border);
+}
+.engine-relaunch .hint {
+  margin: 0;
+  color: var(--accent);
+}
+
 /* Card head (title + trailing note) --------------------------------------- */
 .card-head {
   display: flex;

@@ -39,15 +39,31 @@ async function loadConfig() {
   }
 }
 
+// Engine (STT/TTS) selections save immediately and prompt a relaunch, since the
+// backends are built once at startup — a plain config save wouldn't swap them.
+async function saveEngines() {
+  if (!invoke || !currentConfig) return;
+  const next = {
+    ...currentConfig,
+    stt_provider: el("stt-provider").value,
+    stt_model: el("stt-model").value,
+    tts_provider: el("tts-provider").value,
+  };
+  try {
+    await invoke("save_config", { config: next });
+    currentConfig = next;
+    el("engine-relaunch").hidden = false;
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+  }
+}
+
 async function save() {
   if (!invoke || !currentConfig) return;
   const next = {
     ...currentConfig,
     refine_prompt: el("refine-prompt").value,
     refine_model: el("refine-model").value.trim(),
-    stt_provider: el("stt-provider").value,
-    stt_model: el("stt-model").value,
-    tts_provider: el("tts-provider").value,
   };
   el("save").disabled = true;
   setStatus("Saving…");
@@ -834,8 +850,9 @@ async function init() {
   el("refine-prompt").addEventListener("input", markDirty);
   el("refine-model").addEventListener("input", markDirty);
   for (const id of ["stt-provider", "stt-model", "tts-provider"]) {
-    el(id).addEventListener("change", markDirty);
+    el(id).addEventListener("change", saveEngines);
   }
+  el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
   el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
     if (e.metaKey && e.key === "s" && !recording) {

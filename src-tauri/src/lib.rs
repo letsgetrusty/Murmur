@@ -180,6 +180,7 @@ pub fn run() {
             commands::history_stats,
             commands::copy_text,
             commands::open_url,
+            commands::relaunch_app,
         ])
         .setup(move |app| {
             // Shared live config: the refiner reads it on each refine and the
