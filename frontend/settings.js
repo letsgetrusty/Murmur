@@ -8,17 +8,12 @@ let currentConfig = null;
 
 const el = (id) => document.getElementById(id);
 
-// --- Refinement (Save-based) --------------------------------------------------
+// --- Settings tab: config load + engine switches -----------------------------
 
 function setStatus(text, kind = "") {
   const s = el("status");
   s.textContent = text;
   s.className = `status ${kind}`;
-}
-
-function markDirty() {
-  el("save").disabled = false;
-  setStatus("");
 }
 
 async function loadConfig() {
@@ -35,7 +30,6 @@ async function loadConfig() {
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("llm-provider").value = currentConfig.llm_provider ?? "local";
     applyLlmProviderVisibility();
-    el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
@@ -67,25 +61,6 @@ async function saveEngines() {
     el("engine-relaunch").hidden = false;
   } catch (e) {
     setStatus(`Save failed: ${e}`, "error");
-  }
-}
-
-async function save() {
-  if (!invoke || !currentConfig) return;
-  const next = {
-    ...currentConfig,
-    refine_prompt: el("refine-prompt").value,
-    refine_model: el("refine-model").value.trim(),
-  };
-  el("save").disabled = true;
-  setStatus("Saving…");
-  try {
-    await invoke("save_config", { config: next });
-    currentConfig = next;
-    setStatus("Saved ✓", "ok");
-  } catch (e) {
-    setStatus(`Save failed: ${e}`, "error");
-    el("save").disabled = false;
   }
 }
 
@@ -760,7 +735,11 @@ function macroRow(m = { name: "", triggers: "", response: "" }) {
 function renderMacros() {
   const list = el("macro-list");
   list.innerHTML = "";
-  for (const m of currentConfig?.macros ?? []) list.appendChild(macroRow(m));
+  // Only Paste commands are edited here (refinement is the pinned card above).
+  const paste = (currentConfig?.commands ?? []).filter((c) => c.action?.kind === "paste");
+  for (const c of paste) {
+    list.appendChild(macroRow({ name: c.name, triggers: c.triggers, response: c.action?.response ?? "" }));
+  }
 }
 
 // Read the macro rows back out of the DOM. Fully-empty rows are dropped.
@@ -778,14 +757,31 @@ function collectMacros() {
 
 async function saveMacros() {
   if (!invoke || !currentConfig) return;
-  const macros = collectMacros();
-  for (const m of macros) {
+  const rows = collectMacros();
+  for (const m of rows) {
     if (!m.name || !m.response.trim()) {
-      setMacroStatus("Each macro needs a name and a response.", "error");
+      setMacroStatus("Each command needs a name and a response.", "error");
       return;
     }
   }
-  const next = { ...currentConfig, macros, macro_model: el("macro-model").value.trim() };
+  // Preserve any non-Paste commands the UI doesn't edit; rebuild the Paste ones
+  // from the rows. Refinement (prompt + model) saves together with the tab.
+  const others = (currentConfig.commands ?? []).filter((c) => c.action?.kind !== "paste");
+  const commands = [
+    ...others,
+    ...rows.map((m) => ({
+      name: m.name,
+      triggers: m.triggers,
+      action: { kind: "paste", response: m.response },
+    })),
+  ];
+  const next = {
+    ...currentConfig,
+    commands,
+    macro_model: el("macro-model").value.trim(),
+    refine_prompt: el("refine-prompt").value,
+    refine_model: el("refine-model").value.trim(),
+  };
   el("macro-save").disabled = true;
   setMacroStatus("Saving…");
   try {
@@ -802,6 +798,10 @@ function initMacros() {
   el("macro-model").value = currentConfig?.macro_model ?? "";
   renderMacros();
   el("macro-model").addEventListener("input", markMacrosDirty);
+  // Refinement lives on this tab now, so its edits mark the tab dirty and save
+  // with it.
+  el("refine-prompt").addEventListener("input", markMacrosDirty);
+  el("refine-model").addEventListener("input", markMacrosDirty);
   el("macro-add").addEventListener("click", () => {
     el("macro-list").appendChild(macroRow());
     markMacrosDirty();
@@ -859,23 +859,16 @@ async function init() {
   for (const b of document.querySelectorAll(".nav-item")) {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   }
-  el("refine-prompt").addEventListener("input", markDirty);
-  el("refine-model").addEventListener("input", markDirty);
   for (const id of ["stt-provider", "stt-model", "tts-provider", "llm-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
   el("llm-provider").addEventListener("change", applyLlmProviderVisibility);
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
-  el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
     if (e.metaKey && e.key === "s" && !recording) {
       e.preventDefault();
-      const onMacros = document.getElementById("tab-macros")?.classList.contains("active");
-      if (onMacros) {
-        if (!el("macro-save").disabled) saveMacros();
-      } else if (!el("save").disabled) {
-        save();
-      }
+      // Commands is the only tab with a manual Save.
+      if (!el("macro-save").disabled) saveMacros();
     }
   });
 

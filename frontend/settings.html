@@ -25,7 +25,7 @@
         </div>
         <nav>
           <button class="nav-item active" data-tab="settings">Settings</button>
-          <button class="nav-item" data-tab="macros">Macros</button>
+          <button class="nav-item" data-tab="commands">Commands</button>
           <button class="nav-item" data-tab="insights">Insights</button>
           <button class="nav-item" data-tab="history">History</button>
         </nav>
@@ -38,36 +38,8 @@
             <h1>Settings</h1>
             <div class="actions">
               <span id="status" class="status"></span>
-              <button id="save" class="primary" disabled>Save</button>
             </div>
           </header>
-
-          <div class="card">
-            <h2>Refinement <span class="chip">Fn + Ctrl</span></h2>
-            <p class="hint">
-              When you hold Fn + Ctrl, your dictation is cleaned up by this model
-              using the prompt below before it's pasted.
-            </p>
-
-            <label class="field">
-              <span class="field-label">Prompt</span>
-              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
-            </label>
-
-            <label class="field" id="refine-model-field">
-              <span class="field-label">Model</span>
-              <input id="refine-model" list="models" autocomplete="off" spellcheck="false" />
-              <datalist id="models">
-                <option value="anthropic/claude-haiku-4.5"></option>
-                <option value="anthropic/claude-sonnet-4.5"></option>
-                <option value="openai/gpt-4o-mini"></option>
-                <option value="openai/gpt-4.1-mini"></option>
-                <option value="meta-llama/llama-3.3-70b-instruct"></option>
-                <option value="google/gemini-2.5-flash"></option>
-              </datalist>
-              <span class="hint">Any model slug from openrouter.ai/models.</span>
-            </label>
-          </div>
 
           <div class="card">
             <h2>Engines</h2>
@@ -100,7 +72,7 @@
               </select>
             </div>
             <div class="row">
-              <span class="row-label">Refinement &amp; macros (LLM)</span>
+              <span class="row-label">Refinement &amp; commands (LLM)</span>
               <select id="llm-provider">
                 <option value="local">On-device · Qwen3</option>
                 <option value="openrouter">OpenRouter · cloud</option>
@@ -177,10 +149,10 @@
           </div>
         </section>
 
-        <!-- Macros -->
-        <section id="tab-macros" class="tab">
+        <!-- Commands -->
+        <section id="tab-commands" class="tab">
           <header class="tab-head">
-            <h1>Macros</h1>
+            <h1>Commands</h1>
             <div class="actions">
               <span id="macro-status" class="status"></span>
               <button id="macro-save" class="primary" disabled>Save</button>
@@ -188,17 +160,43 @@
           </header>
 
           <div class="card">
-            <h2>Voice macros</h2>
+            <h2>Refinement <span class="chip">Fn + Ctrl</span></h2>
             <p class="hint">
-              Hold the <b>macro chord</b> (set it under Settings → Keyboard
+              A built-in command. Hold <b>Fn + your refine modifier</b> while
+              dictating and the transcript is rewritten with the prompt below
+              before it's pasted — no classification, it always runs.
+            </p>
+            <label class="field">
+              <span class="field-label">Prompt</span>
+              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
+            </label>
+            <label class="field" id="refine-model-field">
+              <span class="field-label">Model</span>
+              <input id="refine-model" list="models" autocomplete="off" spellcheck="false" />
+              <datalist id="models">
+                <option value="anthropic/claude-haiku-4.5"></option>
+                <option value="anthropic/claude-sonnet-4.5"></option>
+                <option value="openai/gpt-4o-mini"></option>
+                <option value="openai/gpt-4.1-mini"></option>
+                <option value="meta-llama/llama-3.3-70b-instruct"></option>
+                <option value="google/gemini-2.5-flash"></option>
+              </datalist>
+              <span class="hint">Any model slug from openrouter.ai/models.</span>
+            </label>
+          </div>
+
+          <div class="card">
+            <h2>Voice commands</h2>
+            <p class="hint">
+              Hold the <b>command chord</b> (set it under Settings → Keyboard
               shortcuts) and say a phrase. Instead of transcribing what you said,
-              Murmur matches it to one of the macros below and pastes that macro's
-              text. Great for links, snippets, and canned replies — e.g. say
-              “schedule a call” to paste your Calendly link. If nothing matches,
-              Murmur pastes nothing.
+              Murmur matches it to one of the commands below and pastes that
+              command's text. Great for links, snippets, and canned replies — e.g.
+              say “schedule a call” to paste your Calendly link. If nothing
+              matches, Murmur pastes nothing.
             </p>
             <div id="macro-list"></div>
-            <button id="macro-add" class="small-btn">+ Add macro</button>
+            <button id="macro-add" class="small-btn">+ Add command</button>
           </div>
 
           <div class="card" id="macro-model-card">
@@ -207,7 +205,7 @@
               <span class="field-label">Model</span>
               <input id="macro-model" list="models" autocomplete="off" spellcheck="false" />
               <span class="hint">
-                OpenRouter model that picks the macro (uses your OpenRouter key).
+                OpenRouter model that picks the command (uses your OpenRouter key).
                 A small, fast model is best for this.
               </span>
             </label>
