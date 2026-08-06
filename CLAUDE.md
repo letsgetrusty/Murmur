@@ -21,7 +21,8 @@ gotchas). When this file and the architecture doc disagree, ask.**
 
 ## Stack — use these, don't substitute without asking
 - App: Tauri v2 · hotkeys: `tauri-plugin-global-shortcut`
-- Audio in: `cpal` · audio out: `rodio`
+- Audio in: `cpal` · audio out: AVFoundation via `objc2`
+  (`AVSpeechSynthesizer` for native TTS, `AVQueuePlayer` for Kokoro)
 - STT: local `whisper-rs` (whisper.cpp, Metal). Model name in `stt_model`.
 - Inject/selection: `enigo` + `arboard`
 - TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural

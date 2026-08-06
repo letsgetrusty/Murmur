@@ -136,8 +136,8 @@ The full design lives in [`docs/voice-tool-architecture.md`](docs/voice-tool-arc
 
 ### Stack
 
-Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · `rodio` (audio
-out) · `whisper-rs` (STT) · `llama-cpp-2` (refine LLM) · `kokoro-en` / `ort`
-(neural TTS) · `reqwest` (model downloads) · `enigo` + `arboard`
-(inject/selection) · `objc2*` (native macOS FFI) · `rusqlite` (history) ·
+Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · AVFoundation via
+`objc2` (audio out) · `whisper-rs` (STT) · `llama-cpp-2` (refine LLM) ·
+`kokoro-en` / `ort` (neural TTS) · `reqwest` (model downloads) · `enigo` +
+`arboard` (inject/selection) · `objc2*` (native macOS FFI) · `rusqlite` (history) ·
 `tokio` (async).
