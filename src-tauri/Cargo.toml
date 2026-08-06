@@ -44,6 +44,7 @@ objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 # Phase B — dictation history (embedded, single-user)
 rusqlite = { version = "0.32", features = ["bundled"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
+kokoro-en = "0.1.5"
 
 [profile.release]
 # LTO + strip miscompile cpal's CoreAudio device enumeration into a

@@ -22,8 +22,9 @@ phase from it. When this file and the architecture doc disagree, ask.**
 - STT: local `whisper-rs` (whisper.cpp, Metal) — **default**; Groq/OpenAI Whisper
   via `reqwest` optional (cloud). Selected by `stt_provider` in config.
 - Inject/selection: `enigo` + `arboard`
-- TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; ElevenLabs via
-  `reqwest` optional (cloud). Selected by `tts_provider` in config.
+- TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; local neural
+  **Kokoro** (`kokoro-en`: ONNX via `ort` + bundled espeak-ng, CoreML) and
+  ElevenLabs (cloud, `reqwest`) optional. Selected by `tts_provider` in config.
 - Refinement (Fn+Ctrl): OpenRouter via `reqwest`
 - Vector store: `lancedb` · embeddings: Voyage/OpenAI via `reqwest` (or `fastembed`)
 - Generation (Phase 4, KB): Anthropic Messages API via `reqwest`
@@ -66,7 +67,9 @@ selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
 cost), and SQLite dictation history. STT/TTS backends are chosen via
 `stt_provider`/`tts_provider` in config; the local Whisper model (default
 `small.en`) auto-downloads to `<app-support>/murmur/models/` on first run (and via
-`setup.sh`).
+`setup.sh`). Read-aloud can also use local neural **Kokoro** (`tts_provider =
+"kokoro"`): its ONNX model + voice packs auto-download to `…/models/` on first
+selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
 Also shipped: **voice Macros** (`macros.rs`) — a dedicated chord (default
 `Cmd+Shift+M`) records like dictation, but instead of pasting the transcript, an
 OpenRouter classifier (`MacroMatcher` trait) maps the spoken phrase to one of the

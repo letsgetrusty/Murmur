@@ -14,9 +14,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
+use kokoro_en::KokoroTts;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
 use objc2_foundation::NSString;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::secrets;
 
@@ -193,6 +195,65 @@ impl Drop for PlayerHolder {
     }
 }
 
+/// Create a retained AVPlayer for `temp_path` and start playback at `speed` with
+/// pitch-preserving spectral scaling. Returns the holder, or `None` (deleting
+/// the temp file) on failure. Shared by the ElevenLabs and Kokoro backends,
+/// which both play a decoded audio file through AVFoundation.
+fn spawn_avplayer(temp_path: PathBuf, speed: f32) -> Option<PlayerHolder> {
+    // SAFETY: the NSURL/AVPlayer selectors and argument types match their ObjC
+    // signatures; `player` is null-checked before it's retained and stored, and
+    // its item is null-checked before use.
+    unsafe {
+        let path_str = NSString::from_str(temp_path.to_str().unwrap_or_default());
+        let nsurl: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: &*path_str];
+        // `playerWithURL:` returns an autoreleased instance; retain so we can
+        // hold it across thread boundaries.
+        let player: *mut AnyObject = msg_send![class!(AVPlayer), playerWithURL: nsurl];
+        if player.is_null() {
+            log::warn!("tts: AVPlayer playerWithURL returned null");
+            let _ = std::fs::remove_file(&temp_path);
+            return None;
+        }
+        let _: () = msg_send![player, retain];
+        // Pitch-preserving rate scaling lives on the player item.
+        let item: *mut AnyObject = msg_send![player, currentItem];
+        if !item.is_null() {
+            let algo = NSString::from_str(PITCH_ALG);
+            let _: () = msg_send![item, setAudioTimePitchAlgorithm: &*algo];
+        }
+        // Setting a non-zero rate starts playback.
+        let _: () = msg_send![player, setRate: speed];
+        let ptr = NonNull::new(player).expect("just checked non-null above");
+        Some(PlayerHolder {
+            player: ptr,
+            temp_path,
+        })
+    }
+}
+
+/// Encode mono f32 [-1, 1] PCM into a 16-bit WAV byte buffer at `rate` Hz.
+fn pcm_f32_to_wav(samples: &[f32], rate: u32) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut w = Vec::with_capacity(44 + data_len as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVE");
+    w.extend_from_slice(b"fmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    w.extend_from_slice(&1u16.to_le_bytes()); // mono
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * 2).to_le_bytes()); // byte rate (mono, 16-bit)
+    w.extend_from_slice(&2u16.to_le_bytes()); // block align
+    w.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        w.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    w
+}
+
 pub struct ElevenLabsSpeaker {
     client: reqwest::Client,
     voice_id: Mutex<String>,
@@ -314,44 +375,12 @@ impl Speaker for ElevenLabsSpeaker {
                 active.store(false, Ordering::Release);
                 return;
             }
-            log::info!("tts/11labs: AVPlayer rate={speed}");
-
-            // SAFETY: the NSURL/AVPlayer selectors and argument types match their
-            // ObjC signatures; `player` is null-checked before use and retained
-            // before being stored, and its item is null-checked before use.
-            unsafe {
-                let path_str = NSString::from_str(temp_path.to_str().unwrap_or_default());
-                let nsurl: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: &*path_str];
-                // `playerWithURL:` returns an autoreleased instance. Retain
-                // so we can hold onto it across thread boundaries.
-                let player: *mut AnyObject = msg_send![class!(AVPlayer), playerWithURL: nsurl];
-                if player.is_null() {
-                    log::warn!("tts/11labs: AVPlayer playerWithURL returned null");
-                    let _ = std::fs::remove_file(&temp_path);
-                    active.store(false, Ordering::Release);
-                    return;
-                }
-                let _: () = msg_send![player, retain];
-
-                // Pitch-preserving rate scaling lives on the player item.
-                let item: *mut AnyObject = msg_send![player, currentItem];
-                if !item.is_null() {
-                    let algo = NSString::from_str(PITCH_ALG);
-                    let _: () = msg_send![item, setAudioTimePitchAlgorithm: &*algo];
-                }
-
-                // Setting rate to a non-zero value starts playback.
-                let _: () = msg_send![player, setRate: speed];
-
-                let ptr = NonNull::new(player).expect("just checked non-null above");
-                let holder = PlayerHolder {
-                    player: ptr,
-                    temp_path,
-                };
-                // Replacing drops the previous holder, which pauses+releases
-                // the prior player and removes its temp file.
-                let mut g = player_slot.lock().expect("player mutex");
-                *g = Some(holder);
+            log::info!("tts/11labs: play rate={speed}");
+            match spawn_avplayer(temp_path, speed) {
+                // Replacing drops the previous holder, pausing+releasing the
+                // prior player and removing its temp file.
+                Some(holder) => *player_slot.lock().expect("player mutex") = Some(holder),
+                None => active.store(false, Ordering::Release),
             }
         });
     }
@@ -424,5 +453,294 @@ impl Speaker for ElevenLabsSpeaker {
 
     fn current_voice(&self) -> Option<String> {
         Some(self.voice_id.lock().expect("voice id mutex").clone())
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Kokoro backend — local neural TTS (kokoro-en: ONNX via `ort` + bundled
+// espeak-ng, CoreML-accelerated). Fully on-device; no API key.
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Curated subset of Kokoro's voices we ship. `(id, friendly name)`; `af_*`/`am_*`
+/// are US female/male, `bf_*`/`bm_*` British.
+pub const KOKORO_VOICES: &[(&str, &str)] = &[
+    ("af_heart", "Heart (US female)"),
+    ("af_bella", "Bella (US female)"),
+    ("af_nicole", "Nicole (US female)"),
+    ("am_michael", "Michael (US male)"),
+    ("am_puck", "Puck (US male)"),
+    ("am_fenrir", "Fenrir (US male)"),
+    ("bf_emma", "Emma (UK female)"),
+    ("bm_george", "George (UK male)"),
+];
+
+const KOKORO_DEFAULT_VOICE: &str = "af_heart";
+const KOKORO_SAMPLE_RATE: u32 = 24_000;
+
+/// Path to the Kokoro ONNX model file.
+pub fn kokoro_model_path() -> Result<PathBuf> {
+    Ok(crate::stt::models_dir()?.join("kokoro-v1.0.onnx"))
+}
+
+/// Directory holding Kokoro voice `.bin` packs.
+pub fn kokoro_voices_dir() -> Result<PathBuf> {
+    Ok(crate::stt::models_dir()?.join("kokoro-voices"))
+}
+
+/// True once the model and at least one voice pack are on disk.
+pub fn kokoro_assets_present() -> bool {
+    let model = kokoro_model_path().map(|p| p.exists()).unwrap_or(false);
+    let has_voice = kokoro_voices_dir()
+        .ok()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .map(|mut e| {
+            e.any(|f| {
+                f.map(|f| f.path().extension().is_some_and(|x| x == "bin"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    model && has_voice
+}
+
+/// Download the Kokoro model + curated voice packs if missing (onnx-community
+/// Kokoro-82M v1.0 on Hugging Face). Safe to call repeatedly.
+pub async fn ensure_kokoro_assets() -> Result<()> {
+    const BASE: &str = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
+    let model = kokoro_model_path()?;
+    if !model.exists() {
+        if let Some(p) = model.parent() {
+            std::fs::create_dir_all(p).ok();
+        }
+        log::info!("tts/kokoro: downloading model (~310 MB, one-time)…");
+        download_to(&format!("{BASE}/onnx/model.onnx"), &model).await?;
+    }
+    let dir = kokoro_voices_dir()?;
+    std::fs::create_dir_all(&dir).ok();
+    for (id, _) in KOKORO_VOICES {
+        let dst = dir.join(format!("{id}.bin"));
+        if !dst.exists() {
+            log::info!("tts/kokoro: downloading voice '{id}'…");
+            download_to(&format!("{BASE}/voices/{id}.bin"), &dst).await?;
+        }
+    }
+    log::info!("tts/kokoro: assets ready");
+    Ok(())
+}
+
+/// Stream a URL to `dst` via a `.part` temp + rename, so a file at `dst` is
+/// always complete.
+async fn download_to(url: &str, dst: &std::path::Path) -> Result<()> {
+    use std::io::Write;
+    let mut resp = reqwest::Client::new().get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("download {url} failed: HTTP {}", resp.status()));
+    }
+    let part = dst.with_extension("part");
+    let mut file = std::fs::File::create(&part)?;
+    while let Some(chunk) = resp.chunk().await? {
+        file.write_all(&chunk)?;
+    }
+    file.flush().ok();
+    drop(file);
+    std::fs::rename(&part, dst)?;
+    Ok(())
+}
+
+pub struct KokoroSpeaker {
+    model_path: PathBuf,
+    voices_path: PathBuf,
+    /// Loaded lazily on first `speak` and cached (model load is ~1s).
+    tts: Arc<AsyncMutex<Option<Arc<KokoroTts>>>>,
+    voice: Mutex<String>,
+    speed: Mutex<f32>,
+    player: Arc<Mutex<Option<PlayerHolder>>>,
+    active: Arc<AtomicBool>,
+    counter: AtomicU64,
+}
+
+impl KokoroSpeaker {
+    pub fn new(model_path: PathBuf, voices_path: PathBuf) -> Self {
+        Self {
+            model_path,
+            voices_path,
+            tts: Arc::new(AsyncMutex::new(None)),
+            voice: Mutex::new(KOKORO_DEFAULT_VOICE.into()),
+            speed: Mutex::new(1.0),
+            player: Arc::new(Mutex::new(None)),
+            active: Arc::new(AtomicBool::new(false)),
+            counter: AtomicU64::new(0),
+        }
+    }
+}
+
+impl Speaker for KokoroSpeaker {
+    fn speak(&self, text: &str) {
+        let text = text.to_string();
+        let voice = self.voice.lock().expect("voice mutex").clone();
+        let speed = *self.speed.lock().expect("speed mutex");
+        let n = self.counter.fetch_add(1, Ordering::Relaxed);
+        let model_path = self.model_path.clone();
+        let voices_path = self.voices_path.clone();
+        let tts_cell = self.tts.clone();
+        let player_slot = self.player.clone();
+        let active = self.active.clone();
+        // Mark active immediately so is_speaking() is true during synthesis.
+        active.store(true, Ordering::Release);
+
+        tauri::async_runtime::spawn(async move {
+            // Load + cache the model on first use.
+            let tts = {
+                let mut guard = tts_cell.lock().await;
+                if guard.is_none() {
+                    match KokoroTts::new(&model_path, &voices_path).await {
+                        Ok(t) => *guard = Some(Arc::new(t)),
+                        Err(e) => {
+                            log::warn!("tts/kokoro: load model failed: {e}");
+                            active.store(false, Ordering::Release);
+                            return;
+                        }
+                    }
+                }
+                guard.as_ref().expect("just loaded").clone()
+            };
+
+            let samples = match tts.synth(&text, voice.as_str()).await {
+                Ok((s, dur)) => {
+                    log::info!("tts/kokoro: synthesized {:.1}s audio", dur.as_secs_f32());
+                    s
+                }
+                Err(e) => {
+                    log::warn!("tts/kokoro: synth failed: {e}");
+                    active.store(false, Ordering::Release);
+                    return;
+                }
+            };
+
+            let wav = pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE);
+            let temp_path = std::env::temp_dir().join(format!("murmur-kokoro-{n}.wav"));
+            if let Err(e) = std::fs::write(&temp_path, &wav) {
+                log::warn!("tts/kokoro: write temp wav failed: {e}");
+                active.store(false, Ordering::Release);
+                return;
+            }
+            match spawn_avplayer(temp_path, speed) {
+                Some(holder) => *player_slot.lock().expect("player mutex") = Some(holder),
+                None => active.store(false, Ordering::Release),
+            }
+        });
+    }
+
+    fn stop(&self) {
+        self.active.store(false, Ordering::Release);
+        *self.player.lock().expect("player mutex") = None;
+    }
+
+    fn is_speaking(&self) -> bool {
+        if !self.active.load(Ordering::Acquire) {
+            return false;
+        }
+        let g = self.player.lock().expect("player mutex");
+        match g.as_ref() {
+            None => true, // still synthesizing
+            // SAFETY: `h.player` is a live AVPlayer held under the mutex; `rate`
+            // returns a float.
+            Some(h) => unsafe {
+                let rate: f32 = msg_send![h.player.as_ptr(), rate];
+                if rate != 0.0 {
+                    true
+                } else {
+                    self.active.store(false, Ordering::Release);
+                    false
+                }
+            },
+        }
+    }
+
+    fn cycle_speed(&self) -> f32 {
+        let new_speed = {
+            let g = self.speed.lock().expect("speed mutex");
+            let i = SPEEDS
+                .iter()
+                .position(|s| (*s - *g).abs() < 1e-3)
+                .unwrap_or(0);
+            SPEEDS[(i + 1) % SPEEDS.len()]
+        };
+        self.set_speed(new_speed);
+        new_speed
+    }
+
+    fn set_speed(&self, speed: f32) {
+        *self.speed.lock().expect("speed mutex") = speed;
+        let g = self.player.lock().expect("player mutex");
+        if let Some(h) = g.as_ref() {
+            // SAFETY: `h.player` is a live AVPlayer held under the mutex;
+            // `setRate:` takes a float.
+            unsafe {
+                let _: () = msg_send![h.player.as_ptr(), setRate: speed];
+            }
+        }
+    }
+
+    fn current_speed(&self) -> f32 {
+        *self.speed.lock().expect("speed mutex")
+    }
+
+    fn set_voice(&self, voice_id: &str) {
+        if !voice_id.is_empty() {
+            *self.voice.lock().expect("voice mutex") = voice_id.to_string();
+        }
+    }
+
+    fn current_voice(&self) -> Option<String> {
+        Some(self.voice.lock().expect("voice mutex").clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wav_header_is_riff_wave() {
+        let wav = pcm_f32_to_wav(&[0.0, 0.5, -0.5, 1.0], KOKORO_SAMPLE_RATE);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(wav.len(), 44 + 4 * 2);
+    }
+
+    /// End-to-end Kokoro synthesis; needs the model + voices on disk. Ignored by
+    /// default. Run manually (writes /tmp/murmur-kokoro-test.wav to `afplay`):
+    ///   cargo test --no-default-features -- --ignored kokoro_synth --nocapture
+    #[test]
+    #[ignore = "needs the Kokoro model + voices in <app-support>/murmur/models"]
+    fn kokoro_synth() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let tts = KokoroTts::new(kokoro_model_path().unwrap(), kokoro_voices_dir().unwrap())
+                .await
+                .unwrap();
+            let (samples, dur) = tts
+                .synth(
+                    "Hello from Murmur. This is a local neural voice.",
+                    "af_heart",
+                )
+                .await
+                .unwrap();
+            eprintln!(
+                "SYNTH: {} samples, {:.2}s",
+                samples.len(),
+                dur.as_secs_f32()
+            );
+            assert!(samples.len() > 1000);
+            std::fs::write(
+                "/tmp/murmur-kokoro-test.wav",
+                pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE),
+            )
+            .unwrap();
+        });
     }
 }

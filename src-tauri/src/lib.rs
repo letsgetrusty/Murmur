@@ -232,24 +232,44 @@ pub fn run() {
             let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner, matcher);
 
             // Text-to-speech backend, selected by config. Default is the native
-            // on-device AVSpeechSynthesizer; "elevenlabs" uses the cloud voice
-            // when a key is present, else falls back to native so read-aloud
-            // always does *something*. Hydrate from saved config.
-            let use_eleven = cfg.tts_provider == "elevenlabs"
-                && secrets::get(secrets::ELEVENLABS_API_KEY).is_ok();
-            let speaker: Arc<dyn tts::Speaker> = if use_eleven {
-                log::info!("tts: ElevenLabs backend");
-                let s = tts::ElevenLabsSpeaker::new();
-                s.set_speed(cfg.tts_speed);
-                s.set_voice(&cfg.tts_voice_id);
-                Arc::new(s)
-            } else {
-                if cfg.tts_provider == "elevenlabs" {
-                    log::info!("tts: ElevenLabs selected but no key in Keychain; using native");
-                } else {
-                    log::info!("tts: native macOS AVSpeechSynthesizer backend");
+            // on-device AVSpeechSynthesizer; "kokoro" is local neural TTS;
+            // "elevenlabs" is cloud (falls back to native without a key).
+            let speaker: Arc<dyn tts::Speaker> = match cfg.tts_provider.as_str() {
+                "elevenlabs" if secrets::get(secrets::ELEVENLABS_API_KEY).is_ok() => {
+                    log::info!("tts: ElevenLabs backend");
+                    let s = tts::ElevenLabsSpeaker::new();
+                    s.set_speed(cfg.tts_speed);
+                    s.set_voice(&cfg.tts_voice_id);
+                    Arc::new(s)
                 }
-                Arc::new(tts::MacSpeaker::new())
+                "kokoro" => {
+                    if tts::kokoro_assets_present() {
+                        log::info!("tts: Kokoro local neural backend");
+                    } else {
+                        log::info!("tts: Kokoro backend; assets missing — downloading…");
+                    }
+                    // Fetch model + voices in the background so the first
+                    // read-aloud isn't blocked on a ~310 MB download.
+                    tauri::async_runtime::spawn(async {
+                        if let Err(e) = tts::ensure_kokoro_assets().await {
+                            log::warn!("tts/kokoro: asset prefetch failed: {e}");
+                        }
+                    });
+                    let s = tts::KokoroSpeaker::new(
+                        tts::kokoro_model_path().unwrap_or_default(),
+                        tts::kokoro_voices_dir().unwrap_or_default(),
+                    );
+                    s.set_speed(cfg.tts_speed);
+                    Arc::new(s)
+                }
+                other => {
+                    if other == "elevenlabs" {
+                        log::info!("tts: ElevenLabs selected but no key in Keychain; using native");
+                    } else {
+                        log::info!("tts: native macOS AVSpeechSynthesizer backend");
+                    }
+                    Arc::new(tts::MacSpeaker::new())
+                }
             };
 
             // Build the tray menu with CheckMenuItems initialised from the
