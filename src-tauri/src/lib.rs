@@ -561,11 +561,9 @@ fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        // Read-aloud is now playing — hijack Esc so the user can stop it. This
-        // MUST be registered from here (a background thread), not from inside
-        // tts_toggle / the read-aloud shortcut callback: registering a global
-        // shortcut while the plugin holds its dispatch lock deadlocks the whole
-        // app. From this thread, run_on_main_thread defers it to a clean tick.
+        // Read-aloud is playing — let Esc stop it. Registered from this
+        // background thread (not the shortcut callback) to avoid a deadlock;
+        // see hotkeys::register_tts_escape.
         hotkeys::register_tts_escape(&app);
         // Phase 2: wait for it to flip false (end-of-media or stop()), emitting
         // read-aloud progress so the overlay pill fills as it speaks.

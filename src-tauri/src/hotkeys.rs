@@ -172,15 +172,14 @@ fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Hijack Escape while a read-aloud is playing so the user can stop it mid-read.
-/// Stops TTS instead of cancelling a dictation.
+/// Hijack Escape while a read-aloud is playing so the user can stop it mid-read
+/// (stops TTS rather than cancelling a dictation).
 ///
-/// Both register and unregister are deferred onto the main thread via
-/// `run_on_main_thread`, because this is invoked from *inside* a global-shortcut
-/// callback (the read-aloud chord) and from the idle-watcher thread. Calling
-/// `on_shortcut`/`unregister` directly from within a shortcut callback re-locks
-/// the plugin's dispatch mutex and deadlocks the whole app; deferring runs it on
-/// the main thread after the callback has released that lock.
+/// Call only from a background thread (the idle-watcher), never from inside a
+/// global-shortcut callback: touching the global-shortcut registry while the
+/// plugin holds its dispatch lock deadlocks the app. The `run_on_main_thread`
+/// hop then defers the actual (un)register to a clean event-loop tick with that
+/// lock free.
 pub fn register_tts_escape<R: Runtime>(app: &AppHandle<R>) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
