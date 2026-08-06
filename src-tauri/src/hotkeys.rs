@@ -173,30 +173,44 @@ fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Hijack Escape while a read-aloud is playing so the user can stop it mid-read.
-/// Mirrors `register_escape`, but stops TTS instead of cancelling a dictation.
-/// Unregistered by the tts idle-watcher (or here, on press) so Esc is only
-/// hijacked while actually speaking.
+/// Stops TTS instead of cancelling a dictation.
+///
+/// Both register and unregister are deferred onto the main thread via
+/// `run_on_main_thread`, because this is invoked from *inside* a global-shortcut
+/// callback (the read-aloud chord) and from the idle-watcher thread. Calling
+/// `on_shortcut`/`unregister` directly from within a shortcut callback re-locks
+/// the plugin's dispatch mutex and deadlocks the whole app; deferring runs it on
+/// the main thread after the callback has released that lock.
 pub fn register_tts_escape<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(esc) = ESC.parse::<Shortcut>() else {
-        return;
-    };
-    let res = app.global_shortcut().on_shortcut(
-        esc,
-        |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
-            if event.state() == ShortcutState::Pressed {
-                log::info!("tts: stop read-aloud (Esc)");
-                unregister_escape(app);
-                let state = app.state::<AppState>();
-                state.speaker.stop();
-                emit_state(app, OverlayState::Idle);
-            }
-        },
-    );
-    if let Err(e) = res {
-        log::debug!("hotkey: tts esc register failed: {e}");
-    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Ok(esc) = ESC.parse::<Shortcut>() else {
+            return;
+        };
+        let res = handle.global_shortcut().on_shortcut(
+            esc,
+            |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+                if event.state() == ShortcutState::Pressed {
+                    log::info!("tts: stop read-aloud (Esc)");
+                    // Just stop; the idle-watcher unregisters Esc once
+                    // is_speaking() flips false. Do NOT unregister here — this
+                    // runs inside the global-shortcut callback and would deadlock.
+                    app.state::<AppState>().speaker.stop();
+                    emit_state(app, OverlayState::Idle);
+                }
+            },
+        );
+        if let Err(e) = res {
+            log::debug!("hotkey: tts esc register failed: {e}");
+        }
+    });
 }
 
 pub fn unregister_tts_escape<R: Runtime>(app: &AppHandle<R>) {
-    unregister_escape(app);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Ok(esc) = ESC.parse::<Shortcut>() {
+            let _ = handle.global_shortcut().unregister(esc);
+        }
+    });
 }

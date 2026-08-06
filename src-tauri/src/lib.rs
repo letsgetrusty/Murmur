@@ -415,7 +415,8 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     if state.speaker.is_speaking() {
         log::info!("tts: stop");
         state.speaker.stop();
-        hotkeys::unregister_tts_escape(app);
+        // Esc is released by the idle-watcher once is_speaking() flips false;
+        // don't unregister from this shortcut callback (it would deadlock).
         show_overlay(app);
         emit_state(app, OverlayState::Done { chars: 0 });
         idle_after(app.clone(), Duration::from_millis(400));
@@ -448,10 +449,10 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             show_overlay(app);
             emit_state(app, OverlayState::Reading { progress: 0.0 });
             state.speaker.speak(&text);
+            // The watcher registers the Esc-to-stop shortcut (from its own
+            // thread, to avoid a global-shortcut re-lock deadlock) and releases
+            // it when the read ends.
             spawn_tts_idle_watcher(app.clone());
-            // Let Esc stop the read while it plays; the watcher releases it
-            // when the read ends.
-            hotkeys::register_tts_escape(app);
         }
         None => {
             log::info!("tts: nothing to read (no selection or clipboard text)");
@@ -560,6 +561,12 @@ fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+        // Read-aloud is now playing — hijack Esc so the user can stop it. This
+        // MUST be registered from here (a background thread), not from inside
+        // tts_toggle / the read-aloud shortcut callback: registering a global
+        // shortcut while the plugin holds its dispatch lock deadlocks the whole
+        // app. From this thread, run_on_main_thread defers it to a clean tick.
+        hotkeys::register_tts_escape(&app);
         // Phase 2: wait for it to flip false (end-of-media or stop()), emitting
         // read-aloud progress so the overlay pill fills as it speaks.
         loop {
