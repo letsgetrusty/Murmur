@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the notarized Developer ID release build
+  (applied by `tauri build` when signing; see docs/releasing.md).
+
+  Open Wispr is deliberately NOT sandboxed — it needs the Accessibility API
+  (paste injection + the Fn CGEventTap) and full clipboard access, which the App
+  Sandbox forbids. So this file only declares what the hardened runtime gates:
+
+  - audio-input: required to open the microphone via cpal under hardened runtime.
+    (The TCC prompt string is NSMicrophoneUsageDescription in Info.plist.)
+
+  Everything else is statically linked into the single binary — no bundled
+  dylibs — so no library-validation exception is needed. Accessibility and
+  clipboard are governed by TCC at runtime, not by entitlements.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

@@ -15,3 +15,8 @@ src-tauri/WixTools/
 
 # Logs
 *.log
+
+# Release signing / notarization secrets — never commit these
+.env
+*.p8
+*.p12

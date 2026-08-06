@@ -22,12 +22,16 @@
 #   failing with -10810. env_logger's stderr also doesn't reach the unified
 #   log. The launcher is the only way to both launch cleanly AND get logs.)
 #
-#   Frontend hot-reload still works: the debug build loads the Vite dev
-#   server (localhost:1420), so webview edits are instant. Editing Rust means
-#   re-running this script (it does an incremental build).
+#   The built binary embeds ../dist (frontendDist) at compile time — it does
+#   NOT read from a Vite dev server — so this script rebuilds the frontend
+#   (npm run build) before the cargo build. Any frontend or Rust edit takes
+#   effect on the next run (both builds are incremental).
 #
 # Usage:      ./scripts/dev.sh
 # Tail logs:  tail -f ~/Library/Logs/openwispr.log
+#
+# Shipping a signed, notarized .dmg is a different flow — see scripts/release.sh
+# and docs/releasing.md.
 
 set -euo pipefail
 
@@ -40,7 +44,6 @@ TARGET_DIR="src-tauri/target/debug"
 BIN="$TARGET_DIR/openwispr"
 APP="$TARGET_DIR/OpenWispr.app"
 LOG="$HOME/Library/Logs/openwispr.log"
-VITE_URL="http://localhost:1420/"
 
 say() { printf '\033[1;36m▶ %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }

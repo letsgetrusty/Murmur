@@ -12,8 +12,9 @@ gotchas). When this file and the architecture doc disagree, ask.**
 ## Scope — do not violate
 - **macOS only.** Do not add Windows/Linux abstractions, cfg gates, or "portable"
   layers. Pick the simplest macOS-native path every time.
-- **Personal tool.** No accounts, sync, multi-user, telemetry, or distribution
-  packaging.
+- **Single-user tool.** No accounts, sync, multi-user, or telemetry. (Public
+  distribution as a signed/notarized DMG is now in scope — see
+  `docs/releasing.md` — but the app stays single-user and phone-home-free.)
 - **Fully on-device.** Everything runs locally — no cloud providers, API keys, or
   network calls except model downloads. Do not re-add cloud backends (Groq,
   OpenRouter, ElevenLabs) without asking.
@@ -100,7 +101,13 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/openwispr.log`.
 - Rust check (from `src-tauri/`): `cargo check`
 - Rust tests: `cargo test`
-- Release build: `npm run tauri build`
+- Release (signed + notarized DMG): `./scripts/release.sh` — needs a Developer
+  ID cert + notarization credentials in env; see `docs/releasing.md`. Bump the
+  version in `package.json`, `tauri.conf.json`, and `Cargo.toml` first.
+  `./scripts/release.sh --unsigned` tests the bundling without a cert. (Bundle
+  config: `tauri.conf.json` targets `["app","dmg"]`, hardened-runtime
+  `entitlements.plist` — minimal, just `audio-input`, since the binary is fully
+  statically linked.)
 - Lint/format: a pre-commit hook (`.githooks/pre-commit`) runs `cargo fmt --check`
   + `cargo clippy -D warnings` on Rust changes. Keep the crate clean; bypass a WIP
   commit with `git commit --no-verify`.

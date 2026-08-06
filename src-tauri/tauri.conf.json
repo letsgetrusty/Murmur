@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenWispr",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "identifier": "ai.openwispr.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -44,7 +44,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "app",
+    "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -55,7 +55,7 @@
     "category": "Productivity",
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "openwispr dev"
+      "entitlements": "entitlements.plist"
     }
   }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "openwispr"
-version = "0.0.0"
-description = "Voice tool: dictation and read-aloud TTS with on-device refinement + macros"
+version = "0.1.0"
+description = "Voice tool: on-device dictation, read-aloud TTS, and LLM refinement"
 edition = "2021"
 rust-version = "1.77"
 

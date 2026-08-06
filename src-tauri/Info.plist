@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>murmur captures your voice for on-demand dictation.</string>
+    <string>Open Wispr captures your voice for on-demand dictation.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>murmur sends Cmd+V to paste dictated text at your cursor.</string>
+    <string>Open Wispr sends Cmd+V to paste dictated text at your cursor.</string>
     <key>NSInputMonitoringUsageDescription</key>
-    <string>murmur watches for the Fn key so you can hold it to dictate.</string>
+    <string>Open Wispr watches for the Fn key so you can hold it to dictate.</string>
 </dict>
 </plist>
