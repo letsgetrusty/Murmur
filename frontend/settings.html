@@ -23,6 +23,7 @@
         </div>
         <nav>
           <button class="nav-item active" data-tab="settings">Settings</button>
+          <button class="nav-item" data-tab="macros">Macros</button>
           <button class="nav-item" data-tab="insights">Insights</button>
           <button class="nav-item" data-tab="history">History</button>
         </nav>
@@ -98,6 +99,10 @@
               <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
             </div>
             <div class="row">
+              <span class="row-label">Macro chord</span>
+              <button class="recorder" data-action="macro" data-default="CmdOrCtrl+Shift+M"></button>
+            </div>
+            <div class="row">
               <span class="row-label">Refined dictation</span>
               <span class="refine-combo">
                 <span class="fn-badge">Fn</span>
@@ -124,6 +129,43 @@
               take effect after you relaunch Murmur.
             </p>
             <div id="keys"></div>
+          </div>
+        </section>
+
+        <!-- Macros -->
+        <section id="tab-macros" class="tab">
+          <header class="tab-head">
+            <h1>Macros</h1>
+            <div class="actions">
+              <span id="macro-status" class="status"></span>
+              <button id="macro-save" class="primary" disabled>Save</button>
+            </div>
+          </header>
+
+          <div class="card">
+            <h2>Voice macros</h2>
+            <p class="hint">
+              Hold the <b>macro chord</b> (set it under Settings → Keyboard
+              shortcuts) and say a phrase. Instead of transcribing what you said,
+              Murmur matches it to one of the macros below and pastes that macro's
+              text. Great for links, snippets, and canned replies — e.g. say
+              “schedule a call” to paste your Calendly link. If nothing matches,
+              Murmur pastes nothing.
+            </p>
+            <div id="macro-list"></div>
+            <button id="macro-add" class="small-btn">+ Add macro</button>
+          </div>
+
+          <div class="card">
+            <h2>Matching model</h2>
+            <label class="field">
+              <span class="field-label">Model</span>
+              <input id="macro-model" list="models" autocomplete="off" spellcheck="false" />
+              <span class="hint">
+                OpenRouter model that picks the macro (uses your OpenRouter key).
+                A small, fast model is best for this.
+              </span>
+            </label>
           </div>
         </section>
 

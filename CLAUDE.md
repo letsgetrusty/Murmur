@@ -60,6 +60,13 @@ injection, Fn+Ctrl LLM refinement (OpenRouter), read-aloud TTS (ElevenLabs with 
 `AVSpeechSynthesizer` fallback; read-aloud falls back to the clipboard when nothing
 is selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
 cost), and SQLite dictation history.
+Also shipped: **voice Macros** (`macros.rs`) — a dedicated chord (default
+`Cmd+Shift+M`) records like dictation, but instead of pasting the transcript, an
+OpenRouter classifier (`MacroMatcher` trait) maps the spoken phrase to one of the
+user's configured macros and pastes that macro's canned response (or nothing when
+no macro clearly matches). Managed in the Settings "Macros" tab; macro runs are not
+recorded to dictation history. The three dictation paths share one recorder
+lifecycle via the `DictationMode` enum (Plain / Refine / Macro).
 **Next: Phase 4 — knowledge-base–grounded generation** (`kb.rs` is still a stub):
 ingest → embed → LanceDB → top-k → Anthropic Messages over selected text. Phase 5
 (screen context) is optional/later. Phase definitions: `docs/voice-tool-architecture.md` §7.

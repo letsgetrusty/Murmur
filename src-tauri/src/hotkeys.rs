@@ -3,16 +3,18 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, S
 
 use crate::config::Config;
 use crate::{
-    emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, OverlayState,
+    emit_state, show_overlay, tts_speed_cycle, tts_toggle, AppState, DictationCmd, DictationMode,
+    OverlayState,
 };
 
-/// The three configurable global-shortcut chords. (Fn-hold dictation is a
-/// hardware event tap in `fn_key`, not a plugin shortcut, so it isn't here.)
+/// The configurable global-shortcut chords. (Fn-hold dictation is a hardware
+/// event tap in `fn_key`, not a plugin shortcut, so it isn't here.)
 #[derive(Clone, Copy)]
 pub enum HotkeyAction {
     Dictate,
     TtsToggle,
     TtsSpeed,
+    Macro,
 }
 
 impl HotkeyAction {
@@ -21,6 +23,7 @@ impl HotkeyAction {
             "dictate" => Some(Self::Dictate),
             "tts_toggle" => Some(Self::TtsToggle),
             "tts_speed" => Some(Self::TtsSpeed),
+            "macro" => Some(Self::Macro),
             _ => None,
         }
     }
@@ -43,7 +46,14 @@ fn register_action<R: Runtime>(
             move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
                 // The chord is always plain dictation; refined is Fn+Ctrl.
                 ShortcutState::Pressed => on_press(app),
-                ShortcutState::Released => on_release(app, false),
+                ShortcutState::Released => on_release(app, DictationMode::Plain),
+            },
+        )?,
+        HotkeyAction::Macro => gs.on_shortcut(
+            sc,
+            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
+                ShortcutState::Pressed => on_press(app),
+                ShortcutState::Released => on_release(app, DictationMode::Macro),
             },
         )?,
         HotkeyAction::TtsToggle => gs.on_shortcut(
@@ -73,6 +83,7 @@ pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<
         (HotkeyAction::Dictate, &cfg.hotkey_dictate),
         (HotkeyAction::TtsToggle, &cfg.hotkey_tts),
         (HotkeyAction::TtsSpeed, &cfg.hotkey_tts_speed),
+        (HotkeyAction::Macro, &cfg.hotkey_macro),
     ] {
         if let Err(e) = register_action(app, action, sc) {
             log::warn!("hotkey: register '{sc}' failed: {e}");
@@ -119,16 +130,12 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 
 /// Commit a dictation. Keep the overlay visible — the router flips it to
 /// Done/Error and schedules the idle render once transcribe + inject return.
-/// `refine` = Fn+Ctrl was held during this dictation → refine before pasting.
-pub fn on_release<R: Runtime>(app: &AppHandle<R>, refine: bool) {
-    log::info!("hotkey: release (refine={refine})");
+/// `mode` selects plain / refined / macro handling of the transcript.
+pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
+    log::info!("hotkey: release (mode={mode:?})");
     unregister_escape(app);
     emit_state(app, OverlayState::Transcribing);
-    if let Err(e) = app
-        .state::<AppState>()
-        .tx
-        .send(DictationCmd::Stop { refine })
-    {
+    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop { mode }) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }

@@ -107,11 +107,13 @@ const HOTKEY_FIELD = {
   dictate: "hotkey_dictate",
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
+  macro: "hotkey_macro",
 };
 const HOTKEY_LABEL = {
   dictate: "Dictation chord",
   tts_toggle: "Read aloud",
   tts_speed: "Cycle speed",
+  macro: "Macro chord",
 };
 
 function prettyShortcut(s) {
@@ -668,6 +670,111 @@ function initHistory() {
   });
 }
 
+// --- Macros -------------------------------------------------------------------
+// Edited in-memory as DOM rows, then round-tripped through save_config (same
+// whole-config save the rest of Settings uses). Kept stable across tab switches
+// so unsaved edits survive navigation — only rebuilt on load.
+
+function setMacroStatus(text, kind = "") {
+  const s = el("macro-status");
+  s.textContent = text;
+  s.className = `status ${kind}`;
+}
+
+function markMacrosDirty() {
+  el("macro-save").disabled = false;
+  setMacroStatus("");
+}
+
+function macroRow(m = { name: "", triggers: "", response: "" }) {
+  const row = document.createElement("div");
+  row.className = "macro-row";
+
+  const head = document.createElement("div");
+  head.className = "macro-head";
+  const name = document.createElement("input");
+  name.className = "macro-name";
+  name.placeholder = "Name — e.g. Schedule call";
+  name.value = m.name ?? "";
+  const remove = document.createElement("button");
+  remove.className = "small-btn danger";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => {
+    row.remove();
+    markMacrosDirty();
+  });
+  head.append(name, remove);
+
+  const triggers = document.createElement("input");
+  triggers.className = "macro-triggers";
+  triggers.placeholder = "Example phrases (optional) — e.g. book a call, send my calendly";
+  triggers.value = m.triggers ?? "";
+
+  const response = document.createElement("textarea");
+  response.className = "macro-response";
+  response.rows = 3;
+  response.spellcheck = false;
+  response.placeholder = "Text to paste — e.g. https://calendly.com/you/30min";
+  response.value = m.response ?? "";
+
+  for (const inp of [name, triggers, response]) inp.addEventListener("input", markMacrosDirty);
+
+  row.append(head, triggers, response);
+  return row;
+}
+
+function renderMacros() {
+  const list = el("macro-list");
+  list.innerHTML = "";
+  for (const m of currentConfig?.macros ?? []) list.appendChild(macroRow(m));
+}
+
+// Read the macro rows back out of the DOM. Fully-empty rows are dropped.
+function collectMacros() {
+  const macros = [];
+  for (const r of el("macro-list").querySelectorAll(".macro-row")) {
+    const name = r.querySelector(".macro-name").value.trim();
+    const triggers = r.querySelector(".macro-triggers").value.trim();
+    const response = r.querySelector(".macro-response").value;
+    if (!name && !triggers && !response.trim()) continue;
+    macros.push({ name, triggers, response });
+  }
+  return macros;
+}
+
+async function saveMacros() {
+  if (!invoke || !currentConfig) return;
+  const macros = collectMacros();
+  for (const m of macros) {
+    if (!m.name || !m.response.trim()) {
+      setMacroStatus("Each macro needs a name and a response.", "error");
+      return;
+    }
+  }
+  const next = { ...currentConfig, macros, macro_model: el("macro-model").value.trim() };
+  el("macro-save").disabled = true;
+  setMacroStatus("Saving…");
+  try {
+    await invoke("save_config", { config: next });
+    currentConfig = next;
+    setMacroStatus("Saved ✓", "ok");
+  } catch (e) {
+    setMacroStatus(`Save failed: ${e}`, "error");
+    el("macro-save").disabled = false;
+  }
+}
+
+function initMacros() {
+  el("macro-model").value = currentConfig?.macro_model ?? "";
+  renderMacros();
+  el("macro-model").addEventListener("input", markMacrosDirty);
+  el("macro-add").addEventListener("click", () => {
+    el("macro-list").appendChild(macroRow());
+    markMacrosDirty();
+  });
+  el("macro-save").addEventListener("click", saveMacros);
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -691,13 +798,19 @@ async function init() {
   window.addEventListener("keydown", (e) => {
     if (e.metaKey && e.key === "s" && !recording) {
       e.preventDefault();
-      if (!el("save").disabled) save();
+      const onMacros = document.getElementById("tab-macros")?.classList.contains("active");
+      if (onMacros) {
+        if (!el("macro-save").disabled) saveMacros();
+      } else if (!el("save").disabled) {
+        save();
+      }
     }
   });
 
   await loadConfig();
   await loadOptions();
   initHotkeys();
+  initMacros();
   await loadKeys();
   initUsage();
   initHistory();

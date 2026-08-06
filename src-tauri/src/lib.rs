@@ -10,6 +10,7 @@ mod history;
 mod hotkeys;
 mod inject;
 mod kb;
+mod macros;
 mod refine;
 mod secrets;
 mod selection;
@@ -29,13 +30,24 @@ use tauri::{
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
+/// What to do with a committed recording. Decided at release (not press) so the
+/// refine modifier can be pressed before or after Fn, and so the same recorder
+/// lifecycle serves plain dictation, refined dictation, and macros.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DictationMode {
+    /// Paste the transcript verbatim.
+    Plain,
+    /// Run the transcript through the LLM refiner, then paste (Fn+Ctrl).
+    Refine,
+    /// Classify the transcript into a macro and paste its response (macro chord).
+    Macro,
+}
+
 pub enum DictationCmd {
     Start,
-    /// `refine` = run the transcript through the LLM refiner before pasting
-    /// (Fn+Ctrl). Plain dictation sets it false. Decided at release so Ctrl
-    /// can be pressed before or after Fn.
+    /// Commit the in-flight recording and process it per `mode`.
     Stop {
-        refine: bool,
+        mode: DictationMode,
     },
     /// User pressed Esc — drop the in-flight recorder and don't transcribe.
     Cancel,
@@ -81,6 +93,8 @@ pub enum OverlayState {
     Transcribing,
     /// Fn+Ctrl only: the transcript is being cleaned up by the LLM.
     Refining,
+    /// Macro chord only: the spoken phrase is being matched to a macro.
+    Interpreting,
     Done {
         chars: usize,
     },
@@ -189,10 +203,15 @@ pub fn run() {
                 usage_state.clone(),
             ));
 
+            // Macro classifier for the macro chord. Reads the model + macro list
+            // from the shared config; the key is read from Keychain lazily.
+            let matcher: Arc<dyn macros::MacroMatcher> =
+                Arc::new(macros::OpenRouterMatcher::new(config_state.clone()));
+
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
             // callback boundary.
-            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner);
+            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner, matcher);
 
             // Prefer ElevenLabs when the user has set a key; fall back to
             // macOS AVSpeechSynthesizer otherwise so Option+A always does
@@ -734,6 +753,7 @@ fn spawn_dictation_worker<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
     refiner: Arc<dyn refine::Refiner>,
+    matcher: Arc<dyn macros::MacroMatcher>,
 ) -> UnboundedSender<DictationCmd> {
     let (tx, mut rx) = unbounded_channel::<DictationCmd>();
     std::thread::spawn(move || {
@@ -780,7 +800,7 @@ fn spawn_dictation_worker<R: Runtime>(
                     emit_state(&app, OverlayState::Idle);
                     continue;
                 }
-                DictationCmd::Stop { refine } => {
+                DictationCmd::Stop { mode } => {
                     let Some(r) = rec.take() else {
                         log::debug!("dictation: Stop without active recording");
                         continue;
@@ -791,8 +811,9 @@ fn spawn_dictation_worker<R: Runtime>(
                                 app.clone(),
                                 transcriber.clone(),
                                 refiner.clone(),
+                                matcher.clone(),
                                 recording,
-                                refine,
+                                mode,
                             );
                         }
                         Err(e) => {
@@ -860,8 +881,9 @@ fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
     refiner: Arc<dyn refine::Refiner>,
+    matcher: Arc<dyn macros::MacroMatcher>,
     recording: audio::Recording,
-    refine: bool,
+    mode: DictationMode,
 ) {
     if recording.duration_ms < 200 {
         log::info!(
@@ -907,57 +929,11 @@ fn handle_recording<R: Runtime>(
                     text.chars().count(),
                     text
                 );
-                let raw = text.clone(); // keep the original transcript for history
-                let mut was_refined = false;
-                // Fn+Ctrl: run the transcript through the LLM refiner before
-                // pasting. On refine failure, fall back to the raw transcript
-                // so a dropped API call never loses the user's dictation.
-                let final_text = if refine {
-                    emit_state(&app, OverlayState::Refining);
-                    match refiner.refine(&text).await {
-                        Ok(refined) => {
-                            log::info!(
-                                "dictation: refined ({} chars): {}",
-                                refined.chars().count(),
-                                refined
-                            );
-                            // Push updated usage to the settings window if open.
-                            if let Ok(u) = app.state::<AppState>().usage.lock() {
-                                let _ = app.emit("usage", u.clone());
-                            }
-                            was_refined = true;
-                            refined
-                        }
-                        Err(e) => {
-                            log::warn!("dictation: refine failed, pasting raw transcript: {e}");
-                            text
-                        }
-                    }
-                } else {
-                    text
-                };
-                record_history(
-                    &app,
-                    &raw,
-                    if was_refined { Some(&final_text) } else { None },
-                );
-                let chars = final_text.chars().count();
-                // `inject::paste_text` calls enigo, which posts CGEvents via
-                // Quartz. CGEventPost requires a CFRunLoop on the calling
-                // thread — tokio workers don't have one, and calling from a
-                // bare worker exits the process silently. Run on the main
-                // thread (NSApp's run loop) instead.
-                let result = paste_on_main_thread(&app, final_text).await;
-                match result {
-                    Ok(()) => (OverlayState::Done { chars }, 600),
-                    Err(e) => {
-                        log::warn!("dictation: paste failed: {e}");
-                        (
-                            OverlayState::Error {
-                                message: format!("paste failed: {e}"),
-                            },
-                            2500,
-                        )
+                match mode {
+                    DictationMode::Macro => run_macro(&app, matcher.as_ref(), &text).await,
+                    _ => {
+                        run_dictation(&app, refiner.as_ref(), mode == DictationMode::Refine, text)
+                            .await
                     }
                 }
             }
@@ -974,6 +950,132 @@ fn handle_recording<R: Runtime>(
         emit_state(&app, state);
         idle_after(app, Duration::from_millis(dwell_ms));
     });
+}
+
+/// Plain / refined dictation: optionally clean the transcript with the LLM, log
+/// it to history, and paste. Returns the overlay state + dwell for the caller
+/// to emit. On refine failure we fall back to the raw transcript so a dropped
+/// API call never loses the user's dictation.
+async fn run_dictation<R: Runtime>(
+    app: &AppHandle<R>,
+    refiner: &dyn refine::Refiner,
+    refine: bool,
+    text: String,
+) -> (OverlayState, u64) {
+    let raw = text.clone(); // keep the original transcript for history
+    let mut was_refined = false;
+    let final_text = if refine {
+        emit_state(app, OverlayState::Refining);
+        match refiner.refine(&text).await {
+            Ok(refined) => {
+                log::info!(
+                    "dictation: refined ({} chars): {}",
+                    refined.chars().count(),
+                    refined
+                );
+                // Push updated usage to the settings window if open.
+                if let Ok(u) = app.state::<AppState>().usage.lock() {
+                    let _ = app.emit("usage", u.clone());
+                }
+                was_refined = true;
+                refined
+            }
+            Err(e) => {
+                log::warn!("dictation: refine failed, pasting raw transcript: {e}");
+                text
+            }
+        }
+    } else {
+        text
+    };
+    record_history(
+        app,
+        &raw,
+        if was_refined { Some(&final_text) } else { None },
+    );
+    let chars = final_text.chars().count();
+    // `inject::paste_text` calls enigo, which posts CGEvents via Quartz.
+    // CGEventPost requires a CFRunLoop on the calling thread — tokio workers
+    // don't have one, and calling from a bare worker exits the process
+    // silently. Run on the main thread (NSApp's run loop) instead.
+    match paste_on_main_thread(app, final_text).await {
+        Ok(()) => (OverlayState::Done { chars }, 600),
+        Err(e) => {
+            log::warn!("dictation: paste failed: {e}");
+            (
+                OverlayState::Error {
+                    message: format!("paste failed: {e}"),
+                },
+                2500,
+            )
+        }
+    }
+}
+
+/// Macro mode: classify the transcript into one of the configured macros and
+/// paste that macro's response. When nothing matches (or no macros exist) we
+/// paste nothing and surface it — pasting a wrong snippet would be worse than
+/// pasting nothing. Macro runs are intentionally not recorded to dictation
+/// history (they're canned output, not dictation).
+async fn run_macro<R: Runtime>(
+    app: &AppHandle<R>,
+    matcher: &dyn macros::MacroMatcher,
+    transcript: &str,
+) -> (OverlayState, u64) {
+    let macros = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .map(|c| c.macros.clone())
+        .unwrap_or_default();
+    if macros.is_empty() {
+        log::info!("macro: no macros configured");
+        return (
+            OverlayState::Error {
+                message: "no macros configured".into(),
+            },
+            2200,
+        );
+    }
+    emit_state(app, OverlayState::Interpreting);
+    match matcher.match_macro(transcript, &macros).await {
+        Ok(Some(i)) => {
+            let m = &macros[i];
+            let response = m.response.clone();
+            let chars = response.chars().count();
+            log::info!("macro: matched '{}' → pasting {} chars", m.name, chars);
+            match paste_on_main_thread(app, response).await {
+                Ok(()) => (OverlayState::Done { chars }, 800),
+                Err(e) => {
+                    log::warn!("macro: paste failed: {e}");
+                    (
+                        OverlayState::Error {
+                            message: format!("paste failed: {e}"),
+                        },
+                        2500,
+                    )
+                }
+            }
+        }
+        Ok(None) => {
+            log::info!("macro: no matching macro for '{transcript}'");
+            (
+                OverlayState::Error {
+                    message: "no matching macro".into(),
+                },
+                2000,
+            )
+        }
+        Err(e) => {
+            log::warn!("macro: classify failed: {e}");
+            (
+                OverlayState::Error {
+                    message: format!("macro failed: {e}"),
+                },
+                3000,
+            )
+        }
+    }
 }
 
 async fn paste_on_main_thread<R: Runtime>(app: &AppHandle<R>, text: String) -> anyhow::Result<()> {

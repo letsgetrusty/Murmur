@@ -153,8 +153,12 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
             hotkeys::on_press(&state.app);
         } else {
             // Fn released: refine if the modifier was held at any point.
-            let refine = state.refine_latch.load(Ordering::Acquire);
-            hotkeys::on_release(&state.app, refine);
+            let mode = if state.refine_latch.load(Ordering::Acquire) {
+                crate::DictationMode::Refine
+            } else {
+                crate::DictationMode::Plain
+            };
+            hotkeys::on_release(&state.app, mode);
         }
     } else if fn_down_now && (flags & refine_mask(&state.app)) != 0 {
         // Modifier pressed while Fn is already held (handles Fn-then-modifier),

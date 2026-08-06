@@ -6,6 +6,7 @@ const LABELS = {
   recording: "Recording…",
   transcribing: "Transcribing…",
   refining: "Refining…",
+  interpreting: "Interpreting…",
 };
 
 function applyState(payload) {
