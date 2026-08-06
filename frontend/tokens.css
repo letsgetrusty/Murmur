@@ -3,8 +3,9 @@
    @import this file, so the palette, radii, and motion live in exactly one
    place instead of being copy-pasted across the two webviews.
 
-   macOS-only. Dark, monochrome (black & white) by design — one neutral accent,
-   with red reserved strictly for errors (see CLAUDE.md scope). */
+   macOS-only, dark by design. "Let's Get Rusty" brand palette: warm near-black
+   surfaces + rust-orange accent, with red reserved strictly for errors (see
+   CLAUDE.md scope). */
 :root {
   color-scheme: dark;
   font-synthesis: none;
@@ -12,42 +13,43 @@
   /* Typeface -------------------------------------------------------------- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 
-  /* Surfaces & text ------------------------------------------------------- */
-  --bg: #141415;
-  --bg-elev: #1c1c1e;
-  --bg-input: #161617;
-  --bg-sidebar: #0d0d0e;
-  --border: #2a2a2d;
-  --text: #f0f0f2;
-  --text-dim: #8a8a90;
-  --text-on-accent: #141415;
+  /* Surfaces & text — warm-biased near-black + gray (nudged toward the rust
+     accent so the neutrals read as chosen, not default gray). ------------- */
+  --bg: #141210;
+  --bg-elev: #1c1815;
+  --bg-input: #181410;
+  --bg-sidebar: #0e0c0a;
+  --border: #2d2721;
+  --text: #f2eee7;
+  --text-dim: #978d83;
+  --text-on-accent: #ffffff;
   --overlay-hover: rgba(255, 255, 255, 0.05);
 
-  /* Accent — monochrome. Exposed as RGB so every tint derives from it. Pure
-     white reads as the emphasis/brand color on the near-black surfaces; primary
-     buttons invert to white-on-dark. Change it here to retint the whole app. */
-  --accent-rgb: 255, 255, 255;
+  /* Accent — Let's Get Rusty rust orange (#D9531F). Exposed as RGB so every
+     tint derives from it; change it here to retint the whole app. Primary
+     buttons are rust with white text; press darkens to the classic rust. */
+  --accent-rgb: 217, 83, 31;
   --accent: rgb(var(--accent-rgb));
-  --accent-press: #d6d6da;
-  --accent-soft-bg: rgba(var(--accent-rgb), 0.08);
-  --accent-soft-border: rgba(var(--accent-rgb), 0.18);
-  --focus-ring: rgba(var(--accent-rgb), 0.25);
+  --accent-press: #b7410e;
+  --accent-soft-bg: rgba(var(--accent-rgb), 0.14);
+  --accent-soft-border: rgba(var(--accent-rgb), 0.32);
+  --focus-ring: rgba(var(--accent-rgb), 0.28);
 
-  /* Status / feedback — monochrome success, red only for errors. ---------- */
-  --ok: #e8e8ec;
-  --error: #ff6b6b;
+  /* Status / feedback — neutral success, red only for errors. ------------- */
+  --ok: #f2eee7;
+  --error: #f0564b;
 
-  /* Overlay pill state colors (the recording dot + error surface). States are
-     also labeled in text, so the dots go monochrome; only error stays red. */
-  --state-idle: #6e6e75;
-  --state-recording: #ffffff;
-  --state-transcribing: #c4c4cc;
-  --state-refining: #e8e8ec;
-  --state-done: #ffffff;
-  --state-error: #ff6b6b;
-  --overlay-bg: rgba(16, 16, 18, 0.85);
-  --overlay-error-bg: rgba(46, 20, 22, 0.9);
-  --overlay-error-text: #ffb4b4;
+  /* Overlay pill state colors. Recording is the one branded rust moment; the
+     rest stay warm-monochrome (states are also labeled in text); error is red. */
+  --state-idle: #6e6862;
+  --state-recording: var(--accent);
+  --state-transcribing: #c4bdb4;
+  --state-refining: #e6dccf;
+  --state-done: #f2eee7;
+  --state-error: var(--error);
+  --overlay-bg: rgba(15, 13, 11, 0.86);
+  --overlay-error-bg: rgba(46, 22, 20, 0.9);
+  --overlay-error-text: #ffc0b8;
 
   /* Radius ---------------------------------------------------------------- */
   --radius: 10px; /* containers: cards, stats, history/command rows */
