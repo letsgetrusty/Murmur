@@ -71,13 +71,18 @@ cost), and SQLite dictation history. STT/TTS backends are chosen via
 `setup.sh`). Read-aloud can also use local neural **Kokoro** (`tts_provider =
 "kokoro"`): its ONNX model + voice packs auto-download to `…/models/` on first
 selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
-Also shipped: **voice Macros** (`macros.rs`) — a dedicated chord (default
-`Cmd+Shift+M`) records like dictation, but instead of pasting the transcript, an
-OpenRouter classifier (`MacroMatcher` trait) maps the spoken phrase to one of the
-user's configured macros and pastes that macro's canned response (or nothing when
-no macro clearly matches). Managed in the Settings "Macros" tab; macro runs are not
-recorded to dictation history. The three dictation paths share one recorder
-lifecycle via the `DictationMode` enum (Plain / Refine / Macro).
+Refinement + voice commands are unified as one **Commands** concept: a command
+either *transforms* the transcript (refinement — the built-in Fn+Ctrl command) or
+*pastes* a canned response (`config::Action::{Transform,Paste}`). The command
+chord (default `Cmd+Shift+M`) records like dictation, then an LLM classifies the
+phrase against the user's Paste commands and pastes the match (or nothing on no
+clear match). Both operations run through one chat seam (`llm.rs`: `LlmChat`
+trait + `transform`/`classify`, `LocalChat`/`OpenRouterChat`). Managed in the
+Settings "Commands" tab; command runs are not recorded to dictation history. The
+three dictation paths share one recorder lifecycle via the `DictationMode` enum
+(Plain / Refine / Macro). Old `{name,triggers,response}` macros auto-migrate to
+Paste commands on config load. (Stage 2, not yet built: user-authored Transform
+commands with their own triggers.)
 The dictation / refine / read-aloud / macros feature set above is the full
 intended scope — no further phases are planned. Build order + macOS gotchas for
 the shipped work: `docs/voice-tool-architecture.md` §7.

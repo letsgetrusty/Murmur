@@ -24,12 +24,40 @@ pub const DEFAULT_REFINE_PROMPT: &str = "You clean up dictated speech into polis
 /// `macro_model` in config.json to change it.
 pub const DEFAULT_MACRO_MODEL: &str = "anthropic/claude-haiku-4.5";
 
-/// A voice macro: the user holds the macro chord and speaks a phrase, an LLM
-/// classifies it into one of these, and `response` is pasted at the cursor
-/// instead of a verbatim transcript. `triggers` is an optional free-text list
-/// of example phrasings that helps the classifier disambiguate.
+/// What a command does with the dictation that triggered it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Macro {
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Action {
+    /// Paste a fixed string, chosen by voice classification against the command
+    /// chord's dictation (the classic "voice macro").
+    Paste { response: String },
+    /// Rewrite the transcript with an LLM `prompt`. `think` runs the model's
+    /// reasoning pass (editing needs it, or the model echoes the input). The
+    /// built-in Fn+Ctrl refinement is a `Transform` command.
+    Transform {
+        prompt: String,
+        #[serde(default)]
+        think: bool,
+    },
+}
+
+/// A voice command: the user speaks and, per its `action`, the transcript is
+/// either rewritten (Transform) or used to pick a canned response (Paste).
+/// `triggers` is optional example phrasings that help the classifier
+/// disambiguate Paste commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Command {
+    pub name: String,
+    #[serde(default)]
+    pub triggers: String,
+    pub action: Action,
+}
+
+/// Pre-"Commands" macro shape (`{name, triggers, response}`). Still read from
+/// old config files under the `macros` key and migrated into `commands` as a
+/// `Paste` action on load (see [`load`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct LegacyMacro {
     pub name: String,
     #[serde(default)]
     pub triggers: String,
@@ -68,9 +96,14 @@ pub struct Config {
     /// One of "Ctrl" | "Shift" | "Alt" | "Cmd".
     #[serde(default = "default_refine_modifier")]
     pub refine_modifier: String,
-    /// User-defined voice macros, matched against the macro chord's dictation.
+    /// User-defined voice commands: Paste commands are matched against the
+    /// command chord's dictation; Transform commands rewrite the transcript.
     #[serde(default)]
-    pub macros: Vec<Macro>,
+    pub commands: Vec<Command>,
+    /// Legacy pre-"Commands" macros; folded into `commands` on load, then never
+    /// written again. Present only so old config files don't lose data.
+    #[serde(default, rename = "macros", skip_serializing)]
+    pub legacy_macros: Vec<LegacyMacro>,
     /// Global-shortcut chord that starts a macro dictation.
     #[serde(default = "default_hotkey_macro")]
     pub hotkey_macro: String,
@@ -174,7 +207,8 @@ impl Default for Config {
             hotkey_tts: default_hotkey_tts(),
             hotkey_tts_speed: default_hotkey_tts_speed(),
             refine_modifier: default_refine_modifier(),
-            macros: Vec::new(),
+            commands: Vec::new(),
+            legacy_macros: Vec::new(),
             hotkey_macro: default_hotkey_macro(),
             macro_model: default_macro_model(),
             stt_provider: default_stt_provider(),
@@ -191,6 +225,25 @@ fn config_path() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join("Library/Application Support/murmur/config.json"))
 }
 
+/// Fold legacy `macros` into `commands` as `Paste` actions, emptying the legacy
+/// list. Returns how many were migrated. Idempotent.
+fn migrate_legacy(c: &mut Config) -> usize {
+    if c.legacy_macros.is_empty() {
+        return 0;
+    }
+    let n = c.legacy_macros.len();
+    for m in c.legacy_macros.drain(..) {
+        c.commands.push(Command {
+            name: m.name,
+            triggers: m.triggers,
+            action: Action::Paste {
+                response: m.response,
+            },
+        });
+    }
+    n
+}
+
 /// Read the config, returning defaults if the file is missing or unparseable.
 /// Missing/corrupt config should never block startup.
 pub fn load() -> Config {
@@ -204,6 +257,15 @@ pub fn load() -> Config {
                 // AVPlayer's pitch-preserving spectral algorithm sounds
                 // natural up to ~2.0×; clamp anything wilder.
                 c.tts_speed = c.tts_speed.clamp(0.5, 2.0);
+                // Fold any legacy `macros` into the unified `commands` list and
+                // re-save so the old key disappears from disk.
+                let migrated = migrate_legacy(&mut c);
+                if migrated > 0 {
+                    log::info!("config: migrated {migrated} legacy macro(s) into commands");
+                    if let Err(e) = save(&c) {
+                        log::warn!("config: re-save after macro migration failed: {e}");
+                    }
+                }
                 log::info!("config: loaded from {}", path.display());
                 c
             }
@@ -248,7 +310,7 @@ mod tests {
         assert_eq!(c.hotkey_dictate, DEFAULT_HOTKEY_DICTATE);
         assert_eq!(c.refine_modifier, DEFAULT_REFINE_MODIFIER);
         assert_eq!(c.mic_name, None);
-        assert!(c.macros.is_empty());
+        assert!(c.commands.is_empty());
         assert_eq!(c.hotkey_macro, DEFAULT_HOTKEY_MACRO);
         assert_eq!(c.macro_model, DEFAULT_MACRO_MODEL);
         assert_eq!(c.stt_provider, DEFAULT_STT_PROVIDER);
@@ -266,5 +328,31 @@ mod tests {
         assert_eq!(c2.hotkey_tts, c.hotkey_tts);
         assert_eq!(c2.history_limit, c.history_limit);
         assert!((c2.tts_speed - c.tts_speed).abs() < 1e-6);
+    }
+
+    #[test]
+    fn legacy_macros_migrate_to_paste_commands() {
+        // Old config files carry a `macros` array; it lands in `legacy_macros`.
+        let json =
+            r#"{"tts_speed":1.0,"tts_voice_id":"v","macros":[{"name":"Sig","response":"Best"}]}"#;
+        let mut c: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(c.legacy_macros.len(), 1);
+        assert!(c.commands.is_empty());
+
+        assert_eq!(migrate_legacy(&mut c), 1);
+        assert!(c.legacy_macros.is_empty());
+        assert_eq!(c.commands.len(), 1);
+        assert_eq!(c.commands[0].name, "Sig");
+        match &c.commands[0].action {
+            Action::Paste { response } => assert_eq!(response, "Best"),
+            _ => panic!("expected a Paste action"),
+        }
+
+        // Re-serialized config drops the legacy `macros` key and keeps `commands`.
+        let out = serde_json::to_string(&c).unwrap();
+        assert!(!out.contains("\"macros\""));
+        assert!(out.contains("\"commands\""));
+        // Idempotent: nothing left to migrate a second time.
+        assert_eq!(migrate_legacy(&mut c), 0);
     }
 }

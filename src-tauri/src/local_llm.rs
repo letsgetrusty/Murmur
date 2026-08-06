@@ -1,6 +1,6 @@
 // Embedded local LLM (llama.cpp via `llama-cpp-2`) for the refine + macro passes,
 // so both can run fully offline instead of calling OpenRouter. One `LocalLlm` is
-// shared by `refine::LocalRefiner` and `macros::LocalMatcher`; the GGUF model is
+// shared by the refine + command passes in `llm.rs`; the GGUF model is
 // loaded lazily on first use and cached, and downloaded on first run like the
 // Whisper/Kokoro models.
 //

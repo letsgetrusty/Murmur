@@ -8,9 +8,8 @@ mod focus;
 mod history;
 mod hotkeys;
 mod inject;
+mod llm;
 mod local_llm;
-mod macros;
-mod refine;
 mod secrets;
 mod selection;
 mod stt;
@@ -224,43 +223,36 @@ pub fn run() {
             // by config. Default is a single embedded local model (Qwen3 via
             // llama.cpp) shared by both; "openrouter" uses the cloud (key read
             // from Keychain lazily). Prompts/macros come from the shared config.
-            let (refiner, matcher): (Arc<dyn refine::Refiner>, Arc<dyn macros::MacroMatcher>) =
-                if cfg.llm_provider == "local" {
-                    if local_llm::assets_present(&cfg.llm_model) {
-                        log::info!("llm: local backend (model '{}')", cfg.llm_model);
-                    } else {
-                        log::info!("llm: local backend; model missing — downloading…");
-                    }
-                    // Download the model in the background so the first refine/macro
-                    // isn't blocked on a ~1 GB fetch; it loads on first use.
-                    let model = cfg.llm_model.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = local_llm::ensure_local_llm(&model).await {
-                            log::warn!("llm: model prefetch failed: {e}");
-                        }
-                    });
-                    let llm = Arc::new(local_llm::LocalLlm::new(
-                        local_llm::model_path(&cfg.llm_model).unwrap_or_default(),
-                    ));
-                    (
-                        Arc::new(refine::LocalRefiner::new(llm.clone(), config_state.clone())),
-                        Arc::new(macros::LocalMatcher::new(llm.clone())),
-                    )
+            // One chat seam drives both refinement (transform) and voice commands
+            // (classify). "local" shares the embedded llama.cpp engine (loaded on
+            // first use); "openrouter" is the cloud backend (key read lazily).
+            let chat: Arc<dyn llm::LlmChat> = if cfg.llm_provider == "local" {
+                if local_llm::assets_present(&cfg.llm_model) {
+                    log::info!("llm: local backend (model '{}')", cfg.llm_model);
                 } else {
-                    log::info!("llm: OpenRouter cloud backend");
-                    (
-                        Arc::new(refine::OpenRouterRefiner::new(
-                            config_state.clone(),
-                            usage_state.clone(),
-                        )),
-                        Arc::new(macros::OpenRouterMatcher::new(config_state.clone())),
-                    )
-                };
+                    log::info!("llm: local backend; model missing — downloading…");
+                }
+                // Download the model in the background so the first refine/command
+                // isn't blocked on a ~1 GB fetch; it loads on first use.
+                let model = cfg.llm_model.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = local_llm::ensure_local_llm(&model).await {
+                        log::warn!("llm: model prefetch failed: {e}");
+                    }
+                });
+                let engine = Arc::new(local_llm::LocalLlm::new(
+                    local_llm::model_path(&cfg.llm_model).unwrap_or_default(),
+                ));
+                Arc::new(llm::LocalChat::new(engine))
+            } else {
+                log::info!("llm: OpenRouter cloud backend");
+                Arc::new(llm::OpenRouterChat::new())
+            };
 
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
             // callback boundary.
-            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner, matcher);
+            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, chat);
 
             // Text-to-speech backend, selected by config. Default is the native
             // on-device AVSpeechSynthesizer; "kokoro" is local neural TTS;
@@ -854,8 +846,7 @@ fn run_set_key(which: &str) {
 fn spawn_dictation_worker<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
-    refiner: Arc<dyn refine::Refiner>,
-    matcher: Arc<dyn macros::MacroMatcher>,
+    chat: Arc<dyn llm::LlmChat>,
 ) -> UnboundedSender<DictationCmd> {
     let (tx, mut rx) = unbounded_channel::<DictationCmd>();
     std::thread::spawn(move || {
@@ -912,8 +903,7 @@ fn spawn_dictation_worker<R: Runtime>(
                             handle_recording(
                                 app.clone(),
                                 transcriber.clone(),
-                                refiner.clone(),
-                                matcher.clone(),
+                                chat.clone(),
                                 recording,
                                 mode,
                             );
@@ -982,8 +972,7 @@ fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&st
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
-    refiner: Arc<dyn refine::Refiner>,
-    matcher: Arc<dyn macros::MacroMatcher>,
+    chat: Arc<dyn llm::LlmChat>,
     recording: audio::Recording,
     mode: DictationMode,
 ) {
@@ -1032,9 +1021,9 @@ fn handle_recording<R: Runtime>(
                     text
                 );
                 match mode {
-                    DictationMode::Macro => run_macro(&app, matcher.as_ref(), &text).await,
+                    DictationMode::Macro => run_macro(&app, chat.as_ref(), &text).await,
                     _ => {
-                        run_dictation(&app, refiner.as_ref(), mode == DictationMode::Refine, text)
+                        run_dictation(&app, chat.as_ref(), mode == DictationMode::Refine, text)
                             .await
                     }
                 }
@@ -1060,7 +1049,7 @@ fn handle_recording<R: Runtime>(
 /// API call never loses the user's dictation.
 async fn run_dictation<R: Runtime>(
     app: &AppHandle<R>,
-    refiner: &dyn refine::Refiner,
+    chat: &dyn llm::LlmChat,
     refine: bool,
     text: String,
 ) -> (OverlayState, u64) {
@@ -1068,19 +1057,28 @@ async fn run_dictation<R: Runtime>(
     let mut was_refined = false;
     let final_text = if refine {
         emit_state(app, OverlayState::Refining);
-        match refiner.refine(&text).await {
-            Ok(refined) => {
+        // The refine prompt + cloud model come from live config (local ignores
+        // the model). Refinement is the built-in Transform command.
+        let (prompt, model) = match app.state::<AppState>().config.lock() {
+            Ok(c) => (c.refine_prompt.clone(), c.refine_model.clone()),
+            Err(_) => (String::new(), String::new()),
+        };
+        match llm::transform(chat, &model, &prompt, &text).await {
+            Ok(res) => {
                 log::info!(
                     "dictation: refined ({} chars): {}",
-                    refined.chars().count(),
-                    refined
+                    res.content.chars().count(),
+                    res.content
                 );
-                // Push updated usage to the settings window if open.
-                if let Ok(u) = app.state::<AppState>().usage.lock() {
+                // Record OpenRouter token/cost usage (local reports none); either
+                // way refresh the settings window's usage view if it's open.
+                if let Some((p, c, t, cost)) = res.usage {
+                    record_usage(app, |u| u.record(p, c, t, cost));
+                } else if let Ok(u) = app.state::<AppState>().usage.lock() {
                     let _ = app.emit("usage", u.clone());
                 }
                 was_refined = true;
-                refined
+                res.content
             }
             Err(e) => {
                 log::warn!("dictation: refine failed, pasting raw transcript: {e}");
@@ -1114,42 +1112,49 @@ async fn run_dictation<R: Runtime>(
     }
 }
 
-/// Macro mode: classify the transcript into one of the configured macros and
-/// paste that macro's response. When nothing matches (or no macros exist) we
-/// paste nothing and surface it — pasting a wrong snippet would be worse than
-/// pasting nothing. Macro runs are intentionally not recorded to dictation
-/// history (they're canned output, not dictation).
+/// Command-chord mode: classify the transcript into one of the user's Paste
+/// commands and paste its response. When nothing matches (or none are
+/// configured) we paste nothing and surface it — pasting a wrong snippet would
+/// be worse than pasting nothing. Command runs are intentionally not recorded to
+/// dictation history (they're canned output, not dictation).
 async fn run_macro<R: Runtime>(
     app: &AppHandle<R>,
-    matcher: &dyn macros::MacroMatcher,
+    chat: &dyn llm::LlmChat,
     transcript: &str,
 ) -> (OverlayState, u64) {
-    let macros = app
-        .state::<AppState>()
-        .config
-        .lock()
-        .map(|c| c.macros.clone())
-        .unwrap_or_default();
-    if macros.is_empty() {
-        log::info!("macro: no macros configured");
+    let (commands, model) = match app.state::<AppState>().config.lock() {
+        Ok(c) => (c.commands.clone(), c.macro_model.clone()),
+        Err(_) => (Vec::new(), String::new()),
+    };
+    // Only Paste commands take part in voice matching (Transform commands, like
+    // refinement, are triggered by their own chord, not classified).
+    let paste: Vec<&config::Command> = commands
+        .iter()
+        .filter(|c| matches!(c.action, config::Action::Paste { .. }))
+        .collect();
+    if paste.is_empty() {
+        log::info!("command: no voice commands configured");
         return (
             OverlayState::Error {
-                message: "no macros configured".into(),
+                message: "no commands configured".into(),
             },
             2200,
         );
     }
     emit_state(app, OverlayState::Interpreting);
-    match matcher.match_macro(transcript, &macros).await {
+    match llm::classify(chat, &model, transcript, &paste).await {
         Ok(Some(i)) => {
-            let m = &macros[i];
-            let response = m.response.clone();
+            let cmd = paste[i];
+            let response = match &cmd.action {
+                config::Action::Paste { response } => response.clone(),
+                _ => unreachable!("only Paste commands are classified"),
+            };
             let chars = response.chars().count();
-            log::info!("macro: matched '{}' → pasting {} chars", m.name, chars);
+            log::info!("command: matched '{}' → pasting {} chars", cmd.name, chars);
             match paste_on_main_thread(app, response).await {
                 Ok(()) => (OverlayState::Done { chars }, 800),
                 Err(e) => {
-                    log::warn!("macro: paste failed: {e}");
+                    log::warn!("command: paste failed: {e}");
                     (
                         OverlayState::Error {
                             message: format!("paste failed: {e}"),
@@ -1160,19 +1165,19 @@ async fn run_macro<R: Runtime>(
             }
         }
         Ok(None) => {
-            log::info!("macro: no matching macro for '{transcript}'");
+            log::info!("command: no match for '{transcript}'");
             (
                 OverlayState::Error {
-                    message: "no matching macro".into(),
+                    message: "no matching command".into(),
                 },
                 2000,
             )
         }
         Err(e) => {
-            log::warn!("macro: classify failed: {e}");
+            log::warn!("command: classify failed: {e}");
             (
                 OverlayState::Error {
-                    message: format!("macro failed: {e}"),
+                    message: format!("command failed: {e}"),
                 },
                 3000,
             )
