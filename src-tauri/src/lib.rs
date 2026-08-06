@@ -415,6 +415,7 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     if state.speaker.is_speaking() {
         log::info!("tts: stop");
         state.speaker.stop();
+        hotkeys::unregister_tts_escape(app);
         show_overlay(app);
         emit_state(app, OverlayState::Done { chars: 0 });
         idle_after(app.clone(), Duration::from_millis(400));
@@ -448,6 +449,9 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             emit_state(app, OverlayState::Reading { progress: 0.0 });
             state.speaker.speak(&text);
             spawn_tts_idle_watcher(app.clone());
+            // Let Esc stop the read while it plays; the watcher releases it
+            // when the read ends.
+            hotkeys::register_tts_escape(app);
         }
         None => {
             log::info!("tts: nothing to read (no selection or clipboard text)");
@@ -550,6 +554,7 @@ fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
                 break;
             }
             if std::time::Instant::now() > started_by {
+                hotkeys::unregister_tts_escape(&app);
                 emit_state(&app, OverlayState::Idle);
                 return;
             }
@@ -561,6 +566,7 @@ fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
             std::thread::sleep(Duration::from_millis(120));
             let state = app.state::<AppState>();
             if !state.speaker.is_speaking() {
+                hotkeys::unregister_tts_escape(&app);
                 emit_state(&app, OverlayState::Idle);
                 return;
             }

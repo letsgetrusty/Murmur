@@ -171,3 +171,32 @@ fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
         let _ = app.global_shortcut().unregister(esc);
     }
 }
+
+/// Hijack Escape while a read-aloud is playing so the user can stop it mid-read.
+/// Mirrors `register_escape`, but stops TTS instead of cancelling a dictation.
+/// Unregistered by the tts idle-watcher (or here, on press) so Esc is only
+/// hijacked while actually speaking.
+pub fn register_tts_escape<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(esc) = ESC.parse::<Shortcut>() else {
+        return;
+    };
+    let res = app.global_shortcut().on_shortcut(
+        esc,
+        |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+            if event.state() == ShortcutState::Pressed {
+                log::info!("tts: stop read-aloud (Esc)");
+                unregister_escape(app);
+                let state = app.state::<AppState>();
+                state.speaker.stop();
+                emit_state(app, OverlayState::Idle);
+            }
+        },
+    );
+    if let Err(e) = res {
+        log::debug!("hotkey: tts esc register failed: {e}");
+    }
+}
+
+pub fn unregister_tts_escape<R: Runtime>(app: &AppHandle<R>) {
+    unregister_escape(app);
+}
