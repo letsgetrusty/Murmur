@@ -142,34 +142,56 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
 
 const ESC: &str = "Escape";
 
-/// Briefly hijack the Escape key while a dictation is in flight. The
-/// shortcut is unregistered the moment the user releases the hotkey or
-/// hits Esc, so we never block Esc system-wide outside of recording.
+/// Briefly hijack the Escape key while a dictation is in flight so the user can
+/// cancel it; freed on release (or when the app goes idle).
+///
+/// `on_press`/`on_release` can run *inside* a global-shortcut callback (the chord
+/// path), where the plugin holds its dispatch lock — touching the registry there
+/// deadlocks the whole app. So both (un)register hop through a background thread
+/// whose `run_on_main_thread` defers the work to a clean event-loop tick with the
+/// lock free (same reason as [`register_tts_escape`]). From the Fn tap thread the
+/// hop is simply correct too (registry ops belong on the main thread). A plain
+/// `run_on_main_thread` here would NOT be enough: called from the main thread it
+/// runs synchronously and would still re-enter under the held lock.
 fn register_escape<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(esc) = ESC.parse::<Shortcut>() else {
-        return;
-    };
-    let res = app.global_shortcut().on_shortcut(
-        esc,
-        |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
-            if event.state() == ShortcutState::Pressed {
-                log::info!("hotkey: cancel (Esc)");
-                unregister_escape(app);
-                if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Cancel) {
-                    log::warn!("hotkey: cancel send failed: {e}");
-                }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            let Ok(esc) = ESC.parse::<Shortcut>() else {
+                return;
+            };
+            let res = h.global_shortcut().on_shortcut(
+                esc,
+                |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
+                    if event.state() == ShortcutState::Pressed {
+                        log::info!("hotkey: cancel (Esc)");
+                        // Don't unregister here — this runs inside the
+                        // global-shortcut callback and would deadlock; on_release
+                        // frees Esc when the user lets go.
+                        if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Cancel) {
+                            log::warn!("hotkey: cancel send failed: {e}");
+                        }
+                    }
+                },
+            );
+            if let Err(e) = res {
+                log::debug!("hotkey: esc register failed: {e}");
             }
-        },
-    );
-    if let Err(e) = res {
-        log::debug!("hotkey: esc register failed: {e}");
-    }
+        });
+    });
 }
 
 fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
-    if let Ok(esc) = ESC.parse::<Shortcut>() {
-        let _ = app.global_shortcut().unregister(esc);
-    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if let Ok(esc) = ESC.parse::<Shortcut>() {
+                let _ = h.global_shortcut().unregister(esc);
+            }
+        });
+    });
 }
 
 /// Hijack Escape while a read-aloud is playing so the user can stop it mid-read
