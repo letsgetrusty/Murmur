@@ -58,7 +58,8 @@ pub struct AppState {
     pub speaker: Arc<dyn tts::Speaker>,
     /// Tray menu checkmarks for speed, in the same order as `tts::SPEEDS`.
     pub speed_items: Vec<CheckMenuItem<Wry>>,
-    /// Tray menu checkmarks for voice, in the same order as `tts::ELEVENLABS_VOICES`.
+    /// Tray menu checkmarks for voice, in the same order as
+    /// `tts::voices_for(tts_provider)` (the active backend's voice list).
     pub voice_items: Vec<CheckMenuItem<Wry>>,
     /// Tray menu checkmarks for the microphone picker. First entry is the
     /// system default; rest mirror `mic_names`.
@@ -266,6 +267,9 @@ pub fn run() {
                         tts::kokoro_voices_dir().unwrap_or_default(),
                     );
                     s.set_speed(cfg.tts_speed);
+                    // Honor the saved voice if it's a valid Kokoro voice; a stale
+                    // id from another provider is ignored (keeps the default).
+                    s.set_voice(&cfg.tts_voice_id);
                     Arc::new(s)
                 }
                 other => {
@@ -627,8 +631,9 @@ fn build_tray_menu(
         .collect();
     let speed_menu = Submenu::with_id_and_items(app, "speed", "Speed", true, &speed_refs)?;
 
-    // Voice submenu — same treatment.
-    let voice_items: Vec<CheckMenuItem<Wry>> = tts::ELEVENLABS_VOICES
+    // Voice submenu — the list matches the active TTS provider so the picker
+    // reflects the backend that will actually speak.
+    let voice_items: Vec<CheckMenuItem<Wry>> = tts::voices_for(&cfg.tts_provider)
         .iter()
         .map(|(id, name)| {
             let item_id = format!("voice_{id}");
@@ -737,7 +742,16 @@ pub(crate) fn apply_speed<R: Runtime>(app: &AppHandle<R>, speed: f32) {
 pub(crate) fn apply_voice<R: Runtime>(app: &AppHandle<R>, voice_id: &str) {
     let state = app.state::<AppState>();
     state.speaker.set_voice(voice_id);
-    for (item, (id, _)) in state.voice_items.iter().zip(tts::ELEVENLABS_VOICES.iter()) {
+    let provider = state
+        .config
+        .lock()
+        .map(|c| c.tts_provider.clone())
+        .unwrap_or_default();
+    for (item, (id, _)) in state
+        .voice_items
+        .iter()
+        .zip(tts::voices_for(&provider).iter())
+    {
         let _ = item.set_checked(*id == voice_id);
     }
     log::info!("tts: voice → {voice_id}");

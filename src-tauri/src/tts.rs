@@ -484,6 +484,17 @@ pub const KOKORO_VOICES: &[(&str, &str)] = &[
 const KOKORO_DEFAULT_VOICE: &str = "af_heart";
 const KOKORO_SAMPLE_RATE: u32 = 24_000;
 
+/// Voice choices to show in the tray + settings pickers for a given TTS
+/// provider, so the picker matches the backend that will actually speak.
+/// Native (AVSpeechSynthesizer) has no in-app voice selection, so it's empty.
+pub fn voices_for(provider: &str) -> &'static [(&'static str, &'static str)] {
+    match provider {
+        "kokoro" => KOKORO_VOICES,
+        "elevenlabs" => ELEVENLABS_VOICES,
+        _ => &[],
+    }
+}
+
 /// Path to the Kokoro ONNX model file.
 pub fn kokoro_model_path() -> Result<PathBuf> {
     Ok(crate::stt::models_dir()?.join("kokoro-v1.0.onnx"))
@@ -667,9 +678,10 @@ impl Speaker for KokoroSpeaker {
             // instead of waiting for the whole text to synthesize.
             let chunks = split_for_tts(&text);
             log::info!(
-                "tts/kokoro: reading {} chars in {} chunk(s)",
+                "tts/kokoro: reading {} chars in {} chunk(s) [voice {}]",
                 text.len(),
-                chunks.len()
+                chunks.len(),
+                voice.as_str()
             );
             // Char-weighted progress, smoothed within each chunk by elapsed
             // playback time so the overlay fill moves continuously, not in jumps.
@@ -814,7 +826,10 @@ impl Speaker for KokoroSpeaker {
     }
 
     fn set_voice(&self, voice_id: &str) {
-        if !voice_id.is_empty() {
+        // Only accept a real Kokoro voice; ignore stale ids from another
+        // provider (e.g. an ElevenLabs id left in config) so we don't try to
+        // synthesize with a voice Kokoro doesn't have.
+        if KOKORO_VOICES.iter().any(|(id, _)| *id == voice_id) {
             *self.voice.lock().expect("voice mutex") = voice_id.to_string();
         }
     }
@@ -860,6 +875,24 @@ mod tests {
             split_for_tts("no punctuation just a few words"),
             vec!["no punctuation just a few words".to_string()]
         );
+    }
+
+    #[test]
+    fn voices_for_matches_provider() {
+        assert_eq!(voices_for("kokoro"), KOKORO_VOICES);
+        assert_eq!(voices_for("elevenlabs"), ELEVENLABS_VOICES);
+        assert!(voices_for("native").is_empty());
+    }
+
+    #[test]
+    fn kokoro_set_voice_accepts_only_kokoro_voices() {
+        let s = KokoroSpeaker::new(PathBuf::new(), PathBuf::new());
+        assert_eq!(s.current_voice().as_deref(), Some(KOKORO_DEFAULT_VOICE));
+        s.set_voice("am_michael");
+        assert_eq!(s.current_voice().as_deref(), Some("am_michael"));
+        // A stale id from another provider (e.g. ElevenLabs) is ignored.
+        s.set_voice("bIHbv24MWmeRgasZH58o");
+        assert_eq!(s.current_voice().as_deref(), Some("am_michael"));
     }
 
     /// End-to-end Kokoro synthesis; needs the model + voices on disk. Ignored by

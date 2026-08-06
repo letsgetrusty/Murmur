@@ -47,9 +47,14 @@ pub struct Options {
 
 #[tauri::command]
 pub fn get_options(state: State<AppState>) -> Options {
+    let provider = state
+        .config
+        .lock()
+        .map(|c| c.tts_provider.clone())
+        .unwrap_or_default();
     Options {
         speeds: crate::tts::SPEEDS.to_vec(),
-        voices: crate::tts::ELEVENLABS_VOICES
+        voices: crate::tts::voices_for(&provider)
             .iter()
             .map(|(id, name)| VoiceOption {
                 id: (*id).to_string(),
