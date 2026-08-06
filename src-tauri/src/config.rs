@@ -77,6 +77,18 @@ pub struct Config {
     /// OpenRouter model used to classify speech into a macro.
     #[serde(default = "default_macro_model")]
     pub macro_model: String,
+    /// Speech-to-text backend: "local" (whisper-rs, on-device) or "groq"
+    /// (cloud Whisper). Defaults to local.
+    #[serde(default = "default_stt_provider")]
+    pub stt_provider: String,
+    /// Local Whisper model name (a whisper.cpp ggml model, e.g. "small.en").
+    /// The GGML file is fetched to <app-support>/murmur/models/ggml-<name>.bin.
+    #[serde(default = "default_stt_model")]
+    pub stt_model: String,
+    /// Text-to-speech backend: "native" (AVSpeechSynthesizer, on-device) or
+    /// "elevenlabs" (cloud). Defaults to native.
+    #[serde(default = "default_tts_provider")]
+    pub tts_provider: String,
 }
 
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
@@ -105,6 +117,19 @@ fn default_hotkey_macro() -> String {
 }
 fn default_macro_model() -> String {
     DEFAULT_MACRO_MODEL.to_string()
+}
+
+pub const DEFAULT_STT_PROVIDER: &str = "local";
+pub const DEFAULT_STT_MODEL: &str = "small.en";
+pub const DEFAULT_TTS_PROVIDER: &str = "native";
+fn default_stt_provider() -> String {
+    DEFAULT_STT_PROVIDER.to_string()
+}
+fn default_stt_model() -> String {
+    DEFAULT_STT_MODEL.to_string()
+}
+fn default_tts_provider() -> String {
+    DEFAULT_TTS_PROVIDER.to_string()
 }
 
 fn default_refine_model() -> String {
@@ -137,6 +162,9 @@ impl Default for Config {
             macros: Vec::new(),
             hotkey_macro: default_hotkey_macro(),
             macro_model: default_macro_model(),
+            stt_provider: default_stt_provider(),
+            stt_model: default_stt_model(),
+            tts_provider: default_tts_provider(),
         }
     }
 }
@@ -206,6 +234,9 @@ mod tests {
         assert!(c.macros.is_empty());
         assert_eq!(c.hotkey_macro, DEFAULT_HOTKEY_MACRO);
         assert_eq!(c.macro_model, DEFAULT_MACRO_MODEL);
+        assert_eq!(c.stt_provider, DEFAULT_STT_PROVIDER);
+        assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
+        assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);
     }
 
     #[test]

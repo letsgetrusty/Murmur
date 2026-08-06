@@ -19,9 +19,11 @@ phase from it. When this file and the architecture doc disagree, ask.**
 ## Stack — use these, don't substitute without asking
 - App: Tauri v2 · hotkeys: `tauri-plugin-global-shortcut`
 - Audio in: `cpal` · audio out: `rodio`
-- STT v1: Groq/OpenAI Whisper via `reqwest`; STT local (later): `whisper-rs`
+- STT: local `whisper-rs` (whisper.cpp, Metal) — **default**; Groq/OpenAI Whisper
+  via `reqwest` optional (cloud). Selected by `stt_provider` in config.
 - Inject/selection: `enigo` + `arboard`
-- TTS: ElevenLabs via `reqwest` (primary), `AVSpeechSynthesizer` via `objc2` (fallback)
+- TTS: native `AVSpeechSynthesizer` via `objc2` — **default**; ElevenLabs via
+  `reqwest` optional (cloud). Selected by `tts_provider` in config.
 - Refinement (Fn+Ctrl): OpenRouter via `reqwest`
 - Vector store: `lancedb` · embeddings: Voyage/OpenAI via `reqwest` (or `fastembed`)
 - Generation (Phase 4, KB): Anthropic Messages API via `reqwest`
@@ -51,15 +53,20 @@ phase from it. When this file and the architecture doc disagree, ask.**
 
 ## Backends behind traits
 STT, TTS, embeddings, and generation each sit behind a trait; selection is via
-config. v1 = cloud STT + cloud generation + native TTS. Don't hardcode a provider
-at a call site.
+config. Defaults are **on-device**: local Whisper (`whisper-rs`) STT + native
+`AVSpeechSynthesizer` TTS, with cloud (Groq / ElevenLabs) as opt-in alternatives.
+Generation (Phase 4) is still cloud. Don't hardcode a provider at a call site.
 
 ## Current status
-Phases 0–3 shipped: Fn / chord dictation (cloud Groq Whisper) with clipboard-paste
-injection, Fn+Ctrl LLM refinement (OpenRouter), read-aloud TTS (ElevenLabs with an
-`AVSpeechSynthesizer` fallback; read-aloud falls back to the clipboard when nothing
-is selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
-cost), and SQLite dictation history.
+Phases 0–3 shipped: Fn / chord dictation (on-device Whisper by default, `whisper-rs`
+with Metal; Groq cloud optional) with clipboard-paste injection, Fn+Ctrl LLM
+refinement (OpenRouter), read-aloud TTS (native `AVSpeechSynthesizer` by default,
+ElevenLabs optional; read-aloud falls back to the clipboard when nothing is
+selected), a settings window (hotkeys, API keys, mic/voice, per-provider usage &
+cost), and SQLite dictation history. STT/TTS backends are chosen via
+`stt_provider`/`tts_provider` in config; the local Whisper model (default
+`small.en`) auto-downloads to `<app-support>/murmur/models/` on first run (and via
+`setup.sh`).
 Also shipped: **voice Macros** (`macros.rs`) — a dedicated chord (default
 `Cmd+Shift+M`) records like dictation, but instead of pasting the transcript, an
 OpenRouter classifier (`MacroMatcher` trait) maps the spoken phrase to one of the

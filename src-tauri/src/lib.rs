@@ -186,9 +186,27 @@ pub fn run() {
             // settings window edits it via IPC, so changes apply without a restart.
             let config_state = Arc::new(Mutex::new(cfg.clone()));
 
-            // GroqWhisper reads the API key from Keychain on each transcribe,
-            // so the user can run `set-key` without restarting the app.
-            let transcriber: Arc<dyn stt::Transcriber> = Arc::new(stt::GroqWhisper::new());
+            // Speech-to-text backend, selected by config. Default is local
+            // on-device Whisper (whisper-rs); "groq" uses the cloud endpoint,
+            // reading its key from Keychain lazily so `set-key` needs no restart.
+            let transcriber: Arc<dyn stt::Transcriber> = match cfg.stt_provider.as_str() {
+                "groq" => {
+                    log::info!("stt: Groq cloud Whisper backend");
+                    Arc::new(stt::GroqWhisper::new())
+                }
+                _ => {
+                    log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
+                    // Fetch the model in the background so the first dictation
+                    // isn't blocked on a ~0.5 GB download.
+                    let model = cfg.stt_model.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = stt::ensure_local_model(&model).await {
+                            log::warn!("stt: local model prefetch failed: {e}");
+                        }
+                    });
+                    Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
+                }
+            };
 
             // Cumulative refinement usage, persisted across restarts.
             let usage_state = Arc::new(Mutex::new(usage::load()));
@@ -213,21 +231,25 @@ pub fn run() {
             // callback boundary.
             let tx = spawn_dictation_worker(app.handle().clone(), transcriber, refiner, matcher);
 
-            // Prefer ElevenLabs when the user has set a key; fall back to
-            // macOS AVSpeechSynthesizer otherwise so Option+A always does
-            // *something*. Hydrate the speaker from saved config.
-            let speaker: Arc<dyn tts::Speaker> = match secrets::get(secrets::ELEVENLABS_API_KEY) {
-                Ok(_) => {
-                    log::info!("tts: ElevenLabs backend (key present)");
-                    let s = tts::ElevenLabsSpeaker::new();
-                    s.set_speed(cfg.tts_speed);
-                    s.set_voice(&cfg.tts_voice_id);
-                    Arc::new(s)
+            // Text-to-speech backend, selected by config. Default is the native
+            // on-device AVSpeechSynthesizer; "elevenlabs" uses the cloud voice
+            // when a key is present, else falls back to native so read-aloud
+            // always does *something*. Hydrate from saved config.
+            let use_eleven = cfg.tts_provider == "elevenlabs"
+                && secrets::get(secrets::ELEVENLABS_API_KEY).is_ok();
+            let speaker: Arc<dyn tts::Speaker> = if use_eleven {
+                log::info!("tts: ElevenLabs backend");
+                let s = tts::ElevenLabsSpeaker::new();
+                s.set_speed(cfg.tts_speed);
+                s.set_voice(&cfg.tts_voice_id);
+                Arc::new(s)
+            } else {
+                if cfg.tts_provider == "elevenlabs" {
+                    log::info!("tts: ElevenLabs selected but no key in Keychain; using native");
+                } else {
+                    log::info!("tts: native macOS AVSpeechSynthesizer backend");
                 }
-                Err(_) => {
-                    log::info!("tts: macOS AVSpeechSynthesizer backend (no ElevenLabs key)");
-                    Arc::new(tts::MacSpeaker::new())
-                }
+                Arc::new(tts::MacSpeaker::new())
             };
 
             // Build the tray menu with CheckMenuItems initialised from the

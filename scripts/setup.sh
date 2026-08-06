@@ -143,9 +143,31 @@ say "Building the debug binary (so 'murmur set-key' is available)…"
 cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 ok "Build OK"
 
+# ── Local Whisper model ──────────────────────────────────────────────────────
+# Dictation defaults to on-device Whisper (whisper-rs). Fetch the default model
+# now so the first dictation works offline instead of waiting on the download.
+MODEL_NAME="small.en"
+MODELS_DIR="$HOME/Library/Application Support/murmur/models"
+MODEL_FILE="$MODELS_DIR/ggml-$MODEL_NAME.bin"
+if [ -f "$MODEL_FILE" ]; then
+  ok "Local Whisper model '$MODEL_NAME' already present"
+else
+  say "Downloading local Whisper model '$MODEL_NAME' (~466 MB, one-time)…"
+  mkdir -p "$MODELS_DIR"
+  if curl -fL --progress-bar -o "$MODEL_FILE.part" \
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$MODEL_NAME.bin"; then
+    mv "$MODEL_FILE.part" "$MODEL_FILE"
+    ok "Local Whisper model ready"
+  else
+    rm -f "$MODEL_FILE.part"
+    warn "Model download failed — Murmur will retry it on first launch."
+  fi
+fi
+
 say "API keys (stored in macOS Keychain, never on disk)…"
-printf '   Groq is REQUIRED for dictation. OpenRouter (refined dictation) and\n'
-printf '   ElevenLabs (nicer voice) are optional — both fall back gracefully.\n'
+printf '   Dictation runs on-device (local Whisper) by default — no key needed.\n'
+printf '   OpenRouter powers refined dictation + voice macros. Groq (cloud STT)\n'
+printf '   and ElevenLabs (cloud voice) are optional alternatives.\n'
 read -r -p "   Configure API keys now? [Y/n] " cfg
 case "$cfg" in
   [nN]*) printf '   Skipped. Set later with:  %s set-key [groq|openrouter|elevenlabs]\n' "$MURMUR_BIN" ;;
