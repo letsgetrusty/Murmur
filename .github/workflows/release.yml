@@ -21,6 +21,12 @@ jobs:
     # Apple Silicon runner → builds an aarch64 (darwin-aarch64) app, matching
     # the updater manifest's platform key.
     runs-on: macos-14
+    env:
+      # 'true' only once the Developer ID cert secret exists. Gates the Apple
+      # signing step so builds stay ad-hoc (unsigned) until you add the cert —
+      # tauri treats an *empty* APPLE_CERTIFICATE as "present" and fails, so we
+      # must omit the Apple vars entirely rather than pass empty strings.
+      APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,25 +56,32 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      # ── Apple Developer ID + notarization — OPTIONAL (add later) ──────────
+      # Runs only once the Apple secrets exist; then tauri-action signs with the
+      # Developer ID under the hardened runtime + entitlements.plist, notarizes,
+      # and staples. Until then this is skipped and the build is ad-hoc/unsigned
+      # (installs, but Gatekeeper warns). Adding the secrets needs no edits here.
+      - name: Configure Apple signing
+        if: env.APPLE_CONFIGURED == 'true'
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
+            echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+          } >> "$GITHUB_ENV"
+
       - name: Build, sign, and publish
         uses: tauri-apps/tauri-action@v0
         env:
-          # ── Updater signing (minisign) — REQUIRED for auto-update ──────────
-          # Separate from Apple. Add TAURI_SIGNING_PRIVATE_KEY as a repo secret:
-          # the contents of ~/.openwispr/updater.key. Our key has no password, so
-          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD can be left unset.
+          # Updater signing (minisign) — REQUIRED for auto-update; separate from
+          # Apple. TAURI_SIGNING_PRIVATE_KEY = contents of ~/.openwispr/updater.key
+          # (our key has no password, so the *_PASSWORD can be left unset). The
+          # Apple vars, if configured, come from $GITHUB_ENV via the step above.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # ── Apple Developer ID + notarization — OPTIONAL (add later) ────────
-          # Until set, the build is ad-hoc/unsigned. Once set, tauri-action
-          # signs with the Developer ID under the hardened runtime + our
-          # entitlements.plist, then notarizes + staples. See docs/releasing.md.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Open Wispr ${{ github.ref_name }}"
