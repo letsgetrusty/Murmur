@@ -7,8 +7,25 @@ settings — deliberately *not* an 800MB Electron app.
 
 **Everything runs on-device** — local Whisper, a local LLM, and native/neural
 speech. No cloud providers, API keys, or accounts. The only network traffic is a
-one-time model download. Personal daily-driver tool. macOS only, single user, no
-telemetry.
+one-time model download. macOS only, single-user, no telemetry.
+
+---
+
+## Download
+
+**[⬇ Download the latest release »](https://github.com/letsgetrusty/OpenWispr/releases/latest)**
+— grab `OpenWispr_<version>_aarch64.dmg`, open it, and drag **Open Wispr** into
+Applications.
+
+- **Requirements:** macOS 11+ · Apple Silicon.
+- **First launch:** the app walks you through granting **Accessibility** and
+  **Microphone** — the two permissions it needs.
+- **Updates:** Open Wispr checks for new versions in the background and shows a
+  one-click **Restart to update** prompt; nothing installs behind your back.
+
+> Builds aren't notarized yet, so macOS may warn "unidentified developer" on
+> first open. Right-click the app → **Open** → **Open** to bypass it (one time).
+> This note goes away once notarized builds ship.
 
 ---
 
@@ -65,7 +82,8 @@ hardware event tap and is fixed.
   default Whisper model (`small.en`, ~466 MB) is fetched by `setup.sh`; the Qwen3
   refine model and the optional Kokoro voice download on first refine/selection.
 
-The repo is private — you'll need collaborator access to clone it.
+This section is for building from source. To just use the app, see
+[Download](#download) above.
 
 ---
 
