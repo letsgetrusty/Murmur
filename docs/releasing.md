@@ -214,12 +214,15 @@ The app compares its version to the manifest's and installs if newer.
 - **Keep the signing identity stable** across releases so users' Accessibility
   grants survive updates (same principle as the dev cert — see the CLAUDE.md
   hard rules).
-- **Don't run a release build next to a running dev app.** `create-dmg` mounts a
-  temporary `/Volumes/dmg.*` volume, which registers a *second* `ai.openwispr.app`
-  bundle with LaunchServices. With the dev build (or an installed copy) also
-  around, macOS sees duplicate bundle ids and aborts the app (`SIGABRT`) — it
-  looks like a random crash loop. `release.sh` force-ejects stray dmg volumes
-  after building to prevent this, but if you ever hit it: quit all instances,
-  eject `/Volumes/dmg.*`, remove extra `OpenWispr.app` copies (dev + installed),
-  and rebuild so exactly one bundle is registered. Only affects dev machines —
-  end users have a single installed copy that updates in place.
+- **Don't run a release build next to a running dev app.** A release build
+  registers extra `ai.openwispr.app` bundles with LaunchServices — the temporary
+  `create-dmg` volume (`/Volumes/dmg.*`) *and* the release `.app` itself. With the
+  dev build (or an installed copy) also around, macOS sees duplicate bundle ids
+  and aborts the app (`SIGABRT`) — it looks like a random crash loop.
+  `release.sh` now unregisters + ejects both after building to prevent this, but
+  if you ever hit it: quit all instances, `lsregister -u` the extra paths, eject
+  `/Volumes/dmg.*`, remove extra `OpenWispr.app` copies, and rebuild so exactly
+  one bundle is registered. Only affects dev machines — end users have a single
+  installed copy that updates in place. (Verified via the local updater E2E test:
+  a v0.1.0 app pre-downloads + verifies + installs v0.1.1 and relaunches; the
+  crash was only this dev-side bundle collision, not the updater.)

@@ -87,19 +87,23 @@ say "whisper.cpp + llama.cpp + onnxruntime and can take 10–20 minutes."
 # → sign (hardened runtime + entitlements) → notarize + staple (if creds) → dmg.
 npm run tauri build
 
-# --- Eject stray DMG volumes -------------------------------------------------
-# create-dmg mounts a temporary volume (/Volumes/dmg.XXXX) to lay out the .dmg.
-# It usually detaches it, but stray mounts sometimes linger — and a mounted DMG
-# registers a *second* ai.openwispr.app bundle with LaunchServices. On a dev
-# machine that collides with a running/installed copy and macOS aborts the app
-# (duplicate bundle id). Harmless for end users (they only ever have one copy),
-# but we eject here so local release builds never destabilize a running dev app.
+# --- Un-shadow the build from LaunchServices ---------------------------------
+# The build registers extra ai.openwispr.app bundles with LaunchServices — the
+# temporary create-dmg volume (/Volumes/dmg.XXXX) *and* the release .app itself.
+# On a dev machine either one collides with a running/installed copy and macOS
+# aborts the app (duplicate bundle id). Harmless for end users (they only ever
+# have one copy), so we unregister + eject them here — the files stay on disk for
+# uploading; they're just no longer LaunchServices-visible.
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 for vol in /Volumes/dmg.*; do
   [ -d "$vol/OpenWispr.app" ] || continue
+  "$LSREG" -u "$vol/OpenWispr.app" >/dev/null 2>&1 || true
   if hdiutil detach "$vol" -force >/dev/null 2>&1; then
-    say "ejected stray DMG volume $(basename "$vol")"
+    say "ejected DMG volume $(basename "$vol")"
   fi
 done
+# Unregister the release .app build output (kept on disk for uploading).
+"$LSREG" -u "src-tauri/target/release/bundle/macos/OpenWispr.app" >/dev/null 2>&1 || true
 
 # --- Locate + verify outputs -------------------------------------------------
 DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
