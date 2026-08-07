@@ -1,0 +1,57 @@
+name: CI
+
+# Keep main green: format, lint, and test on every PR to main (and on main
+# itself). Mirrors the local pre-commit hook, as a backstop if it's bypassed.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  # One run per branch/PR — cancel superseded runs to save the macOS minutes.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # macOS-native app (objc2 / AVFoundation / whisper.cpp + llama.cpp with
+    # Metal), so it can only be built + tested on macOS. Apple Silicon runner.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # rustup reads rust-toolchain.toml (pins the compiler); add the components
+      # the checks need for that exact toolchain.
+      - name: Rust toolchain
+        run: |
+          rustup show
+          rustup component add clippy rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Caches the registry AND target/, so the heavy whisper.cpp /
+          # llama.cpp / onnxruntime C++ builds are reused across runs.
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      # `generate_context!` embeds ../dist at compile time, so the frontend must
+      # exist for clippy/test to compile the crate.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
