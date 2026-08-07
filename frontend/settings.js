@@ -540,14 +540,16 @@ function initZoom() {
 
 // --- Auto-update --------------------------------------------------------------
 
-function showUpdateAvailable(info) {
+// A newer version has been downloaded + verified in the background and is
+// staged — the user just needs to restart to apply it.
+function showUpdateStaged(version) {
   const banner = el("update-banner");
   banner.classList.remove("neutral");
-  el("update-text").innerHTML = `<b>Open Wispr ${info.version}</b> is available — you're on ${info.current_version}.`;
+  el("update-text").innerHTML = `<b>Open Wispr ${version}</b> is downloaded and ready to install.`;
   const btn = el("update-install");
   btn.hidden = false;
   btn.disabled = false;
-  btn.textContent = "Install & Restart";
+  btn.textContent = "Restart to update";
   banner.hidden = false;
 }
 
@@ -562,10 +564,10 @@ function showUpToDate() {
 async function installUpdate() {
   const btn = el("update-install");
   btn.disabled = true;
-  btn.textContent = "Downloading…";
+  btn.textContent = "Restarting…";
   try {
-    // On success the app installs + relaunches, so this never resolves.
-    await invoke("install_update");
+    // Installs the pre-downloaded update and relaunches — never resolves.
+    await invoke("install_staged_update");
   } catch (e) {
     el("update-text").textContent = `Update failed: ${e}`;
     btn.disabled = false;
@@ -576,11 +578,11 @@ async function installUpdate() {
 function initUpdate() {
   el("update-install").addEventListener("click", installUpdate);
   const listen = window.__TAURI__?.event?.listen;
-  listen?.("update-available", (e) => showUpdateAvailable(e.payload));
+  listen?.("update-staged", (e) => showUpdateStaged(e.payload));
   listen?.("update-none", () => showUpToDate());
-  // Quiet check on open — only surfaces the banner if an update exists.
-  invoke?.("check_for_update").then((info) => {
-    if (info) showUpdateAvailable(info);
+  // If an update was already staged before this window opened, show it.
+  invoke?.("pending_update_version").then((v) => {
+    if (v) showUpdateStaged(v);
   });
 }
 

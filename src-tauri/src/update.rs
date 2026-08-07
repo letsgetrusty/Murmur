@@ -7,60 +7,52 @@
 // proves the update came from us, before macOS ever evaluates the new bundle.
 // See docs/releasing.md for the signing + publishing flow.
 
-use serde::Serialize;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_updater::UpdaterExt;
 
-/// A newer release the user can install, shaped for the settings-window banner.
-#[derive(Serialize, Clone)]
-pub struct UpdateInfo {
+/// A downloaded-and-verified update held in memory until the user restarts.
+/// Pre-fetching means "Restart to update" applies instantly.
+pub struct StagedUpdate {
     pub version: String,
-    pub current_version: String,
-    /// Release notes from the manifest, if any.
-    pub notes: Option<String>,
+    bytes: Vec<u8>,
 }
 
-/// Check the configured endpoint for a newer signed release. Returns `None` when
-/// already up to date, the endpoint isn't reachable, or the updater isn't
-/// configured (e.g. the placeholder endpoint) — all non-fatal and logged, so a
-/// failed check never disrupts the app.
-pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Option<UpdateInfo> {
-    let updater = match app.updater() {
-        Ok(u) => u,
+/// Check the endpoint and, if a newer release exists, download + verify it in
+/// the background. Returns the staged bytes, or `None` when up to date /
+/// unreachable / the endpoint isn't configured (all non-fatal, logged).
+pub async fn check_and_download<R: Runtime>(app: &AppHandle<R>) -> Option<StagedUpdate> {
+    let updater = app.updater().ok()?;
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => return None,
         Err(e) => {
-            log::warn!("update: updater unavailable: {e}");
+            log::info!("update: check skipped ({e})");
             return None;
         }
     };
-    match updater.check().await {
-        Ok(Some(update)) => {
+    let version = update.version.clone();
+    log::info!("update: v{version} available — downloading in the background");
+    match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => {
             log::info!(
-                "update: v{} available (current v{})",
-                update.version,
-                update.current_version
+                "update: v{version} downloaded + verified ({} bytes) — staged",
+                bytes.len()
             );
-            Some(UpdateInfo {
-                version: update.version.clone(),
-                current_version: update.current_version.clone(),
-                notes: update.body.clone(),
-            })
-        }
-        Ok(None) => {
-            log::info!("update: up to date");
-            None
+            Some(StagedUpdate { version, bytes })
         }
         Err(e) => {
-            // Endpoint not set up yet (placeholder) or offline — expected, info-level.
-            log::info!("update: check skipped ({e})");
+            log::warn!("update: background download failed: {e}");
             None
         }
     }
 }
 
-/// Download + install the available update (verifying its signature), then
-/// relaunch. Errors (as a display string) if no update is available or the
-/// download/install fails; the caller surfaces it to the user.
-pub async fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+/// Install a previously-staged (already-verified) update, then relaunch. Errors
+/// as a display string if the update is no longer offered or the install fails.
+pub async fn install_staged<R: Runtime>(
+    app: &AppHandle<R>,
+    staged: StagedUpdate,
+) -> Result<(), String> {
     let updater = app
         .updater()
         .map_err(|e| format!("updater unavailable: {e}"))?;
@@ -68,24 +60,11 @@ pub async fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .check()
         .await
         .map_err(|e| format!("update check failed: {e}"))?
-        .ok_or_else(|| "no update available".to_string())?;
-
-    log::info!("update: installing v{}…", update.version);
-    let mut downloaded: usize = 0;
+        .ok_or_else(|| "update is no longer available".to_string())?;
     update
-        .download_and_install(
-            |chunk, total| {
-                downloaded += chunk;
-                if let Some(total) = total {
-                    log::debug!("update: {downloaded}/{total} bytes");
-                }
-            },
-            || log::info!("update: download complete — installing"),
-        )
-        .await
-        .map_err(|e| format!("update install failed: {e}"))?;
-
-    log::info!("update: installed — relaunching");
+        .install(&staged.bytes)
+        .map_err(|e| format!("install failed: {e}"))?;
+    log::info!("update: installed v{} — relaunching", staged.version);
     crate::relaunch(app);
     Ok(())
 }

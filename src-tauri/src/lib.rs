@@ -74,6 +74,13 @@ pub struct AppState {
     /// Dictation history database (SQLite). `Connection` is `!Sync`, so it's
     /// behind a Mutex; access is infrequent (once per dictation / UI action).
     pub history: Arc<Mutex<rusqlite::Connection>>,
+    /// A newer release, downloaded + verified in the background and held until
+    /// the user restarts. `Some` once staged; drives the "Restart to update"
+    /// tray item and settings banner.
+    pub pending_update: Arc<Mutex<Option<update::StagedUpdate>>>,
+    /// The tray item that flips from "Check for Updates…" to
+    /// "Restart to update (vX)" when an update is staged.
+    pub update_item: tauri::menu::MenuItem<Wry>,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -172,8 +179,8 @@ pub fn run() {
             commands::open_microphone_settings,
             commands::request_microphone,
             commands::finish_onboarding,
-            commands::check_for_update,
-            commands::install_update,
+            commands::pending_update_version,
+            commands::install_staged_update,
         ])
         .setup(move |app| {
             // Shared live config: the refiner reads it on each refine and the
@@ -274,7 +281,7 @@ pub fn run() {
             // saved config so the user sees their previous selection as soon
             // as they open the menu. `mic_names` was enumerated above before
             // Tauri took the main thread.
-            let (menu, speed_items, voice_items, mic_items) =
+            let (menu, speed_items, voice_items, mic_items, update_item) =
                 build_tray_menu(app.handle(), &cfg, &mic_names)?;
             app.manage(AppState {
                 tx,
@@ -287,6 +294,8 @@ pub fn run() {
                 config: config_state.clone(),
                 usage: usage_state.clone(),
                 history: history_state.clone(),
+                pending_update: Arc::new(Mutex::new(None)),
+                update_item,
             });
 
             // The tray icon itself is auto-created from the `trayIcon` block
@@ -331,15 +340,32 @@ pub fn run() {
                 show_onboarding_window(app.handle());
             }
 
-            // Background update check — non-blocking, best-effort. If a newer
-            // signed release exists it's surfaced via the `update-available`
-            // event, which the settings window renders as an install banner (no
-            // window is forced open at startup).
+            // Background auto-update: check on launch and hourly, and when a
+            // newer signed release exists, download + verify it silently and
+            // stage it. Staging flips the tray item to "Restart to update (vX)"
+            // and shows the settings banner — the user applies it when they
+            // choose (no surprise relaunches). See `mark_update_staged`.
             {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Some(info) = update::check(&app).await {
-                        let _ = app.emit("update-available", info);
+                    const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+                    loop {
+                        let staged = app
+                            .state::<AppState>()
+                            .pending_update
+                            .lock()
+                            .map(|g| g.is_some())
+                            .unwrap_or(true);
+                        if !staged {
+                            if let Some(update) = update::check_and_download(&app).await {
+                                let version = update.version.clone();
+                                if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
+                                    *g = Some(update);
+                                }
+                                mark_update_staged(&app, &version);
+                            }
+                        }
+                        tokio::time::sleep(CHECK_INTERVAL).await;
                     }
                 });
             }
@@ -447,6 +473,34 @@ pub fn relaunch<R: Runtime>(app: &AppHandle<R>) {
     }
     // Not inside an .app bundle (unusual) — fall back to Tauri's restart.
     app.restart();
+}
+
+/// Take the staged update out of `AppState` and install it, then relaunch.
+/// Used by both the tray "Restart to update" item and the settings banner.
+pub async fn install_pending<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let staged = app
+        .state::<AppState>()
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take());
+    match staged {
+        Some(u) => update::install_staged(app, u).await,
+        None => Err("no staged update".to_string()),
+    }
+}
+
+/// Surface a staged update: relabel the tray item to "Restart to update (vX)"
+/// and notify the settings window (which shows an install banner). Menu mutation
+/// must happen on the main thread on macOS, so the relabel is deferred there.
+fn mark_update_staged<R: Runtime>(app: &AppHandle<R>, version: &str) {
+    let label = format!("Restart to update (v{version})");
+    let app_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = app_main.state::<AppState>().update_item.set_text(&label);
+    });
+    let _ = app.emit("update-staged", version.to_string());
+    log::info!("update: staged v{version} — 'Restart to update' offered");
 }
 
 /// Progress payload for the onboarding download bars. `total` is 0 when the
@@ -703,6 +757,7 @@ type TrayMenu = (
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
+    MenuItem<Wry>,
 );
 
 fn build_tray_menu(
@@ -805,7 +860,7 @@ fn build_tray_menu(
             &quit,
         ],
     )?;
-    Ok((menu, speed_items, voice_items, mic_items))
+    Ok((menu, speed_items, voice_items, mic_items, check_update))
 }
 
 fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
@@ -814,15 +869,32 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
         "open_main" => show_main_window(app),
         "open_setup" => show_onboarding_window(app),
         "check_update" => {
-            // Manual check: open Settings so the result is visible, then emit the
-            // outcome for its update banner to render.
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
-                let info = update::check(&app).await;
+                // When an update is staged this item reads "Restart to update
+                // (vX)" — apply it now.
+                let staged = app
+                    .state::<AppState>()
+                    .pending_update
+                    .lock()
+                    .map(|g| g.is_some())
+                    .unwrap_or(false);
+                if staged {
+                    if let Err(e) = install_pending(&app).await {
+                        log::warn!("update: restart-to-update failed: {e}");
+                    }
+                    return;
+                }
+                // Otherwise, a plain "Check for Updates…": check + download, open
+                // Settings, and surface the result in its banner.
                 show_main_window(&app);
-                match info {
-                    Some(info) => {
-                        let _ = app.emit("update-available", info);
+                match update::check_and_download(&app).await {
+                    Some(u) => {
+                        let version = u.version.clone();
+                        if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
+                            *g = Some(u);
+                        }
+                        mark_update_staged(&app, &version);
                     }
                     None => {
                         let _ = app.emit("update-none", ());

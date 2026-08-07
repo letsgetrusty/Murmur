@@ -213,17 +213,21 @@ pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
 
 // --- Auto-update -------------------------------------------------------------
 
-/// Check the update endpoint for a newer release. `None` = up to date or the
-/// endpoint isn't reachable/configured (both non-fatal).
+/// The version of a staged (already-downloaded) update, if one is ready. Drives
+/// the settings "Restart to update" banner when the window opens.
 #[tauri::command]
-pub async fn check_for_update(app: AppHandle) -> Option<crate::update::UpdateInfo> {
-    crate::update::check(&app).await
+pub fn pending_update_version(state: State<AppState>) -> Option<String> {
+    state
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|u| u.version.clone()))
 }
 
-/// Download + install the available update (signature-verified) and relaunch.
+/// Apply the staged (already-downloaded + verified) update and relaunch.
 #[tauri::command]
-pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    crate::update::install(&app).await
+pub async fn install_staged_update(app: AppHandle) -> Result<(), String> {
+    crate::install_pending(&app).await
 }
 
 // --- History -----------------------------------------------------------------

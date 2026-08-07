@@ -36,7 +36,7 @@ cpal = "0.16"
 arboard = "3"
 enigo = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-tokio = { version = "1", features = ["sync", "rt"] }
+tokio = { version = "1", features = ["sync", "rt", "time"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
