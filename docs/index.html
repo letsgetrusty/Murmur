@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Open Wispr — Voice to text, 100% on your Mac</title>
+    <meta
+      name="description"
+      content="Open Wispr is a free, open-source macOS dictation app. Hold a key, talk, release — it types wherever your cursor is. Free. Private. Open Source."
+    />
+    <meta property="og:title" content="Open Wispr — Voice to text, 100% on your Mac" />
+    <meta property="og:description" content="Free, private, open-source dictation for macOS. Your voice never leaves your Mac." />
+    <meta property="og:type" content="website" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #141210;
+        --panel-2: #181410;
+        --border: #2d2721;
+        --border-soft: #241f1a;
+        --text: #f2eee7;
+        --dim: #a99f95;
+        --faint: #7d746b;
+        --rust: #d9531f;
+        --rust-bright: #ef6c2e;
+        --on-rust: #ffffff;
+        --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background:
+          radial-gradient(46% 40% at 50% 0%, rgba(217, 83, 31, 0.13), transparent 66%),
+          var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+
+      /* ——— Top bar ——— */
+      .topbar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 20px clamp(20px, 5vw, 40px);
+      }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; text-decoration: none; color: var(--text); }
+      .brand .mark { color: var(--rust); display: flex; }
+      .ghlink { color: var(--dim); text-decoration: none; font-size: 14px; font-weight: 500; }
+      .ghlink:hover { color: var(--rust-bright); }
+
+      /* ——— Hero (fills the screen, centered) ——— */
+      .hero {
+        flex: 1;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; padding: 40px 24px;
+      }
+      .hero-inner { max-width: 640px; }
+      .app-icon { display: block; margin: 0 auto 30px; filter: drop-shadow(0 18px 38px rgba(217, 83, 31, 0.32)); }
+      .eyebrow {
+        font-family: var(--mono); font-size: 13px; font-weight: 600;
+        letter-spacing: 0.22em; text-transform: uppercase; color: var(--rust-bright); margin: 0 0 20px;
+      }
+      h1 {
+        font-size: clamp(42px, 7.4vw, 68px); line-height: 1.02; letter-spacing: -0.035em;
+        font-weight: 800; margin: 0 0 38px; text-wrap: balance;
+      }
+      h1 .accent { color: var(--rust); }
+
+      .btn-download {
+        display: inline-flex; align-items: center; gap: 11px;
+        font-family: var(--sans); font-size: 17px; font-weight: 700;
+        padding: 17px 38px; border-radius: 14px; text-decoration: none;
+        background: var(--rust); color: var(--on-rust); border: 1px solid transparent;
+        box-shadow: 0 14px 40px -10px rgba(217, 83, 31, 0.72);
+        transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+      }
+      .btn-download:hover { background: var(--rust-bright); transform: translateY(-2px); box-shadow: 0 22px 50px -12px rgba(217, 83, 31, 0.85); }
+      .btn-download:active { transform: translateY(0); }
+      .req { margin: 18px 0 0; font-family: var(--mono); font-size: 12.5px; color: var(--faint); letter-spacing: 0.02em; }
+      .req b { color: var(--dim); font-weight: 600; }
+
+      /* ——— Bottom credit ——— */
+      .credit { text-align: center; padding: 22px 24px 28px; font-size: 13.5px; color: var(--faint); }
+      .credit a { color: var(--dim); text-decoration: none; font-weight: 600; }
+      .credit a:hover { color: var(--rust-bright); }
+
+      :focus-visible { outline: 2px solid var(--rust); outline-offset: 3px; border-radius: 6px; }
+      @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    </style>
+  </head>
+
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="wave" viewBox="0 0 24 24">
+        <g fill="currentColor">
+          <rect x="2.2" y="8.5" width="2.6" height="7" rx="1.3" />
+          <rect x="6.9" y="5.5" width="2.6" height="13" rx="1.3" />
+          <rect x="11.6" y="3" width="2.6" height="18" rx="1.3" />
+          <rect x="16.3" y="6.5" width="2.6" height="11" rx="1.3" />
+          <rect x="19.4" y="9" width="2.6" height="6" rx="1.3" />
+        </g>
+      </symbol>
+    </svg>
+
+    <header class="topbar">
+      <a class="brand" href="#">
+        <span class="mark"><svg width="20" height="20"><use href="#wave" /></svg></span>
+        Open Wispr
+      </a>
+      <a class="ghlink" href="https://github.com/letsgetrusty/OpenWispr" rel="noopener">GitHub</a>
+    </header>
+
+    <main class="hero">
+      <div class="hero-inner">
+        <svg class="app-icon" width="78" height="78" viewBox="0 0 76 76" aria-hidden="true">
+          <defs>
+            <linearGradient id="rustgrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#e2632e" />
+              <stop offset="1" stop-color="#bf471a" />
+            </linearGradient>
+          </defs>
+          <rect x="0.5" y="0.5" width="75" height="75" rx="17.5" fill="url(#rustgrad)" />
+          <use href="#wave" x="14" y="14" width="48" height="48" style="color: #fff" />
+        </svg>
+
+        <p class="eyebrow">Free. Private. Open&nbsp;Source.</p>
+        <h1>Voice to text, <span class="accent">for developers.</span></h1>
+
+        <a class="btn-download" href="https://github.com/letsgetrusty/OpenWispr/releases/latest" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1v9m0 0 3.2-3.2M8 10 4.8 6.8M2.5 12.5h11" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download for macOS
+        </a>
+        <p class="req"><b>Free &amp; open source</b> · macOS 11+ · Apple&nbsp;Silicon</p>
+      </div>
+    </main>
+
+    <footer class="credit">
+      Made with 🧡 by <a href="https://letsgetrusty.com" rel="noopener">Let's Get Rusty</a>
+    </footer>
+  </body>
+</html>
