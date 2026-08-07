@@ -76,6 +76,9 @@ jobs:
       - name: Build, sign, and publish
         uses: tauri-apps/tauri-action@v0
         env:
+          # Auto-provided by Actions; tauri-action needs it to create the release
+          # and upload assets. Paired with `permissions: contents: write` above.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater signing (minisign) — REQUIRED for auto-update; separate from
           # Apple. TAURI_SIGNING_PRIVATE_KEY = contents of ~/.openwispr/updater.key
           # (our key has no password, so the *_PASSWORD can be left unset). The
