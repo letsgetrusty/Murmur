@@ -65,8 +65,51 @@ trusts it. Pick **one** of these:
 
 ---
 
-## Doing a release
+## Releasing via CI (recommended)
 
+`.github/workflows/release.yml` builds + publishes automatically when you push a
+**version tag**. Merges to `main` do nothing on their own — releasing is a
+deliberate act, so you control exactly when users get an update.
+
+**To cut a release:**
+
+1. Bump the version in **all three**: `package.json`, `src-tauri/tauri.conf.json`,
+   `src-tauri/Cargo.toml`. Commit + merge to `main`.
+2. Tag it and push the tag:
+   ```sh
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+CI (an Apple-Silicon runner) then builds, signs the updater artifact, and creates
+a **GitHub Release** for the tag with the `.dmg` + `latest.json` + `.app.tar.gz`
+attached. The workflow first fails fast if the tag doesn't match the app version.
+
+### Secrets
+
+Repo → Settings → Secrets and variables → Actions:
+
+| Secret | When | Purpose |
+|---|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | **now** | Updater (minisign) signing — the contents of `~/.openwispr/updater.key`. Without it, auto-update won't work. Our key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can be left unset. |
+| `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY` | later | Developer ID signing (base64 of the `.p12`, its password, and the identity string). |
+| `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` | later | Notarization (or use the App Store Connect API-key trio). |
+
+**Until the Apple secrets are set, CI still runs** — it just produces an
+**ad-hoc / unsigned** build. It installs, but downloaders hit a Gatekeeper
+"unidentified developer" warning (right-click → Open). Add the Apple secrets and
+the *same* workflow notarizes — no other change. Fine for internal/testing;
+notarize before a public launch.
+
+> **Public-repo requirement:** the updater endpoint is
+> `…/releases/latest/download/latest.json`. GitHub serves release assets of a
+> **private** repo only to authenticated users, so auto-update (and public
+> downloads) start working once the repo is public.
+
+---
+
+## Releasing locally (manual fallback)
+
+The CI path above is preferred; use `./scripts/release.sh` for a local build.
 Export the credentials (put them in a **gitignored** `.env` and `source` it — do
 not commit them):
 
@@ -175,23 +218,20 @@ updates users will accept (they'd have to re-download manually). `release.sh`
 reads it from `~/.openwispr/updater.key` (override with `TAURI_SIGNING_PRIVATE_KEY`
 / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). It's `.gitignore`d — never commit it.
 
-### The manifest + hosting  ⚠️ TODO before first release
+### The manifest + hosting
 
-The updater endpoint is currently a **placeholder** in two places that must
-point at the same real host:
+The updater endpoint is **GitHub Releases**:
+`tauri.conf.json` → `plugins.updater.endpoints` →
+`https://github.com/letsgetrusty/OpenWispr/releases/latest/download/latest.json`.
 
-- `tauri.conf.json` → `plugins.updater.endpoints`
-- `scripts/release.sh` → `ENDPOINT_HOST`
+- **Via CI (normal path):** tauri-action generates `latest.json` + the signed
+  `.app.tar.gz` and attaches them to the release automatically. Nothing to do.
+- **Via `release.sh` (manual):** it also writes `…/bundle/latest.json` pointing
+  at the `vN.N.N` release assets — create that GitHub release and upload both
+  `OpenWispr.app.tar.gz` and `latest.json` to it.
 
-Each `release.sh` run (with `createUpdaterArtifacts` on) produces:
-
-- `…/bundle/macos/OpenWispr.app.tar.gz` + `.sig` — the update archive,
-- `…/bundle/latest.json` — the manifest (version, notes, pub_date, and per-arch
-  `{ signature, url }`).
-
-To publish a release: set the real host in both places above, then upload the
-`.app.tar.gz` **and** `latest.json` to it so `endpoints` resolves to that JSON.
-The app compares its version to the manifest's and installs if newer.
+The app fetches the manifest, compares its version, and installs if newer. As
+noted above, release assets are only publicly fetchable once the repo is public.
 
 > This build targets Apple Silicon → the manifest's platform key is
 > `darwin-aarch64`. Add `darwin-x86_64` / `darwin-universal` entries if you ever

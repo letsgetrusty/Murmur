@@ -119,11 +119,13 @@ ok "Build complete."
 [ -n "$TARGZ" ] && printf '   Updater:  %s\n' "$TARGZ"
 
 # --- Generate the update manifest (latest.json) ------------------------------
-# The app fetches this from plugins.updater.endpoints. Host the .app.tar.gz +
-# this JSON on your update server, then set the real URL (TODO placeholder
-# below). Arch: this builds for the host (Apple Silicon → darwin-aarch64).
+# The app fetches this from plugins.updater.endpoints (a GitHub Releases URL).
+# NOTE: CI (.github/workflows/release.yml → tauri-action) is the primary release
+# path and generates + uploads latest.json for you. This local manifest is a
+# manual fallback: it points at the vN.N.N GitHub release's assets, so upload
+# both the .app.tar.gz and this latest.json to that release.
 if [ -n "$TARGZ" ] && [ -n "$SIG" ]; then
-  ENDPOINT_HOST="https://UPDATES-HOST-TBD.example.com/updates"   # TODO: your real host
+  ENDPOINT_HOST="https://github.com/letsgetrusty/OpenWispr/releases/download/v$VERSION"
   MANIFEST="src-tauri/target/release/bundle/latest.json"
   TARGZ_NAME="$(basename "$TARGZ")"
   SIGNATURE="$(cat "$SIG")"
@@ -142,10 +144,8 @@ json.dump({
 PY
   printf '   Manifest: %s\n' "$MANIFEST"
   echo
-  warn "Manifest URL is a placeholder ($ENDPOINT_HOST/…). Before shipping:"
-  warn "  1. set your real host in scripts/release.sh (ENDPOINT_HOST) AND"
-  warn "     tauri.conf.json → plugins.updater.endpoints,"
-  warn "  2. upload $TARGZ_NAME + latest.json to that host."
+  say "Manual publish: create the v$VERSION GitHub release and upload both"
+  say "$TARGZ_NAME and latest.json to it (CI does this automatically on tag push)."
 fi
 
 if [ "$UNSIGNED" -eq 0 ] && [ -d "$APP" ]; then
