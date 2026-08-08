@@ -127,6 +127,12 @@ can enable itself. Do it once the repo is set up:
 Use a **branch ruleset** (GitHub's current system; "classic branch protection"
 is legacy).
 
+> **Requires a public repo (or GitHub Pro).** Rulesets and branch protection are
+> disabled on a **private** free-plan repo — creating one returns
+> `403 "Upgrade to GitHub Pro or make this repository public"` (in the UI and via
+> the API alike). So this becomes available at the same moment the repo goes
+> public (see the public-repo note above). Do it as part of going public.
+
 - **UI:** Repo → Settings → Rules → **Rulesets** → **New branch ruleset** →
   name it `main`, set **Enforcement status: Active**, add a **Target** →
   **Include default branch** → under **Rules** enable **Require status checks to
