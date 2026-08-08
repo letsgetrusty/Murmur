@@ -122,6 +122,11 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - Lint/format: a pre-commit hook (`.githooks/pre-commit`) runs `cargo fmt --check`
   + `cargo clippy -D warnings` on Rust changes. Keep the crate clean; bypass a WIP
   commit with `git commit --no-verify`.
+- CI (`.github/workflows/ci.yml`) gates every PR/push to `main` with two jobs:
+  `check` (fmt, clippy, Rust tests, frontend build + `npm test`) and `audit`
+  (RustSec + `npm audit`). Make both **required status checks** in branch
+  protection so they block merges — see `docs/releasing.md` → "Keeping `main`
+  green".
 - Dependency audits run in CI (the `audit` job) and on demand:
   - Rust: `./scripts/audit.sh` (RustSec / cargo-audit). Accepted advisories with
     rationale live in `src-tauri/.cargo/audit.toml`; anything not listed there

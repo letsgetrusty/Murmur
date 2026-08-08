@@ -107,6 +107,46 @@ notarize before a public launch.
 
 ---
 
+## Keeping `main` green (branch protection)
+
+`.github/workflows/ci.yml` runs on every PR and push to `main` and defines two
+jobs:
+
+- **`check`** (macOS) — `cargo fmt --check`, `cargo clippy -D warnings`, the Rust
+  test suite, and the frontend build + `npm test` (Vitest).
+- **`audit`** (Ubuntu) — RustSec (`cargo-audit`) and `npm audit`, so a
+  known-vulnerable dependency can't land on `main`. Only the advisories
+  explicitly accepted in `src-tauri/.cargo/audit.toml` and `scripts/npm-audit.sh`
+  are tolerated; anything new fails the job. (See AGENTS.md → Commands for what's
+  accepted and why.)
+
+These jobs **report** status but don't **block** a merge until you mark them
+**required** in branch protection — a repo setting, not something the workflow
+can enable itself. Do it once the repo is set up:
+
+- **UI:** Repo → Settings → Branches → Add branch ruleset (or classic
+  protection rule) for `main` → enable **Require status checks to pass before
+  merging** → add **`check`** and **`audit`** → also enable **Require branches to
+  be up to date before merging**.
+- **CLI (classic protection):**
+  ```sh
+  gh api -X PUT repos/letsgetrusty/OpenWispr/branches/main/protection \
+    --input - <<'JSON'
+  {
+    "required_status_checks": { "strict": true, "contexts": ["check", "audit"] },
+    "enforce_admins": true,
+    "required_pull_request_reviews": null,
+    "restrictions": null
+  }
+  JSON
+  ```
+
+Until then, treat a red CI run as a stop sign by convention. The local
+pre-commit hook (`fmt` + `clippy`) is a first line of defense but is easy to
+bypass (`--no-verify`) and doesn't run the tests or audits — CI is the backstop.
+
+---
+
 ## Releasing locally (manual fallback)
 
 The CI path above is preferred; use `./scripts/release.sh` for a local build.
