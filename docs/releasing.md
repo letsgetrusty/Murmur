@@ -124,19 +124,36 @@ These jobs **report** status but don't **block** a merge until you mark them
 **required** in branch protection — a repo setting, not something the workflow
 can enable itself. Do it once the repo is set up:
 
-- **UI:** Repo → Settings → Branches → Add branch ruleset (or classic
-  protection rule) for `main` → enable **Require status checks to pass before
-  merging** → add **`check`** and **`audit`** → also enable **Require branches to
-  be up to date before merging**.
-- **CLI (classic protection):**
+Use a **branch ruleset** (GitHub's current system; "classic branch protection"
+is legacy).
+
+- **UI:** Repo → Settings → Rules → **Rulesets** → **New branch ruleset** →
+  name it `main`, set **Enforcement status: Active**, add a **Target** →
+  **Include default branch** → under **Rules** enable **Require status checks to
+  pass** and add **`check`** and **`audit`** (also tick **Require branches to be
+  up to date before merging**) → **Create**. (Optionally enable **Require a pull
+  request before merging** for a PR-based flow.)
+- **CLI:**
   ```sh
-  gh api -X PUT repos/letsgetrusty/OpenWispr/branches/main/protection \
+  gh api -X POST repos/letsgetrusty/OpenWispr/rulesets \
     --input - <<'JSON'
   {
-    "required_status_checks": { "strict": true, "contexts": ["check", "audit"] },
-    "enforce_admins": true,
-    "required_pull_request_reviews": null,
-    "restrictions": null
+    "name": "main",
+    "target": "branch",
+    "enforcement": "active",
+    "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+    "rules": [
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": true,
+          "required_status_checks": [
+            { "context": "check" },
+            { "context": "audit" }
+          ]
+        }
+      }
+    ]
   }
   JSON
   ```
