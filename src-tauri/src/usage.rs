@@ -42,7 +42,7 @@ impl UsageStats {
 
 fn path() -> Option<PathBuf> {
     let mut p = PathBuf::from(std::env::var_os("HOME")?);
-    p.push("Library/Application Support/openwispr/usage.json");
+    p.push("Library/Application Support/murmur/usage.json");
     Some(p)
 }
 

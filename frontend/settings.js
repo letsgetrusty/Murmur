@@ -515,7 +515,7 @@ function initZoom() {
 function showUpdateStaged(version) {
   const banner = el("update-banner");
   banner.classList.remove("neutral");
-  el("update-text").innerHTML = `<b>Open Wispr ${version}</b> is downloaded and ready to install.`;
+  el("update-text").innerHTML = `<b>Murmur ${version}</b> is downloaded and ready to install.`;
   const btn = el("update-install");
   btn.hidden = false;
   btn.disabled = false;

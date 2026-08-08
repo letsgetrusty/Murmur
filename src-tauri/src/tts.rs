@@ -606,7 +606,7 @@ impl Speaker for KokoroSpeaker {
                     break;
                 }
                 let secs = (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
-                let temp = std::env::temp_dir().join(format!("openwispr-kokoro-{n}-{i}.wav"));
+                let temp = std::env::temp_dir().join(format!("murmur-kokoro-{n}-{i}.wav"));
                 if std::fs::write(&temp, &wav).is_err() {
                     break;
                 }
@@ -796,10 +796,10 @@ mod tests {
     }
 
     /// End-to-end Kokoro synthesis; needs the model + voices on disk. Ignored by
-    /// default. Run manually (writes /tmp/openwispr-kokoro-test.wav to `afplay`):
+    /// default. Run manually (writes /tmp/murmur-kokoro-test.wav to `afplay`):
     ///   cargo test --no-default-features -- --ignored kokoro_synth --nocapture
     #[test]
-    #[ignore = "needs the Kokoro model + voices in <app-support>/openwispr/models"]
+    #[ignore = "needs the Kokoro model + voices in <app-support>/murmur/models"]
     fn kokoro_synth() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -811,7 +811,7 @@ mod tests {
                 .unwrap();
             let (samples, dur) = tts
                 .synth(
-                    "Hello from Open Wispr. This is a local neural voice.",
+                    "Hello from Murmur. This is a local neural voice.",
                     "af_heart",
                 )
                 .await
@@ -823,7 +823,7 @@ mod tests {
             );
             assert!(samples.len() > 1000);
             std::fs::write(
-                "/tmp/openwispr-kokoro-test.wav",
+                "/tmp/murmur-kokoro-test.wav",
                 pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE),
             )
             .unwrap();

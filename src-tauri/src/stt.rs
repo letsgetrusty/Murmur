@@ -24,7 +24,7 @@ pub trait Transcriber: Send + Sync {
 /// Directory holding downloaded whisper.cpp GGML models.
 pub fn models_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME env var unset")?;
-    Ok(PathBuf::from(home).join("Library/Application Support/openwispr/models"))
+    Ok(PathBuf::from(home).join("Library/Application Support/murmur/models"))
 }
 
 /// Local path for a whisper.cpp GGML model by short name (e.g. "small.en").
@@ -245,13 +245,13 @@ mod tests {
 
     /// End-to-end local transcription against a real WAV fixture + model.
     /// Ignored by default (needs the ~0.5 GB model on disk). Run manually:
-    ///   OPENWISPR_TEST_WAV=/path/to/jfk.wav \
+    ///   MURMUR_TEST_WAV=/path/to/jfk.wav \
     ///     cargo test --no-default-features -- --ignored --nocapture transcribes_fixture
     #[test]
-    #[ignore = "needs a local Whisper model + a 16 kHz WAV fixture (OPENWISPR_TEST_WAV)"]
+    #[ignore = "needs a local Whisper model + a 16 kHz WAV fixture (MURMUR_TEST_WAV)"]
     fn transcribes_fixture() {
-        let wav_path = std::env::var("OPENWISPR_TEST_WAV").expect("set OPENWISPR_TEST_WAV");
-        let model = std::env::var("OPENWISPR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
+        let wav_path = std::env::var("MURMUR_TEST_WAV").expect("set MURMUR_TEST_WAV");
+        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
         let wav = std::fs::read(&wav_path).unwrap();
         let stt = WhisperStt::new(model);
         let rt = tokio::runtime::Builder::new_current_thread()

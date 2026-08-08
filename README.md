@@ -1,4 +1,4 @@
-# Open Wispr
+# Murmur
 
 A fast, native macOS voice tool: **dictation** and **read-aloud**, with
 on-device LLM refinement over your dictation. Built as
@@ -13,14 +13,14 @@ one-time model download. macOS only, single-user, no telemetry.
 
 ## Download
 
-**[⬇ Download the latest release »](https://github.com/letsgetrusty/OpenWispr/releases/latest)**
-— grab `OpenWispr_<version>_aarch64.dmg`, open it, and drag **Open Wispr** into
+**[⬇ Download the latest release »](https://github.com/letsgetrusty/murmur/releases/latest)**
+— grab `Murmur_<version>_aarch64.dmg`, open it, and drag **Murmur** into
 Applications.
 
 - **Requirements:** macOS 11+ · Apple Silicon.
 - **First launch:** the app walks you through granting **Accessibility** and
   **Microphone** — the two permissions it needs.
-- **Updates:** Open Wispr checks for new versions in the background and shows a
+- **Updates:** Murmur checks for new versions in the background and shows a
   one-click **Restart to update** prompt; nothing installs behind your back.
 
 > Builds aren't notarized yet, so macOS may warn "unidentified developer" on
@@ -74,7 +74,7 @@ hardware event tap and is fixed.
 - **Toolchain**: Xcode Command Line Tools (`xcode-select --install`), Rust via
   [rustup](https://rustup.rs) (the pinned version installs automatically from
   `rust-toolchain.toml`), and Node 18+ (`.nvmrc` pins 22).
-- **Accessibility permission** — the one grant Open Wispr needs. It authorizes both
+- **Accessibility permission** — the one grant Murmur needs. It authorizes both
   paste-injection and the Fn-key event tap. Grant it under *System Settings →
   Privacy & Security → Accessibility*. See
   [`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md).
@@ -92,17 +92,17 @@ This section is for building from source. To just use the app, see
 From a fresh clone, one script does the machine setup:
 
 ```sh
-git clone <repo-url> && cd openwispr
+git clone <repo-url> && cd murmur
 ./scripts/setup.sh      # toolchain check · npm install · create+trust the
-                        # 'openwispr dev' signing cert · build · fetch Whisper model
-./scripts/dev.sh        # build, sign, wrap in OpenWispr.app, launch
+                        # 'murmur dev' signing cert · build · fetch Whisper model
+./scripts/dev.sh        # build, sign, wrap in Murmur.app, launch
 ```
 
 `setup.sh` is idempotent and walks you through it. It handles everything that
 *can* be automated; one step is yours to do once:
 
 1. **Grant Accessibility.** On the first `./scripts/dev.sh`, macOS won't have the
-   grant yet — enable **Open Wispr** under *System Settings → Privacy & Security →
+   grant yet — enable **Murmur** under *System Settings → Privacy & Security →
    Accessibility*, then re-run `./scripts/dev.sh`.
 
 Why the signing dance? A stable, *trusted* self-signed identity keeps the
@@ -113,8 +113,8 @@ for the full story.
 ## Development
 
 ```sh
-./scripts/dev.sh        # build, sign (stable 'openwispr dev' identity), wrap in
-                        # OpenWispr.app, and relaunch. Use this, NOT `tauri dev`.
+./scripts/dev.sh        # build, sign (stable 'murmur dev' identity), wrap in
+                        # Murmur.app, and relaunch. Use this, NOT `tauri dev`.
 ```
 
 `./scripts/dev.sh` signs with a stable identity so the Accessibility grant
@@ -133,7 +133,7 @@ that touches Rust — bypass a WIP commit with `git commit --no-verify`. Check
 dependencies against the RustSec advisory database on demand with
 `./scripts/audit.sh` (it's intentionally not in the hook).
 
-Logs stream to `~/Library/Logs/openwispr.log`.
+Logs stream to `~/Library/Logs/murmur.log`.
 
 ---
 
@@ -164,7 +164,7 @@ Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · AVFoundation 
 
 ## License
 
-Open Wispr is free and open source under the [MIT License](LICENSE).
+Murmur is free and open source under the [MIT License](LICENSE).
 
 - Third-party components and bundled/downloaded models are attributed in
   [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — all permissive licenses,

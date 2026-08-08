@@ -4,7 +4,7 @@
   Hardened-runtime entitlements for the notarized Developer ID release build
   (applied by `tauri build` when signing; see docs/releasing.md).
 
-  Open Wispr is deliberately NOT sandboxed — it needs the Accessibility API
+  Murmur is deliberately NOT sandboxed — it needs the Accessibility API
   (paste injection + the Fn CGEventTap) and full clipboard access, which the App
   Sandbox forbids. So this file only declares what the hardened runtime gates:
 

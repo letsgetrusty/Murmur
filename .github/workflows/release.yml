@@ -85,14 +85,14 @@ jobs:
           # and upload assets. Paired with `permissions: contents: write` above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater signing (minisign) — REQUIRED for auto-update; separate from
-          # Apple. TAURI_SIGNING_PRIVATE_KEY = contents of ~/.openwispr/updater.key
+          # Apple. TAURI_SIGNING_PRIVATE_KEY = contents of ~/.murmur/updater.key
           # (our key has no password, so the *_PASSWORD can be left unset). The
           # Apple vars, if configured, come from $GITHUB_ENV via the step above.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Open Wispr ${{ github.ref_name }}"
+          releaseName: "Murmur ${{ github.ref_name }}"
           releaseBody: "Download the .dmg below to install. Existing installs update automatically."
           releaseDraft: false
           prerelease: false

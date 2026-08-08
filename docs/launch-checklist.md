@@ -1,6 +1,6 @@
 # Launch checklist
 
-Owner-only steps to take Open Wispr from its current internal/unsigned state to a
+Owner-only steps to take Murmur from its current internal/unsigned state to a
 public release. The code and CI/CD are already in place — these are the gates that
 depend on account/repo settings only the owner can flip (repo visibility, Apple
 membership, secrets). Details for each live in [`releasing.md`](releasing.md).

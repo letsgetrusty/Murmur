@@ -223,7 +223,7 @@ mod tests {
     /// End-to-end local generation; needs the GGUF model on disk. Ignored by
     /// default. Run: cargo test --no-default-features -- --ignored llm_chat --nocapture
     #[test]
-    #[ignore = "needs the Qwen3 GGUF in <app-support>/openwispr/models"]
+    #[ignore = "needs the Qwen3 GGUF in <app-support>/murmur/models"]
     fn llm_chat() {
         let path = model_path("Qwen3-1.7B-Q4_K_M").unwrap();
         let llm = LocalLlm::new(path);

@@ -10,7 +10,7 @@
 // like the chord callbacks.
 //
 // Permissions: this tap needs event-listen authorization, which on macOS is
-// satisfied by the **Accessibility** grant Open Wispr already requires for
+// satisfied by the **Accessibility** grant Murmur already requires for
 // paste-injection — so it needs NO separate Input Monitoring grant. We gate
 // tap creation on `AXIsProcessTrusted()` and deliberately never call
 // `IOHIDRequestAccess`: doing so records an explicit Input Monitoring *denial*
@@ -201,12 +201,12 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
     unsafe {
         // Preflight Input Monitoring. If it isn't granted, the tap below is
         // born disabled and never delivers events, so trigger the system
-        // prompt (which also adds `openwispr` to the Input Monitoring list). The
+        // prompt (which also adds `murmur` to the Input Monitoring list). The
         // grant only takes effect on the next launch.
         let ax_trusted = AXIsProcessTrusted();
         let access = IOHIDCheckAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
         log::info!("Fn-key: Accessibility(AXIsProcessTrusted)={ax_trusted}  InputMonitoring(IOHIDCheckAccess)={access} [0=granted,1=denied,2=unknown]");
-        // Accessibility is the ONE permission Open Wispr needs: it's required for
+        // Accessibility is the ONE permission Murmur needs: it's required for
         // paste-injection AND it authorizes the Fn CGEventTap (an app trusted
         // for Accessibility satisfies the event-listen check, so a separate
         // Input Monitoring grant is unnecessary). We deliberately do NOT call
@@ -214,7 +214,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         // that then overrides the Accessibility grant and wedges the tap off.
         if !ax_trusted {
             log::warn!(
-                "Fn-key: Accessibility not granted — Fn-hold disabled. Grant Open Wispr in System Settings → Privacy & Security → Accessibility, then relaunch."
+                "Fn-key: Accessibility not granted — Fn-hold disabled. Grant Murmur in System Settings → Privacy & Security → Accessibility, then relaunch."
             );
             let _ = Box::from_raw(state as *mut TapState<R>);
             return Ok(());
@@ -232,7 +232,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
             // Reclaim the leaked state so we don't drop it on the floor.
             let _ = Box::from_raw(state as *mut TapState<R>);
             log::warn!(
-                "Fn-key tap unavailable. Grant Input Monitoring in System Settings → Privacy & Security → Input Monitoring (add `openwispr`), then restart. Cmd+Shift+Space still works."
+                "Fn-key tap unavailable. Grant Input Monitoring in System Settings → Privacy & Security → Input Monitoring (add `murmur`), then restart. Cmd+Shift+Space still works."
             );
             return Ok(());
         }
@@ -243,7 +243,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
             log::info!("Fn-key tap installed and enabled");
         } else {
             log::warn!(
-                "Fn-key tap created but disabled by the system — Input Monitoring likely missing. Grant `openwispr` and restart."
+                "Fn-key tap created but disabled by the system — Input Monitoring likely missing. Grant `murmur` and restart."
             );
         }
         // Intentionally leak the tap + source + state for the lifetime of the

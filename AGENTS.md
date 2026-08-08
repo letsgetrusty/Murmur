@@ -81,7 +81,7 @@ tray "Check for Updates…" checks surface an install banner in Settings —
 resolves once the repo is public — see `docs/launch-checklist.md`), and SQLite
 dictation history. The TTS backend is
 chosen via `tts_provider` in config; the local Whisper model (default `small.en`,
-name in `stt_model`) auto-downloads to `<app-support>/openwispr/models/` on first
+name in `stt_model`) auto-downloads to `<app-support>/murmur/models/` on first
 run (and via `setup.sh`). Read-aloud can also use local neural **Kokoro**
 (`tts_provider = "kokoro"`): its ONNX model + voice packs auto-download to
 `…/models/` on first selection (opt-in, ~310 MB, so not fetched by `setup.sh`).
@@ -98,17 +98,17 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 
 ## Commands
 - First-time setup: `./scripts/setup.sh` — toolchain check, `npm install`,
-  create + trust the `openwispr dev` signing cert, build, and fetch the local
+  create + trust the `murmur dev` signing cert, build, and fetch the local
   Whisper model. See the README "Getting Started".
 - Dev: `./scripts/dev.sh` — rebuilds the frontend (`npm run build`, since the
   binary embeds `../dist` at compile time — a stale dist means frontend edits
-  silently don't ship), builds + signs the Rust binary (stable `openwispr dev`
-  identity), wraps in `OpenWispr.app`, launches via `open`. Use this, **not**
+  silently don't ship), builds + signs the Rust binary (stable `murmur dev`
+  identity), wraps in `Murmur.app`, launches via `open`. Use this, **not**
   `npm run tauri dev`:
   bare `tauri dev` ad-hoc-signs a shell-launched binary, which breaks the Fn-key
-  tap and TCC grant persistence on macOS. Open Wispr needs exactly ONE permission —
+  tap and TCC grant persistence on macOS. Murmur needs exactly ONE permission —
   **Accessibility** (it also authorizes the Fn CGEventTap; no Input Monitoring).
-  See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/openwispr.log`.
+  See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/murmur.log`.
 - Rust check (from `src-tauri/`): `cargo check`
 - Rust tests: `cargo test` (includes an IPC contract test that asserts the JS
   `constants.js` names match the Rust events/commands — keep them in sync).
@@ -147,7 +147,7 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - **Changing the app icon:** the icon is compiled *into* the binary by
   `generate_context!` (not just read from the bundle's `icon.icns` at runtime),
   so after editing `src-tauri/icons/*` you must force a recompile —
-  `cargo clean -p openwispr && ./scripts/dev.sh` — or the old icon stays baked in
+  `cargo clean -p murmur && ./scripts/dev.sh` — or the old icon stays baked in
   and no macOS icon-cache clearing will fix it. `tray.png` is a monochrome
   template macOS tints itself; don't color it.
 - Module layout per `docs/voice-tool-architecture.md` §4 (`audio.rs`, `stt.rs`,

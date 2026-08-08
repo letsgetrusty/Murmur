@@ -48,14 +48,14 @@ pub struct Config {
     #[serde(default = "default_refine_modifier")]
     pub refine_modifier: String,
     /// Local Whisper model name (a whisper.cpp ggml model, e.g. "small.en").
-    /// The GGML file is fetched to <app-support>/openwispr/models/ggml-<name>.bin.
+    /// The GGML file is fetched to <app-support>/murmur/models/ggml-<name>.bin.
     #[serde(default = "default_stt_model")]
     pub stt_model: String,
     /// Text-to-speech backend: "native" (AVSpeechSynthesizer) or "kokoro" (local
     /// neural). Both on-device. Defaults to native.
     #[serde(default = "default_tts_provider")]
     pub tts_provider: String,
-    /// Local GGUF model name (in <app-support>/openwispr/models/<name>.gguf).
+    /// Local GGUF model name (in <app-support>/murmur/models/<name>.gguf).
     #[serde(default = "default_llm_model")]
     pub llm_model: String,
     /// Set once the user completes the first-run onboarding flow. While false,
@@ -129,7 +129,7 @@ impl Default for Config {
 
 fn config_path() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME env var unset")?;
-    Ok(PathBuf::from(home).join("Library/Application Support/openwispr/config.json"))
+    Ok(PathBuf::from(home).join("Library/Application Support/murmur/config.json"))
 }
 
 /// Read the config, returning defaults if the file is missing or unparseable.

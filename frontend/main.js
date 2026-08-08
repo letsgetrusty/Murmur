@@ -4,7 +4,7 @@
 import { EVENTS } from "./constants.js";
 
 const LABELS = {
-  idle: "Open Wispr",
+  idle: "Murmur",
   recording: "Recording…",
   transcribing: "Transcribing…",
   refining: "Refining…",
@@ -37,7 +37,7 @@ function applyState(payload) {
       break;
     }
     default:
-      label.textContent = LABELS[kind] ?? "Open Wispr";
+      label.textContent = LABELS[kind] ?? "Murmur";
   }
 }
 

@@ -7,7 +7,7 @@ use objc2::{class, msg_send};
 use objc2_foundation::NSString;
 
 // AXIsProcessTrusted reports whether we hold the Accessibility grant — the one
-// permission Open Wispr needs (it also authorizes the Fn CGEventTap). See
+// permission Murmur needs (it also authorizes the Fn CGEventTap). See
 // `fn_key.rs` for why Input Monitoring is deliberately never requested.
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {

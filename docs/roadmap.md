@@ -1,6 +1,6 @@
 # Roadmap — voice for developers
 
-Exploratory ideas for making Open Wispr excellent for its primary use: talking to
+Exploratory ideas for making Murmur excellent for its primary use: talking to
 coding agents (Claude Code, Codex) instead of typing, and listening to their
 output instead of reading it. These are candidates, not commitments — the shipped
 scope is still what's in [AGENTS.md](../AGENTS.md).
@@ -8,7 +8,7 @@ scope is still what's in [AGENTS.md](../AGENTS.md).
 ## Thesis
 
 Code and agent output is written **for the eye**. Speech needs it rewritten **for
-the ear**. Open Wispr is uniquely placed to be that translation layer — *the voice
+the ear**. Murmur is uniquely placed to be that translation layer — *the voice
 layer for coding agents*. Most items below fall out of this one idea.
 
 ## Priority order

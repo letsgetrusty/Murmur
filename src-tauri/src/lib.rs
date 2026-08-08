@@ -127,10 +127,10 @@ impl std::io::Write for Tee {
     }
 }
 
-/// `~/Library/Logs/openwispr.log`, truncated each launch so it stays readable.
+/// `~/Library/Logs/murmur.log`, truncated each launch so it stays readable.
 fn open_log_file() -> Option<std::fs::File> {
     let mut path = std::path::PathBuf::from(std::env::var_os("HOME")?);
-    path.push("Library/Logs/openwispr.log");
+    path.push("Library/Logs/murmur.log");
     std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -322,7 +322,7 @@ pub fn run() {
 
             // The main (settings/history) window is created lazily on first
             // open (tray item / dock reopen) and destroyed on close, so an
-            // idle Open Wispr carries no WebKit content process for a window the
+            // idle Murmur carries no WebKit content process for a window the
             // user may never open. See `show_main_window`.
 
             // Hotkey registration MUST happen on the main thread on macOS —
@@ -398,7 +398,7 @@ pub fn run() {
 ///
 /// The window is not declared in `tauri.conf.json`; it's built here on first
 /// open and destroyed when the user closes it (Tauri's default), so an idle
-/// Open Wispr keeps no WebKit content process for a window that's rarely opened.
+/// Murmur keeps no WebKit content process for a window that's rarely opened.
 /// It self-populates from the backend on load (`settings.js` `init`), so a
 /// fresh instance needs no restored state.
 fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
@@ -409,7 +409,7 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     match WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
-        .title("Open Wispr")
+        .title("Murmur")
         .inner_size(900.0, 640.0)
         .min_inner_size(640.0, 460.0)
         .center()
@@ -433,7 +433,7 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     match WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
-        .title("Welcome to Open Wispr")
+        .title("Welcome to Murmur")
         .inner_size(640.0, 620.0)
         .resizable(false)
         .center()
@@ -446,7 +446,7 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Relaunch Open Wispr as its own responsible process. We deliberately do NOT
+/// Relaunch Murmur as its own responsible process. We deliberately do NOT
 /// use `app.restart()`: on macOS Tauri relaunches by spawning the binary as a
 /// *child* process, and macOS then attributes the TCC responsible process to the
 /// parent chain — which wedges the Fn-key tap / Accessibility grant (the exact
@@ -455,7 +455,7 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
 /// "Relaunch" button and after an auto-update installs.
 pub fn relaunch<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(exe) = std::env::current_exe() {
-        // exe = <OpenWispr.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
+        // exe = <Murmur.app>/Contents/MacOS/<bin>; walk up to the .app bundle.
         if let Some(bundle) = exe
             .ancestors()
             .find(|p| p.extension().is_some_and(|e| e == "app"))
@@ -777,7 +777,7 @@ fn build_tray_menu(
     )?;
     let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Open Wispr", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Murmur", true, None::<&str>)?;
 
     // Speed submenu — CheckMenuItems with the current selection pre-checked.
     let speed_items: Vec<CheckMenuItem<Wry>> = tts::SPEEDS

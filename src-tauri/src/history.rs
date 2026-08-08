@@ -12,7 +12,7 @@ use serde::Serialize;
 
 fn db_path() -> Option<PathBuf> {
     let mut p = PathBuf::from(std::env::var_os("HOME")?);
-    p.push("Library/Application Support/openwispr/history.db");
+    p.push("Library/Application Support/murmur/history.db");
     Some(p)
 }
 

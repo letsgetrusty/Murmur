@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Open Wispr is licensed under the [MIT License](LICENSE). It builds on open-source
+Murmur is licensed under the [MIT License](LICENSE). It builds on open-source
 software, and downloads open-weight ML models at runtime. This file records their
 licenses and attributions.
 
@@ -40,7 +40,7 @@ do not modify them; upstream source is available from crates.io.
 ## ML models (downloaded at runtime)
 
 Models are fetched on first use from Hugging Face to
-`~/Library/Application Support/openwispr/models/` — they are **not** bundled in
+`~/Library/Application Support/murmur/models/` — they are **not** bundled in
 the app and do not affect its license.
 
 | Model | Purpose | License | Source |
@@ -53,7 +53,7 @@ the app and do not affect its license.
 
 ## Complete dependency list
 
-Every third-party Rust crate compiled into Open Wispr, with its SPDX license
+Every third-party Rust crate compiled into Murmur, with its SPDX license
 expression, generated from `cargo metadata`. Regenerate after dependency changes.
 
 - adler2 2.0.1 — 0BSD OR MIT OR Apache-2.0

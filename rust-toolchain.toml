@@ -1,4 +1,4 @@
-# Pin the Rust toolchain so every developer builds Open Wispr with the same
+# Pin the Rust toolchain so every developer builds Murmur with the same
 # compiler. rustup installs this automatically on the first `cargo` invocation.
 # (Cargo.toml's rust-version = "1.77" is the MSRV floor; this is the pinned build
 # version — bump both together when raising requirements.)

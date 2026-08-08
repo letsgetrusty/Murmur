@@ -1,4 +1,4 @@
-# Releasing Open Wispr (signed + notarized DMG)
+# Releasing Murmur (signed + notarized DMG)
 
 > For the end-to-end path to a public release (repo visibility, signing, first
 > tag, landing page), see [`launch-checklist.md`](launch-checklist.md). This doc
@@ -7,13 +7,13 @@
 How to turn the code into a `.dmg` a stranger can download and run without
 Gatekeeper blocking it. This is the **distribution** build. It's separate from
 local development — for that, keep using `./scripts/dev.sh` with the self-signed
-`openwispr dev` identity (see `docs/macos-signing-and-permissions.md`).
+`murmur dev` identity (see `docs/macos-signing-and-permissions.md`).
 
 Two different signatures are involved, don't confuse them:
 
 | | `dev.sh` (local) | `release.sh` (shipping) |
 |---|---|---|
-| Identity | self-signed `openwispr dev` | **Developer ID Application** (Apple-issued) |
+| Identity | self-signed `murmur dev` | **Developer ID Application** (Apple-issued) |
 | Notarized | no | **yes** |
 | Runs on other Macs | no (Gatekeeper blocks) | yes |
 | Cost | free | Apple Developer Program ($99/yr) |
@@ -64,7 +64,7 @@ trusts it. Pick **one** of these:
 **(b) Apple ID + app-specific password — simplest to set up:**
 
 - <https://account.apple.com> → Sign-In & Security → **App-Specific Passwords** →
-  generate one for "Open Wispr notarization".
+  generate one for "Murmur notarization".
 - You get: your Apple ID email, that password, and your Team ID.
 
 ---
@@ -94,7 +94,7 @@ Repo → Settings → Secrets and variables → Actions:
 
 | Secret | When | Purpose |
 |---|---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | **now** | Updater (minisign) signing — the contents of `~/.openwispr/updater.key`. Without it, auto-update won't work. Our key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can be left unset. |
+| `TAURI_SIGNING_PRIVATE_KEY` | **now** | Updater (minisign) signing — the contents of `~/.murmur/updater.key`. Without it, auto-update won't work. Our key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can be left unset. |
 | `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY` | later | Developer ID signing (base64 of the `.p12`, its password, and the identity string). |
 | `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` | later | Notarization (or use the App Store Connect API-key trio). |
 
@@ -145,7 +145,7 @@ is legacy).
   request before merging** for a PR-based flow.)
 - **CLI:**
   ```sh
-  gh api -X POST repos/letsgetrusty/OpenWispr/rulesets \
+  gh api -X POST repos/letsgetrusty/murmur/rulesets \
     --input - <<'JSON'
   {
     "name": "main",
@@ -208,7 +208,7 @@ The script validates your env, then runs `tauri build`, which:
 3. signs it with your Developer ID under the **hardened runtime** +
    `src-tauri/entitlements.plist`,
 4. notarizes with Apple and **staples** the ticket,
-5. packages `OpenWispr_<version>_aarch64.dmg`.
+5. packages `Murmur_<version>_aarch64.dmg`.
 
 Output lands in `src-tauri/target/release/bundle/dmg/`. The script finishes by
 running `spctl` and `stapler validate` on the result.
@@ -238,7 +238,7 @@ Macs** — it only proves the compile + packaging path.
 ## Verifying the result
 
 ```sh
-APP=src-tauri/target/release/bundle/macos/OpenWispr.app
+APP=src-tauri/target/release/bundle/macos/Murmur.app
 
 # Gatekeeper verdict — want "accepted" and "source=Notarized Developer ID"
 spctl -a -vvv --type execute "$APP"
@@ -258,7 +258,7 @@ Gatekeeper path.
 
 ## Auto-updates
 
-Open Wispr ships with `tauri-plugin-updater`. On launch (and from the tray's
+Murmur ships with `tauri-plugin-updater`. On launch (and from the tray's
 **Check for Updates…**) it fetches a manifest, and if a newer, validly-signed
 release exists, the Settings window shows an **Install & Restart** banner.
 
@@ -271,31 +271,31 @@ from your Developer ID. The app only installs an update whose signature matches
 the **public key baked into `tauri.conf.json` → `plugins.updater.pubkey`**. This
 proves the update came from you *before* macOS ever evaluates the new bundle.
 
-A keypair already exists at `~/.openwispr/updater.key` (public half in the
+A keypair already exists at `~/.murmur/updater.key` (public half in the
 config). It has no password. To rotate it (e.g. to set a password you alone
 control), regenerate and update the config:
 
 ```sh
-npx tauri signer generate -w ~/.openwispr/updater.key -f
+npx tauri signer generate -w ~/.murmur/updater.key -f
 # copy the printed public key into tauri.conf.json → plugins.updater.pubkey
 ```
 
 **Guard the private key like the Apple cert** — losing it means you can't ship
 updates users will accept (they'd have to re-download manually). `release.sh`
-reads it from `~/.openwispr/updater.key` (override with `TAURI_SIGNING_PRIVATE_KEY`
+reads it from `~/.murmur/updater.key` (override with `TAURI_SIGNING_PRIVATE_KEY`
 / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). It's `.gitignore`d — never commit it.
 
 ### The manifest + hosting
 
 The updater endpoint is **GitHub Releases**:
 `tauri.conf.json` → `plugins.updater.endpoints` →
-`https://github.com/letsgetrusty/OpenWispr/releases/latest/download/latest.json`.
+`https://github.com/letsgetrusty/murmur/releases/latest/download/latest.json`.
 
 - **Via CI (normal path):** tauri-action generates `latest.json` + the signed
   `.app.tar.gz` and attaches them to the release automatically. Nothing to do.
 - **Via `release.sh` (manual):** it also writes `…/bundle/latest.json` pointing
   at the `vN.N.N` release assets — create that GitHub release and upload both
-  `OpenWispr.app.tar.gz` and `latest.json` to it.
+  `Murmur.app.tar.gz` and `latest.json` to it.
 
 The app fetches the manifest, compares its version, and installs if newer. As
 noted above, release assets are only publicly fetchable once the repo is public.
@@ -306,7 +306,7 @@ noted above, release assets are only publicly fetchable once the repo is public.
 
 ## Notes / gotchas
 
-- **Why not sandboxed?** Open Wispr needs the Accessibility API (paste + the Fn
+- **Why not sandboxed?** Murmur needs the Accessibility API (paste + the Fn
   tap) and full clipboard access, which the App Sandbox forbids. So it ships with
   the hardened runtime but no sandbox — that's fine for Developer ID distribution
   (only the App Store requires the sandbox).
@@ -322,13 +322,13 @@ noted above, release assets are only publicly fetchable once the repo is public.
   grants survive updates (same principle as the dev cert — see the CLAUDE.md
   hard rules).
 - **Don't run a release build next to a running dev app.** A release build
-  registers extra `ai.openwispr.app` bundles with LaunchServices — the temporary
+  registers extra `dev.lgr.murmur` bundles with LaunchServices — the temporary
   `create-dmg` volume (`/Volumes/dmg.*`) *and* the release `.app` itself. With the
   dev build (or an installed copy) also around, macOS sees duplicate bundle ids
   and aborts the app (`SIGABRT`) — it looks like a random crash loop.
   `release.sh` now unregisters + ejects both after building to prevent this, but
   if you ever hit it: quit all instances, `lsregister -u` the extra paths, eject
-  `/Volumes/dmg.*`, remove extra `OpenWispr.app` copies, and rebuild so exactly
+  `/Volumes/dmg.*`, remove extra `Murmur.app` copies, and rebuild so exactly
   one bundle is registered. Only affects dev machines — end users have a single
   installed copy that updates in place. (Verified via the local updater E2E test:
   a v0.1.0 app pre-downloads + verifies + installs v0.1.1 and relaunches; the
