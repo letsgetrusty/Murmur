@@ -7,6 +7,12 @@ const root = fileURLToPath(new URL("frontend", import.meta.url));
 export default defineConfig({
   root,
   clearScreen: false,
+  test: {
+    // Frontend unit tests (pure helpers + shared constants). jsdom gives a DOM
+    // for future component-level tests; the current suite is dependency-free.
+    environment: "jsdom",
+    include: ["**/*.test.js"],
+  },
   server: {
     port: 1420,
     strictPort: true,

@@ -2,6 +2,7 @@
 // (the overlay is event-driven; this window is request/response).
 
 import { EVENTS, CMD, TABS } from "./constants.js";
+import { prettyShortcut, codeToKey } from "./shortcuts.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -130,60 +131,6 @@ const HOTKEY_FIELD = {
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
 };
-
-function prettyShortcut(s) {
-  return (s || "")
-    .split("+")
-    .map((t) => {
-      switch (t) {
-        case "CmdOrCtrl":
-        case "Cmd":
-        case "Command":
-        case "Super":
-          return "⌘";
-        case "Ctrl":
-        case "Control":
-          return "⌃";
-        case "Alt":
-        case "Option":
-          return "⌥";
-        case "Shift":
-          return "⇧";
-        default:
-          return t;
-      }
-    })
-    .join("");
-}
-
-function codeToKey(code) {
-  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
-  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
-  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
-  const map = {
-    Space: "Space",
-    Enter: "Enter",
-    Tab: "Tab",
-    Backspace: "Backspace",
-    Delete: "Delete",
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
-    Minus: "-",
-    Equal: "=",
-    BracketLeft: "[",
-    BracketRight: "]",
-    Backslash: "\\",
-    Semicolon: ";",
-    Quote: "'",
-    Comma: ",",
-    Period: ".",
-    Slash: "/",
-    Backquote: "`",
-  };
-  return map[code] || null; // pure modifier codes fall through to null
-}
 
 // The recorder relies on the control itself for confirmation — the button
 // label (or dropdown value) updates to the new binding — so success and cancel

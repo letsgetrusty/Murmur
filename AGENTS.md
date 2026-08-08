@@ -108,7 +108,10 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   **Accessibility** (it also authorizes the Fn CGEventTap; no Input Monitoring).
   See `docs/macos-signing-and-permissions.md`. Logs: `~/Library/Logs/openwispr.log`.
 - Rust check (from `src-tauri/`): `cargo check`
-- Rust tests: `cargo test`
+- Rust tests: `cargo test` (includes an IPC contract test that asserts the JS
+  `constants.js` names match the Rust events/commands — keep them in sync).
+- Frontend tests (from repo root): `npm test` (Vitest — pure helpers + shared
+  constants; `npm run test:watch` to iterate).
 - Release (signed + notarized DMG): `./scripts/release.sh` — needs a Developer
   ID cert + notarization credentials in env; see `docs/releasing.md`. Bump the
   version in `package.json`, `tauri.conf.json`, and `Cargo.toml` first.
