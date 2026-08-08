@@ -234,7 +234,7 @@ pub fn kokoro_assets_present() -> bool {
 
 /// Download the Kokoro model + curated voice packs if missing (onnx-community
 /// Kokoro-82M v1.0 on Hugging Face). Safe to call repeatedly.
-pub async fn ensure_kokoro_assets() -> Result<()> {
+pub async fn ensure_kokoro_assets(on_progress: impl Fn(u64, u64)) -> Result<()> {
     const BASE: &str = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main";
     let model = kokoro_model_path()?;
     if !model.exists() {
@@ -242,7 +242,9 @@ pub async fn ensure_kokoro_assets() -> Result<()> {
             std::fs::create_dir_all(p).ok();
         }
         log::info!("tts/kokoro: downloading model (~310 MB, one-time)…");
-        download_to(&format!("{BASE}/onnx/model.onnx"), &model).await?;
+        // The model.onnx is ~310 MB — the whole download; report its progress.
+        // The voice packs below are a few MB total, so they need no bar.
+        download_to(&format!("{BASE}/onnx/model.onnx"), &model, &on_progress).await?;
     }
     let dir = kokoro_voices_dir()?;
     std::fs::create_dir_all(&dir).ok();
@@ -250,29 +252,46 @@ pub async fn ensure_kokoro_assets() -> Result<()> {
         let dst = dir.join(format!("{id}.bin"));
         if !dst.exists() {
             log::info!("tts/kokoro: downloading voice '{id}'…");
-            download_to(&format!("{BASE}/voices/{id}.bin"), &dst).await?;
+            download_to(&format!("{BASE}/voices/{id}.bin"), &dst, &|_, _| {}).await?;
         }
     }
     log::info!("tts/kokoro: assets ready");
+    // Ensure listeners see a completed bar even if the model was already present.
+    let done = std::fs::metadata(&model).map(|m| m.len()).unwrap_or(0);
+    on_progress(done, done);
     Ok(())
 }
 
 /// Stream a URL to `dst` via a `.part` temp + rename, so a file at `dst` is
 /// always complete.
-async fn download_to(url: &str, dst: &std::path::Path) -> Result<()> {
+async fn download_to(
+    url: &str,
+    dst: &std::path::Path,
+    on_progress: impl Fn(u64, u64),
+) -> Result<()> {
     use std::io::Write;
     let mut resp = reqwest::Client::new().get(url).send().await?;
     if !resp.status().is_success() {
         return Err(anyhow!("download {url} failed: HTTP {}", resp.status()));
     }
+    let total = resp.content_length().unwrap_or(0);
     let part = dst.with_extension("part");
     let mut file = std::fs::File::create(&part)?;
+    let mut written: u64 = 0;
+    let mut last_emit: u64 = 0;
     while let Some(chunk) = resp.chunk().await? {
         file.write_all(&chunk)?;
+        written += chunk.len() as u64;
+        // Throttle to ~1 MB steps so we don't flood the event bus.
+        if written - last_emit >= 1_000_000 {
+            on_progress(written, total);
+            last_emit = written;
+        }
     }
     file.flush().ok();
     drop(file);
     std::fs::rename(&part, dst)?;
+    on_progress(written, total.max(written));
     Ok(())
 }
 

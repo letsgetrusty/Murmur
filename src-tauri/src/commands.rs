@@ -145,9 +145,9 @@ pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(
 }
 
 /// Onboarding opt-out for the neural read-aloud voice. Persists the choice of
-/// TTS backend (Kokoro when enabled, native macOS otherwise); the ~310 MB Kokoro
-/// download happens via the startup prefetch after onboarding relaunches (gated
-/// on `onboarding_done`), so opting out never fetches it.
+/// TTS backend (Kokoro when enabled, native macOS otherwise). Persists the
+/// choice only; the actual ~310 MB fetch is kicked off by `download_neural_voice`
+/// when kept, so opting out never downloads it.
 #[tauri::command]
 pub fn set_neural_voice(state: State<AppState>, enabled: bool) -> Result<(), String> {
     let provider = if enabled { "kokoro" } else { "native" };
@@ -159,6 +159,24 @@ pub fn set_neural_voice(state: State<AppState>, enabled: bool) -> Result<(), Str
     crate::config::save(&snapshot).map_err(|e| e.to_string())?;
     log::info!("config: neural voice {} → tts_provider={provider}", enabled);
     Ok(())
+}
+
+/// Kick off the Kokoro model + voice download from onboarding so its progress bar
+/// fills alongside Whisper/Qwen. Idempotent — no-ops (and reports a full bar) if
+/// the assets are already on disk. Progress is emitted on the `model-download`
+/// event with id `kokoro`.
+#[tauri::command]
+pub fn download_neural_voice(app: AppHandle) {
+    let dl_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let emit = |downloaded, total| {
+            crate::emit_download_progress(&dl_app, crate::ipc::download::KOKORO, downloaded, total)
+        };
+        if let Err(e) = crate::tts::ensure_kokoro_assets(emit).await {
+            log::warn!("tts/kokoro: onboarding download failed: {e}");
+            crate::emit_download_error(&dl_app, crate::ipc::download::KOKORO);
+        }
+    });
 }
 
 // --- Onboarding (first-run setup) --------------------------------------------
@@ -174,6 +192,8 @@ pub struct OnboardingStatus {
     /// Whether the default Whisper + refine models are already on disk.
     whisper_ready: bool,
     llm_ready: bool,
+    /// Whether the Kokoro neural-voice assets are already on disk.
+    kokoro_ready: bool,
 }
 
 #[tauri::command]
@@ -191,6 +211,7 @@ pub fn onboarding_status(state: State<AppState>) -> OnboardingStatus {
         microphone: crate::permissions::microphone_status(),
         whisper_ready,
         llm_ready: crate::local_llm::assets_present(&llm_model),
+        kokoro_ready: crate::tts::kokoro_assets_present(),
     }
 }
 

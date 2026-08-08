@@ -169,6 +169,7 @@ pub fn run() {
             commands::set_hotkey,
             commands::set_refine_modifier,
             commands::set_neural_voice,
+            commands::download_neural_voice,
             commands::get_usage,
             commands::list_history,
             commands::delete_history,
@@ -263,9 +264,19 @@ pub fn run() {
                     // relaunches, so opting out never triggers the download and
                     // the two paths can't race on the same files.
                     if cfg.onboarding_done {
-                        tauri::async_runtime::spawn(async {
-                            if let Err(e) = tts::ensure_kokoro_assets().await {
+                        let dl_app = app.handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let emit = |downloaded, total| {
+                                emit_download_progress(
+                                    &dl_app,
+                                    ipc::download::KOKORO,
+                                    downloaded,
+                                    total,
+                                )
+                            };
+                            if let Err(e) = tts::ensure_kokoro_assets(emit).await {
                                 log::warn!("tts/kokoro: asset prefetch failed: {e}");
+                                emit_download_error(&dl_app, ipc::download::KOKORO);
                             }
                         });
                     }
@@ -521,7 +532,7 @@ struct DownloadProgress {
     failed: bool,
 }
 
-fn emit_download_progress<R: Runtime>(
+pub(crate) fn emit_download_progress<R: Runtime>(
     app: &AppHandle<R>,
     id: &'static str,
     downloaded: u64,
@@ -538,7 +549,7 @@ fn emit_download_progress<R: Runtime>(
     );
 }
 
-fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
+pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {

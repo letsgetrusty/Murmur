@@ -26,6 +26,7 @@ export const CMD = {
   SET_HOTKEY: "set_hotkey",
   SET_REFINE_MODIFIER: "set_refine_modifier",
   SET_NEURAL_VOICE: "set_neural_voice",
+  DOWNLOAD_NEURAL_VOICE: "download_neural_voice",
   GET_USAGE: "get_usage",
   HISTORY_STATS: "history_stats",
   LIST_HISTORY: "list_history",
@@ -55,4 +56,5 @@ export const TABS = {
 export const DOWNLOAD = {
   WHISPER: "whisper",
   LLM: "llm",
+  KOKORO: "kokoro",
 };

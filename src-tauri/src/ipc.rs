@@ -25,6 +25,7 @@ pub mod event {
 pub mod download {
     pub const WHISPER: &str = "whisper";
     pub const LLM: &str = "llm";
+    pub const KOKORO: &str = "kokoro";
 }
 
 // Contract tests: the whole point of this module is that the Rust and JS sides
@@ -111,7 +112,11 @@ mod tests {
 
     #[test]
     fn js_download_ids_match_rust_download_consts() {
-        let rust = set(&[super::download::WHISPER, super::download::LLM]);
+        let rust = set(&[
+            super::download::WHISPER,
+            super::download::LLM,
+            super::download::KOKORO,
+        ]);
         assert_eq!(js_object("DOWNLOAD"), rust);
     }
 }

@@ -37,12 +37,18 @@ function renderDots() {
   });
 }
 
+// Step 2 is "Downloading models".
+const DOWNLOAD_STEP = 2;
+
 function goTo(n) {
   step = Math.max(0, Math.min(STEPS - 1, n));
   $$(".ob-step").forEach((s) => {
     s.hidden = Number(s.dataset.step) !== step;
   });
   renderDots();
+  // Start the Kokoro download when the user reaches the downloads step (if the
+  // neural voice is kept), so its bar fills alongside Whisper/Qwen.
+  if (step === DOWNLOAD_STEP) maybeStartNeural();
 }
 
 // --- Permissions -------------------------------------------------------------
@@ -95,6 +101,7 @@ async function refreshStatus() {
     // Seed the download bars for anything already on disk.
     if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
     if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
+    if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
   } catch (e) {
     /* transient; polled again shortly */
   }
@@ -102,8 +109,28 @@ async function refreshStatus() {
 
 // --- Model downloads ---------------------------------------------------------
 
-const DL_EL = { [DOWNLOAD.WHISPER]: "dl-whisper", [DOWNLOAD.LLM]: "dl-llm" };
-const dlDone = { [DOWNLOAD.WHISPER]: false, [DOWNLOAD.LLM]: false };
+const DL_EL = {
+  [DOWNLOAD.WHISPER]: "dl-whisper",
+  [DOWNLOAD.LLM]: "dl-llm",
+  [DOWNLOAD.KOKORO]: "dl-kokoro",
+};
+const dlDone = {
+  [DOWNLOAD.WHISPER]: false,
+  [DOWNLOAD.LLM]: false,
+  [DOWNLOAD.KOKORO]: false,
+};
+
+// The Kokoro download is opt-out: kicked off (once) only when the neural-voice
+// box is kept, so opting out never fetches the ~310 MB model.
+let neuralStarted = false;
+function maybeStartNeural() {
+  const on = $("#ob-neural")?.checked;
+  if (!on || neuralStarted || !invoke) return;
+  neuralStarted = true;
+  invoke(CMD.DOWNLOAD_NEURAL_VOICE).catch(() => {
+    neuralStarted = false; // let a later attempt retry
+  });
+}
 
 function markDownloadDone(id) {
   dlDone[id] = true;
@@ -206,6 +233,16 @@ function init() {
   });
 
   $("#ob-finish").addEventListener("click", finish);
+
+  // Neural-voice opt-out: persist the choice, hide its download row when off,
+  // and start the download when turned (back) on.
+  const neural = $("#ob-neural");
+  neural?.addEventListener("change", () => {
+    invoke?.(CMD.SET_NEURAL_VOICE, { enabled: neural.checked });
+    const row = $("#dl-kokoro");
+    if (row) row.hidden = !neural.checked;
+    if (neural.checked) maybeStartNeural();
+  });
 
   // Model-download progress from the backend's prefetch.
   listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));
