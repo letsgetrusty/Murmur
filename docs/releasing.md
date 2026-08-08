@@ -1,5 +1,9 @@
 # Releasing Open Wispr (signed + notarized DMG)
 
+> For the end-to-end path to a public release (repo visibility, signing, first
+> tag, landing page), see [`launch-checklist.md`](launch-checklist.md). This doc
+> is the deep-dive on the signing + release mechanics it references.
+
 How to turn the code into a `.dmg` a stranger can download and run without
 Gatekeeper blocking it. This is the **distribution** build. It's separate from
 local development — for that, keep using `./scripts/dev.sh` with the self-signed
