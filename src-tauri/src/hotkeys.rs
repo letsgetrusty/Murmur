@@ -225,3 +225,33 @@ pub fn unregister_tts_escape<R: Runtime>(app: &AppHandle<R>) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::HotkeyAction;
+
+    // These action strings are a contract: they're the `set_hotkey` command's
+    // `action` arg and the frontend's `data-action` / HOTKEY_FIELD keys.
+    #[test]
+    fn parse_maps_known_actions() {
+        assert!(matches!(
+            HotkeyAction::parse("dictate"),
+            Some(HotkeyAction::Dictate)
+        ));
+        assert!(matches!(
+            HotkeyAction::parse("tts_toggle"),
+            Some(HotkeyAction::TtsToggle)
+        ));
+        assert!(matches!(
+            HotkeyAction::parse("tts_speed"),
+            Some(HotkeyAction::TtsSpeed)
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_unknown_or_miscased() {
+        assert!(HotkeyAction::parse("").is_none());
+        assert!(HotkeyAction::parse("command").is_none());
+        assert!(HotkeyAction::parse("Dictate").is_none());
+    }
+}

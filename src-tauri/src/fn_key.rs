@@ -43,6 +43,28 @@ const KCG_FLAG_CONTROL: u64 = 0x0004_0000;
 const KCG_FLAG_ALT: u64 = 0x0008_0000;
 const KCG_FLAG_COMMAND: u64 = 0x0010_0000;
 
+/// Map a configured refine-modifier name to its CGEvent flag mask. The accepted
+/// names mirror the settings-window `<select>` values and
+/// `config::DEFAULT_REFINE_MODIFIER`; anything unknown falls back to Control.
+fn modifier_mask(modifier: &str) -> u64 {
+    match modifier {
+        "Shift" => KCG_FLAG_SHIFT,
+        "Alt" | "Option" => KCG_FLAG_ALT,
+        "Cmd" | "Command" | "Super" => KCG_FLAG_COMMAND,
+        _ => KCG_FLAG_CONTROL,
+    }
+}
+
+/// The Fn-hold dictation mode: refined if the configured modifier was held at
+/// any point during the hold (the latch), else plain.
+fn dictation_mode(refine_held: bool) -> crate::DictationMode {
+    if refine_held {
+        crate::DictationMode::Refine
+    } else {
+        crate::DictationMode::Plain
+    }
+}
+
 /// The flag mask for the configured refine modifier (defaults to Control).
 /// Read from the shared config so a change in the settings window applies live.
 fn refine_mask<R: Runtime>(app: &AppHandle<R>) -> u64 {
@@ -51,12 +73,7 @@ fn refine_mask<R: Runtime>(app: &AppHandle<R>) -> u64 {
         .try_state::<crate::AppState>()
         .and_then(|s| s.config.lock().ok().map(|c| c.refine_modifier.clone()))
         .unwrap_or_else(|| "Ctrl".to_string());
-    match modifier.as_str() {
-        "Shift" => KCG_FLAG_SHIFT,
-        "Alt" | "Option" => KCG_FLAG_ALT,
-        "Cmd" | "Command" | "Super" => KCG_FLAG_COMMAND,
-        _ => KCG_FLAG_CONTROL,
-    }
+    modifier_mask(&modifier)
 }
 
 type CGEventRef = *mut c_void;
@@ -153,11 +170,7 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
             hotkeys::on_press(&state.app);
         } else {
             // Fn released: refine if the modifier was held at any point.
-            let mode = if state.refine_latch.load(Ordering::Acquire) {
-                crate::DictationMode::Refine
-            } else {
-                crate::DictationMode::Plain
-            };
+            let mode = dictation_mode(state.refine_latch.load(Ordering::Acquire));
             hotkeys::on_release(&state.app, mode);
         }
     } else if fn_down_now && (flags & refine_mask(&state.app)) != 0 {
@@ -237,4 +250,43 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         // app. macOS releases them on process exit.
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::DictationMode;
+
+    #[test]
+    fn modifier_mask_maps_each_configured_name() {
+        assert_eq!(modifier_mask("Shift"), KCG_FLAG_SHIFT);
+        assert_eq!(modifier_mask("Alt"), KCG_FLAG_ALT);
+        assert_eq!(modifier_mask("Option"), KCG_FLAG_ALT);
+        assert_eq!(modifier_mask("Cmd"), KCG_FLAG_COMMAND);
+        assert_eq!(modifier_mask("Command"), KCG_FLAG_COMMAND);
+        assert_eq!(modifier_mask("Super"), KCG_FLAG_COMMAND);
+        assert_eq!(modifier_mask("Ctrl"), KCG_FLAG_CONTROL);
+    }
+
+    #[test]
+    fn modifier_mask_unknown_falls_back_to_control() {
+        assert_eq!(modifier_mask(""), KCG_FLAG_CONTROL);
+        assert_eq!(modifier_mask("Meta"), KCG_FLAG_CONTROL);
+    }
+
+    // The config default must resolve to a real mask (Control), or Fn+default
+    // would silently never refine.
+    #[test]
+    fn default_refine_modifier_maps_to_control() {
+        assert_eq!(
+            modifier_mask(crate::config::DEFAULT_REFINE_MODIFIER),
+            KCG_FLAG_CONTROL
+        );
+    }
+
+    #[test]
+    fn dictation_mode_reflects_refine_latch() {
+        assert_eq!(dictation_mode(true), DictationMode::Refine);
+        assert_eq!(dictation_mode(false), DictationMode::Plain);
+    }
 }
