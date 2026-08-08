@@ -39,6 +39,12 @@ jobs:
           # llama.cpp / onnxruntime C++ builds are reused across runs.
           workspaces: src-tauri
 
+      # esbuild 0.28's platform-optional packages trip a bug in npm 10 (bundled
+      # with Node 22): `npm ci` errors EBADPLATFORM on other-OS optionals it
+      # should skip. npm 11 handles them correctly.
+      - name: Use npm 11
+        run: npm install -g npm@11
+
       - name: Install frontend deps
         run: npm ci
 
@@ -73,6 +79,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # See the check job: npm 11 is needed for esbuild 0.28's optional deps.
+      - name: Use npm 11
+        run: npm install -g npm@11
 
       - name: Install frontend deps
         run: npm ci
