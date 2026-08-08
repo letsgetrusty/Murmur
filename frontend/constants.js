@@ -22,6 +22,7 @@ export const CMD = {
   GET_OPTIONS: "get_options",
   SET_SPEED: "set_speed",
   SET_VOICE: "set_voice",
+  PREVIEW_VOICE: "preview_voice",
   SET_MIC: "set_mic",
   SET_HOTKEY: "set_hotkey",
   SET_REFINE_MODIFIER: "set_refine_modifier",

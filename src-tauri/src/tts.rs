@@ -31,6 +31,13 @@ pub trait Speaker: Send + Sync {
     fn stop(&self);
     fn is_speaking(&self) -> bool;
 
+    /// Speak a short preview sample (used when picking a voice in Settings).
+    /// Backends may render + cache it for instant replay; the default just
+    /// speaks it live, which is fine for the instant native voice.
+    fn preview(&self, text: &str) {
+        self.speak(text);
+    }
+
     // Speed (1.0 = normal, 2.0 = double). Backends without a real speed
     // control no-op these.
     fn cycle_speed(&self) -> f32 {
@@ -193,7 +200,7 @@ pub const KOKORO_VOICES: &[(&str, &str)] = &[
     ("bm_george", "George (UK male)"),
 ];
 
-const KOKORO_DEFAULT_VOICE: &str = "af_heart";
+const KOKORO_DEFAULT_VOICE: &str = "am_puck";
 const KOKORO_SAMPLE_RATE: u32 = 24_000;
 
 /// Voice choices to show in the tray + settings pickers for a given TTS
@@ -367,6 +374,9 @@ pub struct KokoroSpeaker {
     /// Bumped per `speak`; each read tags its work with its own value so a
     /// finishing read only cleans up its own player, never a newer read's.
     generation: Arc<AtomicU64>,
+    /// Player for the current voice preview, held so a new preview (or stop())
+    /// replaces + releases the previous one. Separate from `player` (read-aloud).
+    preview_player: Arc<Mutex<Option<KokoroQueue>>>,
 }
 
 impl KokoroSpeaker {
@@ -381,7 +391,43 @@ impl KokoroSpeaker {
             active: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicU64::new(0)),
             generation: Arc::new(AtomicU64::new(0)),
+            preview_player: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Render + cache the preview clip for every shipped voice in the background,
+    /// so switching voices in Settings is instant. Skips work when everything is
+    /// already cached (and then never loads the model).
+    pub fn pregenerate_previews(&self) {
+        let all_cached = KOKORO_VOICES.iter().all(|(id, friendly)| {
+            preview_cache_path(id, &preview_text(friendly))
+                .map(|p| p.exists())
+                .unwrap_or(false)
+        });
+        if all_cached {
+            return;
+        }
+        let model_path = self.model_path.clone();
+        let voices_path = self.voices_path.clone();
+        let tts_cell = self.tts.clone();
+        tauri::async_runtime::spawn(async move {
+            let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
+                return;
+            };
+            for (id, friendly) in KOKORO_VOICES {
+                let text = preview_text(friendly);
+                let Some(path) = preview_cache_path(id, &text) else {
+                    continue;
+                };
+                if path.exists() {
+                    continue;
+                }
+                if let Some(wav) = synth_chunk_wav(&tts, &text, id).await {
+                    write_cache_file(&path, &wav);
+                }
+            }
+            log::info!("tts/kokoro: voice previews cached");
+        });
     }
 }
 
@@ -460,7 +506,129 @@ async fn synth_chunk_wav(tts: &KokoroTts, text: &str, voice: &str) -> Option<Vec
     }
 }
 
+// ── Voice-preview cache ─────────────────────────────────────────────────────
+// Kokoro synth is ~1s, so picking a voice in Settings felt laggy. We render each
+// voice's preview clip once, cache the WAV next to the model, and play the file
+// directly (instant). All previews are also pre-generated in the background at
+// startup, so even the first switch is instant.
+
+/// The spoken preview line for a voice's friendly name ("Puck (US male)" →
+/// "Hey, my name is Puck!"). Kept in one place so the on-demand preview and the
+/// pre-generated cache produce the same text (hence the same cache file).
+pub fn preview_text(friendly_name: &str) -> String {
+    let name = friendly_name
+        .split('(')
+        .next()
+        .unwrap_or(friendly_name)
+        .trim();
+    if name.is_empty() {
+        "Hey! This is how I sound.".to_string()
+    } else {
+        format!("Hey, my name is {name}!")
+    }
+}
+
+/// Cache path for a voice's preview WAV, keyed by voice id + a hash of the text
+/// (so changing the phrase auto-invalidates old clips). `None` if the models dir
+/// can't be resolved.
+fn preview_cache_path(voice: &str, text: &str) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let dir = kokoro_model_path().ok()?.parent()?.join("previews");
+    Some(dir.join(format!("{voice}-{:016x}.wav", h.finish())))
+}
+
+/// Write `bytes` to `path` atomically (`.part` + rename). Returns success.
+fn write_cache_file(path: &std::path::Path, bytes: &[u8]) -> bool {
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).ok();
+    }
+    let part = path.with_extension("part");
+    std::fs::write(&part, bytes).is_ok() && std::fs::rename(&part, path).is_ok()
+}
+
+/// Play a cached preview WAV at `speed` through an AVQueuePlayer — same
+/// pitch-preserving spectral speed as read-aloud, so the preview matches the
+/// current speed setting. Held in `slot` so a new preview (or stop()) replaces +
+/// releases the previous one. The cached file is never deleted (`temps` stays
+/// empty), unlike read-aloud's transient chunk files.
+fn play_preview_file(slot: &Arc<Mutex<Option<KokoroQueue>>>, path: &std::path::Path, speed: f32) {
+    let Some(qp) = new_queue_player() else {
+        return;
+    };
+    let queue = KokoroQueue {
+        player: qp,
+        temps: Vec::new(),
+    };
+    // SAFETY: `qp` is a live AVQueuePlayer from new_queue_player(); `enqueue_wav`
+    // and `playImmediatelyAtRate:` are valid messages with the argument types
+    // used, and playback methods are thread-safe off the main thread (module
+    // comment). On enqueue failure, dropping `queue` pauses + releases the player.
+    unsafe {
+        if !enqueue_wav(qp.as_ptr(), path) {
+            return;
+        }
+        // Plays now at `speed`; the item's spectral pitch algorithm (set in
+        // enqueue_wav) preserves pitch.
+        let _: () = msg_send![qp.as_ptr(), playImmediatelyAtRate: speed];
+    }
+    // Replace any previous preview (its KokoroQueue drops → pause + release).
+    *slot.lock().expect("preview mutex") = Some(queue);
+}
+
+/// Load (and cache) the Kokoro model, shared by `speak`, `preview`, and
+/// pre-generation. `None` if the model can't be loaded.
+async fn load_kokoro_tts(
+    cell: &Arc<AsyncMutex<Option<Arc<KokoroTts>>>>,
+    model_path: &std::path::Path,
+    voices_path: &std::path::Path,
+) -> Option<Arc<KokoroTts>> {
+    let mut guard = cell.lock().await;
+    if guard.is_none() {
+        match KokoroTts::new(model_path, voices_path).await {
+            Ok(t) => *guard = Some(Arc::new(t)),
+            Err(e) => {
+                log::warn!("tts/kokoro: load model failed: {e}");
+                return None;
+            }
+        }
+    }
+    guard.clone()
+}
+
 impl Speaker for KokoroSpeaker {
+    fn preview(&self, text: &str) {
+        let voice = self.voice.lock().expect("voice mutex").clone();
+        let speed = *self.speed.lock().expect("speed mutex");
+        let Some(path) = preview_cache_path(&voice, text) else {
+            self.speak(text);
+            return;
+        };
+        // Don't overlap an in-progress read-aloud (also clears a prior preview).
+        self.stop();
+        if path.exists() {
+            play_preview_file(&self.preview_player, &path, speed); // cached → instant
+            return;
+        }
+        // Cache miss: synth once (~1s), cache, then play — next time is instant.
+        let text = text.to_string();
+        let model_path = self.model_path.clone();
+        let voices_path = self.voices_path.clone();
+        let tts_cell = self.tts.clone();
+        let slot = self.preview_player.clone();
+        tauri::async_runtime::spawn(async move {
+            let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
+                return;
+            };
+            if let Some(wav) = synth_chunk_wav(&tts, &text, &voice).await {
+                if write_cache_file(&path, &wav) {
+                    play_preview_file(&slot, &path, speed);
+                }
+            }
+        });
+    }
+
     fn speak(&self, text: &str) {
         let text = text.to_string();
         let voice = Arc::new(self.voice.lock().expect("voice mutex").clone());
@@ -699,6 +867,7 @@ impl Speaker for KokoroSpeaker {
     fn stop(&self) {
         self.active.store(false, Ordering::Release);
         *self.player.lock().expect("player mutex") = None;
+        *self.preview_player.lock().expect("preview mutex") = None;
     }
 
     fn is_speaking(&self) -> bool {

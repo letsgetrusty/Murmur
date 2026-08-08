@@ -165,6 +165,7 @@ pub fn run() {
             commands::get_options,
             commands::set_speed,
             commands::set_voice,
+            commands::preview_voice,
             commands::set_mic,
             commands::set_hotkey,
             commands::set_refine_modifier,
@@ -288,6 +289,9 @@ pub fn run() {
                     // Honor the saved voice if it's a valid Kokoro voice; a stale
                     // id from another provider is ignored (keeps the default).
                     s.set_voice(&cfg.tts_voice_id);
+                    // Render + cache each voice's preview in the background so
+                    // switching voices in Settings is instant (no-op if cached).
+                    s.pregenerate_previews();
                     Arc::new(s)
                 }
                 _ => {

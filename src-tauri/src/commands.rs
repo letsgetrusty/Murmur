@@ -79,6 +79,17 @@ pub fn set_voice(app: AppHandle, voice_id: String) {
     crate::apply_voice(&app, &voice_id);
 }
 
+/// Play a short sample in the current voice, so picking one in Settings gives an
+/// instant preview. Call after `set_voice` so it uses the just-selected voice.
+/// `name` is the voice's friendly name (e.g. "Puck"). Kokoro caches the rendered
+/// clip so replays are instant (`Speaker::preview`); `preview_text` keeps the
+/// phrasing identical to the pre-generated cache.
+#[tauri::command]
+pub fn preview_voice(state: State<AppState>, name: String) {
+    let sample = crate::tts::preview_text(&name);
+    state.speaker.preview(&sample);
+}
+
 #[tauri::command]
 pub fn set_mic(app: AppHandle, name: Option<String>) {
     crate::apply_mic(&app, name);

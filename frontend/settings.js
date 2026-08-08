@@ -137,9 +137,14 @@ async function loadOptions() {
   speed.addEventListener("change", (e) =>
     invoke(CMD.SET_SPEED, { speed: parseFloat(e.target.value) })
   );
-  voice.addEventListener("change", (e) =>
-    invoke(CMD.SET_VOICE, { voiceId: e.target.value })
-  );
+  voice.addEventListener("change", async (e) => {
+    await invoke(CMD.SET_VOICE, { voiceId: e.target.value });
+    // Preview the new voice: "Hey, my name is <Name>!". The option label is the
+    // friendly name (e.g. "Heart (US female)"); take the part before " (".
+    const label = e.target.selectedOptions[0]?.textContent ?? "";
+    const name = label.split("(")[0].trim();
+    invoke(CMD.PREVIEW_VOICE, { name });
+  });
   mic.addEventListener("change", (e) => {
     const v = e.target.value;
     invoke(CMD.SET_MIC, { name: v === "" ? null : v });

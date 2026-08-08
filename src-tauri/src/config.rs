@@ -9,9 +9,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 // Default TTS voice id. The native (AVSpeechSynthesizer) backend ignores this;
-// the Kokoro backend maps it to one of its voices. `af_heart` is Kokoro's
-// default US female voice.
-const DEFAULT_VOICE_ID: &str = "af_heart";
+// the Kokoro backend maps it to one of its voices. `am_puck` is a Kokoro US
+// male voice.
+const DEFAULT_VOICE_ID: &str = "am_puck";
 
 /// System prompt for the refine pass. Deliberately treats the transcript as
 /// text-to-clean, not instructions, so dictated questions/commands aren't
