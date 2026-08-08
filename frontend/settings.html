@@ -24,15 +24,15 @@
           Open Wispr
         </div>
         <nav>
-          <button class="nav-item active" data-tab="settings">Settings</button>
+          <button class="nav-item active" data-tab="history">History</button>
+          <button class="nav-item" data-tab="settings">Settings</button>
           <button class="nav-item" data-tab="insights">Insights</button>
-          <button class="nav-item" data-tab="history">History</button>
         </nav>
       </aside>
 
       <main class="content">
         <!-- Settings -->
-        <section id="tab-settings" class="tab active">
+        <section id="tab-settings" class="tab">
           <header class="tab-head">
             <h1>Settings</h1>
             <div class="actions">
@@ -45,19 +45,6 @@
             <span class="update-icon" aria-hidden="true">↑</span>
             <span class="update-text" id="update-text"></span>
             <button id="update-install" class="primary small">Install &amp; Restart</button>
-          </div>
-
-          <div class="card">
-            <h2>Refinement <span class="chip">Fn + Ctrl</span></h2>
-            <p class="hint">
-              Hold <b>Fn + your refine modifier</b> while dictating and the
-              transcript is cleaned up by the LLM using the prompt below before
-              it's pasted.
-            </p>
-            <label class="field">
-              <span class="field-label">Prompt</span>
-              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
-            </label>
           </div>
 
           <div class="card">
@@ -137,6 +124,15 @@
               modifier). Hold-to-dictate on the <b>Fn</b> key is always on;
               hold Fn + the modifier above to dictate <i>and refine</i>.
             </p>
+
+            <label class="field">
+              <span class="field-label">Refinement prompt</span>
+              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
+            </label>
+            <p class="hint">
+              Applied on refined dictations — the transcript is cleaned up by
+              the LLM using this prompt before it's pasted.
+            </p>
           </div>
 
         </section>
@@ -145,10 +141,6 @@
         <section id="tab-insights" class="tab">
           <header class="tab-head">
             <h1>Insights</h1>
-            <div class="actions">
-              <span id="usage-msg" class="hint"></span>
-              <button id="u-refresh" class="small-btn">Refresh</button>
-            </div>
           </header>
 
           <div class="stat-grid">
@@ -185,7 +177,7 @@
         </section>
 
         <!-- History -->
-        <section id="tab-history" class="tab">
+        <section id="tab-history" class="tab active">
           <header class="tab-head">
             <h1>History</h1>
             <div class="actions">

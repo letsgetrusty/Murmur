@@ -231,8 +231,8 @@ nav {
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  padding: var(--control-pad-y) var(--control-pad-x);
-  font-size: var(--fs-base);
+  padding: var(--input-pad-y) var(--control-pad-x);
+  font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
 }
 .refine-combo .plus {

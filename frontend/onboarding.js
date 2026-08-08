@@ -2,6 +2,8 @@
 // permissions and the one-time model downloads, then relaunches (if needed) so
 // the Fn tap picks up a freshly granted Accessibility permission.
 
+import { EVENTS, CMD, DOWNLOAD } from "./constants.js";
+
 const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
@@ -88,11 +90,11 @@ function renderPermissions(status) {
 async function refreshStatus() {
   if (!invoke) return;
   try {
-    const status = await invoke("onboarding_status");
+    const status = await invoke(CMD.ONBOARDING_STATUS);
     renderPermissions(status);
     // Seed the download bars for anything already on disk.
-    if (status.whisper_ready) markDownloadDone("whisper");
-    if (status.llm_ready) markDownloadDone("llm");
+    if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
+    if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
   } catch (e) {
     /* transient; polled again shortly */
   }
@@ -100,8 +102,8 @@ async function refreshStatus() {
 
 // --- Model downloads ---------------------------------------------------------
 
-const DL_EL = { whisper: "dl-whisper", llm: "dl-llm" };
-const dlDone = { whisper: false, llm: false };
+const DL_EL = { [DOWNLOAD.WHISPER]: "dl-whisper", [DOWNLOAD.LLM]: "dl-llm" };
+const dlDone = { [DOWNLOAD.WHISPER]: false, [DOWNLOAD.LLM]: false };
 
 function markDownloadDone(id) {
   dlDone[id] = true;
@@ -149,14 +151,14 @@ async function finish() {
   const btn = $("#ob-finish");
   btn.disabled = true;
   try {
-    await invoke("finish_onboarding");
+    await invoke(CMD.FINISH_ONBOARDING);
   } catch (e) {
     btn.disabled = false;
     return;
   }
   // A grant made while running only reaches the Fn tap after a relaunch.
   if (accessibilityGranted) {
-    await invoke("relaunch_app");
+    await invoke(CMD.RELAUNCH_APP);
   } else if (currentWindow) {
     await currentWindow.close();
   }
@@ -172,19 +174,19 @@ function init() {
   $$("[data-back]").forEach((b) => b.addEventListener("click", () => goTo(step - 1)));
 
   $("[data-open-ax]").addEventListener("click", () => {
-    invoke?.("open_accessibility_settings");
+    invoke?.(CMD.OPEN_ACCESSIBILITY_SETTINGS);
   });
 
   $("[data-mic-action]").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     if (btn.dataset.mode === "settings") {
-      invoke?.("open_microphone_settings");
+      invoke?.(CMD.OPEN_MICROPHONE_SETTINGS);
       return;
     }
     btn.disabled = true;
     btn.textContent = "Waiting…";
     try {
-      const status = await invoke("request_microphone");
+      const status = await invoke(CMD.REQUEST_MICROPHONE);
       renderPermissions({ accessibility: accessibilityGranted, microphone: status });
     } catch (_) {
       btn.disabled = false;
@@ -195,7 +197,7 @@ function init() {
   $("#ob-finish").addEventListener("click", finish);
 
   // Model-download progress from the backend's prefetch.
-  listen?.("model-download", (e) => renderDownload(e.payload));
+  listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));
 
   // Permissions change in System Settings (outside the app), so poll.
   refreshStatus();

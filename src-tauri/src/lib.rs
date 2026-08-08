@@ -8,6 +8,7 @@ mod focus;
 mod history;
 mod hotkeys;
 mod inject;
+mod ipc;
 mod llm;
 mod local_llm;
 mod permissions;
@@ -197,11 +198,11 @@ pub fn run() {
                 let dl_app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let emit = |downloaded, total| {
-                        emit_download_progress(&dl_app, "whisper", downloaded, total)
+                        emit_download_progress(&dl_app, ipc::download::WHISPER, downloaded, total)
                     };
                     if let Err(e) = stt::ensure_local_model(&model, emit).await {
                         log::warn!("stt: local model prefetch failed: {e}");
-                        emit_download_error(&dl_app, "whisper");
+                        emit_download_error(&dl_app, ipc::download::WHISPER);
                     }
                 });
                 Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
@@ -227,11 +228,11 @@ pub fn run() {
                 let dl_app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let emit = |downloaded, total| {
-                        emit_download_progress(&dl_app, "llm", downloaded, total)
+                        emit_download_progress(&dl_app, ipc::download::LLM, downloaded, total)
                     };
                     if let Err(e) = local_llm::ensure_local_llm(&model, emit).await {
                         log::warn!("llm: model prefetch failed: {e}");
-                        emit_download_error(&dl_app, "llm");
+                        emit_download_error(&dl_app, ipc::download::LLM);
                     }
                 });
                 let engine = Arc::new(local_llm::LocalLlm::new(
@@ -499,7 +500,7 @@ fn mark_update_staged<R: Runtime>(app: &AppHandle<R>, version: &str) {
     let _ = app.run_on_main_thread(move || {
         let _ = app_main.state::<AppState>().update_item.set_text(&label);
     });
-    let _ = app.emit("update-staged", version.to_string());
+    let _ = app.emit(ipc::event::UPDATE_STAGED, version.to_string());
     log::info!("update: staged v{version} — 'Restart to update' offered");
 }
 
@@ -520,7 +521,7 @@ fn emit_download_progress<R: Runtime>(
     total: u64,
 ) {
     let _ = app.emit(
-        "model-download",
+        ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
             id,
             downloaded,
@@ -532,7 +533,7 @@ fn emit_download_progress<R: Runtime>(
 
 fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
     let _ = app.emit(
-        "model-download",
+        ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
             id,
             downloaded: 0,
@@ -544,7 +545,7 @@ fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
 
 pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {
     if let Some(win) = app.get_webview_window("overlay") {
-        if let Err(e) = win.emit("state", state) {
+        if let Err(e) = win.emit(ipc::event::STATE, state) {
             log::debug!("emit overlay state failed: {e}");
         }
     }
@@ -897,7 +898,7 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                         mark_update_staged(&app, &version);
                     }
                     None => {
-                        let _ = app.emit("update-none", ());
+                        let _ = app.emit(ipc::event::UPDATE_NONE, ());
                     }
                 }
             });
@@ -1022,7 +1023,7 @@ fn spawn_dictation_worker<R: Runtime>(
                     // Forward audio levels to the overlay frontend.
                     let app_for_level = app.clone();
                     let on_level: audio::LevelFn = Box::new(move |level: f32| {
-                        let _ = app_for_level.emit("audio:level", level);
+                        let _ = app_for_level.emit(ipc::event::AUDIO_LEVEL, level);
                     });
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
@@ -1092,7 +1093,7 @@ fn record_usage<R: Runtime>(app: &AppHandle<R>, update: impl FnOnce(&mut usage::
         if let Err(e) = usage::save(&snapshot) {
             log::warn!("usage: save failed: {e}");
         }
-        let _ = app.emit("usage", snapshot);
+        let _ = app.emit(ipc::event::USAGE, snapshot);
     }
 }
 
@@ -1121,7 +1122,7 @@ fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&st
     }
     let _ = history::prune(&conn, limit);
     drop(conn);
-    let _ = app.emit("history", ()); // nudge the History tab to refresh if open
+    let _ = app.emit(ipc::event::HISTORY, ()); // nudge the History tab to refresh if open
 }
 
 fn handle_recording<R: Runtime>(

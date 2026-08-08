@@ -1,6 +1,8 @@
 // Overlay state renderer. The Rust action router emits a `state` event on
 // every transition (recording → transcribing → done/error). We just paint it.
 
+import { EVENTS } from "./constants.js";
+
 const LABELS = {
   idle: "Open Wispr",
   recording: "Recording…",
@@ -47,8 +49,8 @@ function init() {
     console.warn("Tauri event API unavailable; overlay state will not update.");
     return;
   }
-  tauri.event.listen("state", (e) => applyState(e.payload));
-  tauri.event.listen("audio:level", (e) => {
+  tauri.event.listen(EVENTS.STATE, (e) => applyState(e.payload));
+  tauri.event.listen(EVENTS.AUDIO_LEVEL, (e) => {
     // payload is a 0..1 peak amplitude from the capture thread.
     const v = typeof e.payload === "number" ? e.payload : 0;
     document.documentElement.style.setProperty("--audio-level", String(v));

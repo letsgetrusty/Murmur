@@ -1,6 +1,8 @@
 // Settings/history window. Talks to the Rust backend over Tauri IPC commands
 // (the overlay is event-driven; this window is request/response).
 
+import { EVENTS, CMD, TABS } from "./constants.js";
+
 const invoke = window.__TAURI__?.core?.invoke;
 
 // The full config object, kept so Save round-trips fields this UI doesn't edit.
@@ -27,7 +29,7 @@ async function loadConfig() {
     return;
   }
   try {
-    currentConfig = await invoke("get_config");
+    currentConfig = await invoke(CMD.GET_CONFIG);
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
@@ -48,7 +50,7 @@ async function saveEngines() {
     tts_provider: el("tts-provider").value,
   };
   try {
-    await invoke("save_config", { config: next });
+    await invoke(CMD.SAVE_CONFIG, { config: next });
     currentConfig = next;
     el("engine-relaunch").hidden = false;
   } catch (e) {
@@ -66,7 +68,7 @@ async function save() {
   el("save").disabled = true;
   setStatus("Saving…");
   try {
-    await invoke("save_config", { config: next });
+    await invoke(CMD.SAVE_CONFIG, { config: next });
     currentConfig = next;
     setStatus("Saved ✓", "ok");
   } catch (e) {
@@ -88,7 +90,7 @@ async function loadOptions() {
   if (!invoke || !currentConfig) return;
   let opts;
   try {
-    opts = await invoke("get_options");
+    opts = await invoke(CMD.GET_OPTIONS);
   } catch (e) {
     return;
   }
@@ -110,14 +112,14 @@ async function loadOptions() {
   mic.value = currentConfig.mic_name ?? "";
 
   speed.addEventListener("change", (e) =>
-    invoke("set_speed", { speed: parseFloat(e.target.value) })
+    invoke(CMD.SET_SPEED, { speed: parseFloat(e.target.value) })
   );
   voice.addEventListener("change", (e) =>
-    invoke("set_voice", { voiceId: e.target.value })
+    invoke(CMD.SET_VOICE, { voiceId: e.target.value })
   );
   mic.addEventListener("change", (e) => {
     const v = e.target.value;
-    invoke("set_mic", { name: v === "" ? null : v });
+    invoke(CMD.SET_MIC, { name: v === "" ? null : v });
   });
 }
 
@@ -127,11 +129,6 @@ const HOTKEY_FIELD = {
   dictate: "hotkey_dictate",
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
-};
-const HOTKEY_LABEL = {
-  dictate: "Dictation chord",
-  tts_toggle: "Read aloud",
-  tts_speed: "Cycle speed",
 };
 
 function prettyShortcut(s) {
@@ -188,10 +185,13 @@ function codeToKey(code) {
   return map[code] || null; // pure modifier codes fall through to null
 }
 
-function setHotkeyStatus(text, kind = "") {
-  const s = el("hotkey-status");
-  s.textContent = text;
-  s.className = `hint ${kind}`;
+// The recorder relies on the control itself for confirmation — the button
+// label (or dropdown value) updates to the new binding — so success and cancel
+// need no message. Only errors get feedback, shown inline on the active control
+// (#hotkey-status stays static help and is never overwritten).
+function flashInvalid(elm) {
+  elm.classList.add("invalid");
+  setTimeout(() => elm.classList.remove("invalid"), 1800);
 }
 
 let recording = null;
@@ -205,7 +205,7 @@ function renderHotkeys() {
 function stopRecording(restore) {
   if (!recording) return;
   window.removeEventListener("keydown", onRecordKey, true);
-  recording.button.classList.remove("recording");
+  recording.button.classList.remove("recording", "invalid");
   if (restore) {
     recording.button.textContent = prettyShortcut(
       currentConfig[HOTKEY_FIELD[recording.action]]
@@ -218,8 +218,7 @@ async function onRecordKey(e) {
   e.preventDefault();
   e.stopPropagation();
   if (e.key === "Escape") {
-    stopRecording(true);
-    setHotkeyStatus("Cancelled.");
+    stopRecording(true); // reverting the label is the cancel confirmation
     return;
   }
   const key = codeToKey(e.code);
@@ -231,21 +230,23 @@ async function onRecordKey(e) {
   if (e.altKey) mods.push("Alt");
   if (e.shiftKey) mods.push("Shift");
   if (mods.length === 0) {
-    setHotkeyStatus("Add at least one modifier (⌘/⌃/⌥/⇧).", "error");
+    // Inline validation on the active recorder; keep listening so the user can
+    // immediately retry with a modifier held.
+    recording.button.classList.add("invalid");
+    recording.button.textContent = "Hold a modifier ⌘⌃⌥⇧";
     return;
   }
 
   const shortcut = [...mods, key].join("+");
   const { action, button } = recording;
   stopRecording(false);
-  button.textContent = prettyShortcut(shortcut);
+  button.textContent = prettyShortcut(shortcut); // label change confirms success
   try {
-    await invoke("set_hotkey", { action, shortcut });
+    await invoke(CMD.SET_HOTKEY, { action, shortcut });
     currentConfig[HOTKEY_FIELD[action]] = shortcut;
-    setHotkeyStatus(`${HOTKEY_LABEL[action]} → ${prettyShortcut(shortcut)} ✓`, "ok");
   } catch (err) {
     button.textContent = prettyShortcut(currentConfig[HOTKEY_FIELD[action]]);
-    setHotkeyStatus(`Couldn't set that: ${err}`, "error");
+    flashInvalid(button);
   }
 }
 
@@ -255,6 +256,7 @@ function initHotkeys() {
     btn.addEventListener("click", () => {
       if (recording) stopRecording(true);
       recording = { action: btn.dataset.action, button: btn };
+      btn.classList.remove("invalid");
       btn.classList.add("recording");
       btn.textContent = "Press keys…";
       window.addEventListener("keydown", onRecordKey, true);
@@ -268,12 +270,11 @@ function initHotkeys() {
     rm.addEventListener("change", async (e) => {
       const modifier = e.target.value;
       try {
-        await invoke("set_refine_modifier", { modifier });
-        currentConfig.refine_modifier = modifier;
-        setHotkeyStatus(`Refined dictation → Fn+${modifier} ✓`, "ok");
+        await invoke(CMD.SET_REFINE_MODIFIER, { modifier });
+        currentConfig.refine_modifier = modifier; // selected value confirms it
       } catch (err) {
         rm.value = currentConfig.refine_modifier ?? "Ctrl";
-        setHotkeyStatus(`Couldn't set that: ${err}`, "error");
+        flashInvalid(rm);
       }
     });
   }
@@ -286,7 +287,7 @@ let localUsage = null; // from get_usage (dictation/refine/read-aloud counts)
 async function loadUsage() {
   if (!invoke) return;
   try {
-    localUsage = await invoke("get_usage");
+    localUsage = await invoke(CMD.GET_USAGE);
   } catch (e) {
     /* ignore */
   }
@@ -294,9 +295,9 @@ async function loadUsage() {
 }
 
 function initUsage() {
-  el("u-refresh").addEventListener("click", loadInsights);
-  // Live-update the counts while the window is open.
-  window.__TAURI__?.event?.listen?.("usage", (e) => {
+  // Insights auto-loads on tab open and live-updates from the backend's "usage"
+  // event (fired after every dictation / read-aloud), so no manual refresh.
+  window.__TAURI__?.event?.listen?.(EVENTS.USAGE, (e) => {
     localUsage = e.payload;
     renderInsights();
   });
@@ -374,7 +375,7 @@ function renderActivity(s) {
 async function loadInsights() {
   if (!invoke) return;
   try {
-    insStats = await invoke("history_stats");
+    insStats = await invoke(CMD.HISTORY_STATS);
   } catch (_) {
     insStats = null;
   }
@@ -420,7 +421,7 @@ function renderHistoryRow(e) {
   copy.textContent = "Copy";
   copy.addEventListener("click", async () => {
     try {
-      await invoke("copy_text", { text });
+      await invoke(CMD.COPY_TEXT, { text });
       copy.textContent = "Copied";
       setTimeout(() => (copy.textContent = "Copy"), 1200);
     } catch (_) {}
@@ -430,7 +431,7 @@ function renderHistoryRow(e) {
   del.textContent = "Delete";
   del.addEventListener("click", async () => {
     try {
-      await invoke("delete_history", { id: e.id });
+      await invoke(CMD.DELETE_HISTORY, { id: e.id });
       row.remove();
       if (!el("history-list").children.length) el("history-empty").hidden = false;
     } catch (_) {}
@@ -448,7 +449,7 @@ function renderHistoryRow(e) {
 async function loadHistory() {
   if (!invoke) return;
   try {
-    const entries = await invoke("list_history", {
+    const entries = await invoke(CMD.LIST_HISTORY, {
       query: historyQuery,
       limit: 200,
       offset: 0,
@@ -466,7 +467,7 @@ function initHistory() {
   enabled.addEventListener("change", async (e) => {
     const next = { ...currentConfig, history_enabled: e.target.checked };
     try {
-      await invoke("save_config", { config: next });
+      await invoke(CMD.SAVE_CONFIG, { config: next });
       currentConfig = next;
     } catch (_) {}
   });
@@ -481,15 +482,15 @@ function initHistory() {
   el("history-clear").addEventListener("click", async () => {
     if (!window.confirm("Delete all dictation history?")) return;
     try {
-      await invoke("clear_history");
+      await invoke(CMD.CLEAR_HISTORY);
       loadHistory();
     } catch (_) {}
   });
 
   // Refresh live when a new dictation lands and we're on the relevant tab.
-  window.__TAURI__?.event?.listen?.("history", () => {
-    if (document.getElementById("tab-history")?.classList.contains("active")) loadHistory();
-    if (document.getElementById("tab-insights")?.classList.contains("active")) loadInsights();
+  window.__TAURI__?.event?.listen?.(EVENTS.HISTORY, () => {
+    if (document.getElementById(`tab-${TABS.HISTORY}`)?.classList.contains("active")) loadHistory();
+    if (document.getElementById(`tab-${TABS.INSIGHTS}`)?.classList.contains("active")) loadInsights();
   });
 }
 
@@ -502,8 +503,8 @@ function switchTab(name) {
   for (const t of document.querySelectorAll(".tab")) {
     t.classList.toggle("active", t.id === `tab-${name}`);
   }
-  if (name === "history") loadHistory();
-  if (name === "insights") loadInsights();
+  if (name === TABS.HISTORY) loadHistory();
+  if (name === TABS.INSIGHTS) loadInsights();
 }
 
 // --- UI zoom (Cmd +/-/0) ------------------------------------------------------
@@ -567,7 +568,7 @@ async function installUpdate() {
   btn.textContent = "Restarting…";
   try {
     // Installs the pre-downloaded update and relaunches — never resolves.
-    await invoke("install_staged_update");
+    await invoke(CMD.INSTALL_STAGED_UPDATE);
   } catch (e) {
     el("update-text").textContent = `Update failed: ${e}`;
     btn.disabled = false;
@@ -578,10 +579,10 @@ async function installUpdate() {
 function initUpdate() {
   el("update-install").addEventListener("click", installUpdate);
   const listen = window.__TAURI__?.event?.listen;
-  listen?.("update-staged", (e) => showUpdateStaged(e.payload));
-  listen?.("update-none", () => showUpToDate());
+  listen?.(EVENTS.UPDATE_STAGED, (e) => showUpdateStaged(e.payload));
+  listen?.(EVENTS.UPDATE_NONE, () => showUpToDate());
   // If an update was already staged before this window opened, show it.
-  invoke?.("pending_update_version").then((v) => {
+  invoke?.(CMD.PENDING_UPDATE_VERSION).then((v) => {
     if (v) showUpdateStaged(v);
   });
 }
@@ -594,7 +595,7 @@ async function init() {
   for (const id of ["stt-model", "tts-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
-  el("engine-relaunch-btn").addEventListener("click", () => invoke?.("relaunch_app"));
+  el("engine-relaunch-btn").addEventListener("click", () => invoke?.(CMD.RELAUNCH_APP));
   el("refine-prompt").addEventListener("input", markDirty);
   el("save").addEventListener("click", save);
   window.addEventListener("keydown", (e) => {
@@ -610,6 +611,12 @@ async function init() {
   initUsage();
   initHistory();
   initUpdate();
+
+  // Populate whichever tab is active on launch (switchTab handles this on click,
+  // but the landing tab is set in markup and never goes through it).
+  const landing = document.querySelector(".nav-item.active")?.dataset.tab;
+  if (landing === TABS.HISTORY) loadHistory();
+  else if (landing === TABS.INSIGHTS) loadInsights();
 }
 
 if (document.readyState === "loading") {
