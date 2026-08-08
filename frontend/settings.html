@@ -48,22 +48,22 @@
           </div>
 
           <div class="card">
-            <h2>Engines</h2>
+            <h2>Models</h2>
             <p class="hint">
-              Dictation, read-aloud, and refinement all run on-device —
-              private, offline, no API key. Switching an engine takes effect
-              after you relaunch Open Wispr.
+              The models that power dictation, refinement, and read-aloud all run
+              on your Mac — private, offline, no API key. Changing a model takes
+              effect after you relaunch Open Wispr.
             </p>
             <div class="row">
-              <span class="row-label">Whisper model</span>
+              <span class="row-label">Dictation (speech → text)</span>
               <select id="stt-model">
-                <option value="base.en">base.en — fastest (~142 MB)</option>
-                <option value="small.en">small.en — balanced (~466 MB)</option>
-                <option value="medium.en">medium.en — most accurate (~1.5 GB)</option>
+                <option value="base.en">Whisper · base.en — fastest (~142 MB)</option>
+                <option value="small.en">Whisper · small.en — balanced (~466 MB)</option>
+                <option value="medium.en">Whisper · medium.en — most accurate (~1.5 GB)</option>
               </select>
             </div>
             <div class="row">
-              <span class="row-label">Refinement model</span>
+              <span class="row-label">Refinement (cleans up dictation)</span>
               <select id="llm-model">
                 <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M — fastest (~1.1 GB)</option>
                 <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M — balanced (~1.2 GB)</option>
@@ -71,14 +71,14 @@
               </select>
             </div>
             <div class="row">
-              <span class="row-label">Read-aloud (text-to-speech)</span>
+              <span class="row-label">Read-aloud (text → speech)</span>
               <select id="tts-provider">
-                <option value="native">On-device · macOS</option>
-                <option value="kokoro">On-device · Kokoro (neural)</option>
+                <option value="native">macOS built-in — fast, no download</option>
+                <option value="kokoro">Kokoro — neural, higher quality (~310 MB)</option>
               </select>
             </div>
             <div id="engine-relaunch" class="engine-relaunch" hidden>
-              <span class="hint">Saved — relaunch to load the new engine.</span>
+              <span class="hint">Saved — relaunch to apply the new model.</span>
               <button id="engine-relaunch-btn" class="primary small">Relaunch now</button>
             </div>
           </div>
@@ -86,36 +86,36 @@
           <div class="card">
             <h2>Audio</h2>
             <div class="row">
-              <span class="row-label">Playback speed</span>
-              <select id="speed"></select>
-            </div>
-            <div class="row">
-              <span class="row-label">Voice</span>
+              <span class="row-label">Read-aloud voice</span>
               <select id="voice"></select>
             </div>
             <div class="row">
-              <span class="row-label">Microphone</span>
+              <span class="row-label">Read-aloud speed</span>
+              <select id="speed"></select>
+            </div>
+            <div class="row">
+              <span class="row-label">Microphone (dictation input)</span>
               <select id="mic"></select>
             </div>
-            <p class="hint">Changes apply immediately (same as the tray menu).</p>
+            <p class="hint">These apply right away — no relaunch needed.</p>
           </div>
 
           <div class="card">
             <h2>Keyboard shortcuts</h2>
             <div class="row">
-              <span class="row-label">Dictation chord</span>
+              <span class="row-label">Dictate</span>
               <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+Space"></button>
             </div>
             <div class="row">
-              <span class="row-label">Read aloud</span>
+              <span class="row-label">Read selection aloud</span>
               <button class="recorder" data-action="tts_toggle" data-default="CmdOrCtrl+Shift+R"></button>
             </div>
             <div class="row">
-              <span class="row-label">Cycle speed</span>
+              <span class="row-label">Cycle read-aloud speed</span>
               <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
             </div>
             <div class="row">
-              <span class="row-label">Refined dictation</span>
+              <span class="row-label">Dictate &amp; refine</span>
               <span class="refine-combo">
                 <span class="fn-badge">Fn</span>
                 <span class="plus">+</span>
@@ -128,18 +128,18 @@
               </span>
             </div>
             <p id="hotkey-status" class="hint">
-              Click a chord, then press the new combination (needs at least one
-              modifier). Hold-to-dictate on the <b>Fn</b> key is always on;
-              hold Fn + the modifier above to dictate <i>and refine</i>.
+              Click a shortcut, then press the new key combination (needs at
+              least one modifier). Holding the <b>Fn</b> key to dictate is always
+              on; hold Fn + the modifier above to dictate <i>and refine</i>.
             </p>
 
             <label class="field">
-              <span class="field-label">Refinement prompt</span>
+              <span class="field-label">Refinement instructions</span>
               <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
             </label>
             <p class="hint">
-              Applied on refined dictations — the transcript is cleaned up by
-              the LLM using this prompt before it's pasted.
+              How the refinement model rewrites your dictation before it's
+              pasted — e.g. fix grammar and punctuation, drop filler words.
             </p>
           </div>
 
