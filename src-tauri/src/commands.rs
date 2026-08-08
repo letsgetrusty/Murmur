@@ -58,7 +58,12 @@ pub fn get_options(state: State<AppState>) -> Options {
                 name: (*name).to_string(),
             })
             .collect(),
-        mics: state.mic_names.clone(),
+        // Re-enumerate live (not the startup-cached `state.mic_names`) so a mic
+        // plugged in after launch shows up when the user opens Settings. Safe
+        // here: this command runs off the main thread, well past the startup
+        // window where early CoreAudio enumeration crashes the release build —
+        // the recorder already enumerates on demand the same way (`audio.rs`).
+        mics: crate::audio::list_input_devices(),
     }
 }
 

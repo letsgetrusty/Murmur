@@ -89,6 +89,30 @@ function addOption(select, value, label) {
   select.appendChild(o);
 }
 
+// (Re)build the microphone dropdown from the current input-device list.
+function fillMics(mics) {
+  const mic = el("mic");
+  const current = currentConfig?.mic_name ?? "";
+  mic.innerHTML = "";
+  addOption(mic, "", "System default");
+  for (const m of mics) addOption(mic, m, m);
+  // Keep the saved selection if the device is still present; otherwise show
+  // System default (the recorder falls back to the default the same way).
+  mic.value = mics.includes(current) ? current : "";
+}
+
+// Re-fetch just the input-device list. Called when the window is shown/refocused
+// so a mic plugged in after launch appears without a relaunch.
+async function refreshMics() {
+  if (!invoke || !currentConfig) return;
+  try {
+    const opts = await invoke(CMD.GET_OPTIONS);
+    fillMics(opts.mics);
+  } catch (e) {
+    /* transient — next focus/open retries */
+  }
+}
+
 async function loadOptions() {
   if (!invoke || !currentConfig) return;
   let opts;
@@ -108,11 +132,7 @@ async function loadOptions() {
   for (const v of opts.voices) addOption(voice, v.id, v.name);
   voice.value = currentConfig.tts_voice_id;
 
-  const mic = el("mic");
-  mic.innerHTML = "";
-  addOption(mic, "", "System default");
-  for (const m of opts.mics) addOption(mic, m, m);
-  mic.value = currentConfig.mic_name ?? "";
+  fillMics(opts.mics);
 
   speed.addEventListener("change", (e) =>
     invoke(CMD.SET_SPEED, { speed: parseFloat(e.target.value) })
@@ -560,6 +580,15 @@ async function init() {
   initUsage();
   initHistory();
   initUpdate();
+
+  // The settings window is reused across opens (shown/focused, not recreated),
+  // so init() runs once. Re-enumerate input devices whenever the window is
+  // shown or refocused — otherwise a mic plugged in after launch wouldn't
+  // appear until relaunch.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshMics();
+  });
+  window.addEventListener("focus", refreshMics);
 
   // Populate whichever tab is active on launch (switchTab handles this on click,
   // but the landing tab is set in markup and never goes through it).
