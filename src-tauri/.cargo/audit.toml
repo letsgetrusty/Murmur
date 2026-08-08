@@ -1,0 +1,17 @@
+# cargo-audit config (read by `./scripts/audit.sh`, which runs from src-tauri/).
+#
+# Ignored advisories are consciously accepted, not unknown. Each MUST have a
+# rationale and should be removed once an upstream fix is reachable. Everything
+# NOT listed here still fails the audit — so a genuinely new vulnerability blocks
+# CI. Unmaintained-crate *warnings* (the Linux-only gtk-rs GTK3 bindings, etc.)
+# do not fail the audit and are intentionally not listed.
+[advisories]
+ignore = [
+    # quick-xml memory-exhaustion / quadratic-parse DoS. Reachable only via
+    # `plist`, which Tauri uses to parse the app's OWN bundled Info.plist
+    # (trusted input) — not attacker-controlled data — so the DoS isn't
+    # exploitable here. The fix (quick-xml >=0.41) is gated on an upstream Tauri
+    # bump: plist 1.9.0 pins quick-xml ^0.39. Remove when Tauri ships it.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

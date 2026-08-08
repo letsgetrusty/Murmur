@@ -122,7 +122,19 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - Lint/format: a pre-commit hook (`.githooks/pre-commit`) runs `cargo fmt --check`
   + `cargo clippy -D warnings` on Rust changes. Keep the crate clean; bypass a WIP
   commit with `git commit --no-verify`.
-- Dependency audit (on demand, not in the hook): `./scripts/audit.sh` (RustSec).
+- Dependency audits run in CI (the `audit` job) and on demand:
+  - Rust: `./scripts/audit.sh` (RustSec / cargo-audit). Accepted advisories with
+    rationale live in `src-tauri/.cargo/audit.toml`; anything not listed there
+    fails. Unmaintained-crate *warnings* (the Linux-only gtk-rs GTK3 bindings a
+    macOS build never compiles, etc.) don't fail the audit.
+  - JS: `./scripts/npm-audit.sh`. Shipped (`dependencies`) deps are zero-
+    tolerance; the dev toolchain blocks only CRITICAL. **Accepted, do not
+    "fix":** vite/esbuild carry moderate/high advisories (GHSA-67mh-4wv8-2f99
+    et al.) fixable only by a breaking vite major bump; they affect only the
+    local dev server, never the shipped app (which embeds the pre-built frontend)
+    or CI (`vitest run`, no server). Revisit when Tauri's Vite baseline moves.
+  - Not in the pre-commit hook: results depend on the advisory DB (network), not
+    your edits.
 
 ## Conventions
 - **Changing the app icon:** the icon is compiled *into* the binary by

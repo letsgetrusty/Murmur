@@ -58,3 +58,35 @@ jobs:
 
       - name: Tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+
+  audit:
+    # Advisory checks read lockfiles only (platform-independent), so run on the
+    # cheap Ubuntu runner rather than macOS. Keeps known-vulnerable deps off main:
+    # RustSec (cargo-audit) for Rust, `npm audit` for JS. Both gates tolerate
+    # only the advisories explicitly accepted in src-tauri/.cargo/audit.toml and
+    # scripts/npm-audit.sh — anything new fails.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: npm audit
+        run: ./scripts/npm-audit.sh
+
+      - name: Rust toolchain
+        run: rustup show
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit (RustSec)
+        run: ./scripts/audit.sh
