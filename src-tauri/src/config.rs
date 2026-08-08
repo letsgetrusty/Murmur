@@ -85,7 +85,10 @@ fn default_hotkey_tts_speed() -> String {
     DEFAULT_HOTKEY_TTS_SPEED.to_string()
 }
 pub const DEFAULT_STT_MODEL: &str = "small.en";
-pub const DEFAULT_TTS_PROVIDER: &str = "native";
+// Default to the higher-quality on-device neural voice. It needs a ~310 MB
+// download, fetched after first-run onboarding (opt-out) — see the kokoro prefetch
+// in lib.rs (gated on `onboarding_done`) and `set_neural_voice`.
+pub const DEFAULT_TTS_PROVIDER: &str = "kokoro";
 pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
 fn default_stt_model() -> String {
     DEFAULT_STT_MODEL.to_string()

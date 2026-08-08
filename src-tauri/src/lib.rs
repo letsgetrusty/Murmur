@@ -168,6 +168,7 @@ pub fn run() {
             commands::set_mic,
             commands::set_hotkey,
             commands::set_refine_modifier,
+            commands::set_neural_voice,
             commands::get_usage,
             commands::list_history,
             commands::delete_history,
@@ -256,12 +257,18 @@ pub fn run() {
                         log::info!("tts: Kokoro backend; assets missing — downloading…");
                     }
                     // Fetch model + voices in the background so the first
-                    // read-aloud isn't blocked on a ~310 MB download.
-                    tauri::async_runtime::spawn(async {
-                        if let Err(e) = tts::ensure_kokoro_assets().await {
-                            log::warn!("tts/kokoro: asset prefetch failed: {e}");
-                        }
-                    });
+                    // read-aloud isn't blocked on a ~310 MB download. Gated on
+                    // `onboarding_done`: on first run we wait until onboarding
+                    // records the user's opt-out choice (`set_neural_voice`) and
+                    // relaunches, so opting out never triggers the download and
+                    // the two paths can't race on the same files.
+                    if cfg.onboarding_done {
+                        tauri::async_runtime::spawn(async {
+                            if let Err(e) = tts::ensure_kokoro_assets().await {
+                                log::warn!("tts/kokoro: asset prefetch failed: {e}");
+                            }
+                        });
+                    }
                     let s = tts::KokoroSpeaker::new(
                         tts::kokoro_model_path().unwrap_or_default(),
                         tts::kokoro_voices_dir().unwrap_or_default(),

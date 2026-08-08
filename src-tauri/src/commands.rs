@@ -144,6 +144,23 @@ pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(
     Ok(())
 }
 
+/// Onboarding opt-out for the neural read-aloud voice. Persists the choice of
+/// TTS backend (Kokoro when enabled, native macOS otherwise); the ~310 MB Kokoro
+/// download happens via the startup prefetch after onboarding relaunches (gated
+/// on `onboarding_done`), so opting out never fetches it.
+#[tauri::command]
+pub fn set_neural_voice(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    let provider = if enabled { "kokoro" } else { "native" };
+    let snapshot = {
+        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
+        cfg.tts_provider = provider.to_string();
+        cfg.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    log::info!("config: neural voice {} → tts_provider={provider}", enabled);
+    Ok(())
+}
+
 // --- Onboarding (first-run setup) --------------------------------------------
 
 /// Live permission + model-download state for the onboarding window to poll.

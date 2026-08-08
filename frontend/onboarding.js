@@ -150,6 +150,17 @@ function fmtMB(bytes) {
 async function finish() {
   const btn = $("#ob-finish");
   btn.disabled = true;
+  // Persist the read-aloud voice choice. When kept (default), the ~310 MB Kokoro
+  // model downloads via the startup prefetch after the relaunch below; when
+  // unchecked, the backend stays on the built-in macOS voice and never fetches it.
+  const neural = $("#ob-neural");
+  if (neural) {
+    try {
+      await invoke(CMD.SET_NEURAL_VOICE, { enabled: neural.checked });
+    } catch (_) {
+      /* non-fatal; default (neural) stands */
+    }
+  }
   try {
     await invoke(CMD.FINISH_ONBOARDING);
   } catch (e) {
