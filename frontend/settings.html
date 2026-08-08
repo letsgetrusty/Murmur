@@ -63,6 +63,14 @@
               </select>
             </div>
             <div class="row">
+              <span class="row-label">Refinement model</span>
+              <select id="llm-model">
+                <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M — fastest (~1.1 GB)</option>
+                <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M — balanced (~1.2 GB)</option>
+                <option value="Qwen3-1.7B-Q8_0">Qwen3 1.7B · Q8_0 — most accurate (~1.8 GB)</option>
+              </select>
+            </div>
+            <div class="row">
               <span class="row-label">Read-aloud (text-to-speech)</span>
               <select id="tts-provider">
                 <option value="native">On-device · macOS</option>

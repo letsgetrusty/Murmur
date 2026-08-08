@@ -33,6 +33,7 @@ async function loadConfig() {
     currentConfig = await invoke(CMD.GET_CONFIG);
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
+    el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("save").disabled = true;
   } catch (e) {
@@ -48,6 +49,7 @@ async function saveEngines() {
   const next = {
     ...currentConfig,
     stt_model: el("stt-model").value,
+    llm_model: el("llm-model").value,
     tts_provider: el("tts-provider").value,
   };
   try {
@@ -539,7 +541,7 @@ async function init() {
   for (const b of document.querySelectorAll(".nav-item")) {
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   }
-  for (const id of ["stt-model", "tts-provider"]) {
+  for (const id of ["stt-model", "llm-model", "tts-provider"]) {
     el(id).addEventListener("change", saveEngines);
   }
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.(CMD.RELAUNCH_APP));
