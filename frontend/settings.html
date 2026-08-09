@@ -46,11 +46,7 @@
 
           <div class="card">
             <h2>Models</h2>
-            <p class="hint">
-              The models that power dictation, refinement, and read-aloud all run
-              on your Mac — private, offline, no API key. Changing a model takes
-              effect after you relaunch Murmur.
-            </p>
+            <p class="hint">All on-device — private, offline, no API key.</p>
             <div class="row">
               <span class="row-label">Dictation (speech → text)</span>
               <select id="stt-model">
@@ -94,7 +90,6 @@
               <span class="row-label">Microphone (dictation input)</span>
               <select id="mic"></select>
             </div>
-            <p class="hint">These apply right away — no relaunch needed.</p>
           </div>
 
           <div class="card">
@@ -104,7 +99,7 @@
               <span class="fn-badge" title="Always on; can't be changed">Fn</span>
             </div>
             <div class="row">
-              <span class="row-label">Dictate — alternate chord (hold)</span>
+              <span class="row-label">Dictate — alternate shortcut (hold)</span>
               <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+D"></button>
             </div>
             <div class="row">
@@ -129,21 +124,15 @@
               </span>
             </div>
             <p id="hotkey-status" class="hint">
-              <b>Fn</b> dictation is always on and can't be rebound (macOS only
-              exposes Fn as a modifier). The chords are <b>hold-to-talk</b> — hold
-              to dictate, release to insert. Click a chord to rebind it (needs at
-              least one modifier); hold Fn + the modifier above to dictate
-              <i>and refine</i>.
+              Hold a shortcut (or the <b>Fn</b> key) to dictate — talk, then
+              release. Hold Fn + the modifier above to also <b>refine</b> (clean
+              up) your words.
             </p>
 
             <label class="field">
               <span class="field-label">Refinement instructions</span>
               <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
             </label>
-            <p class="hint">
-              How the refinement model rewrites your dictation before it's
-              pasted — e.g. fix grammar and punctuation, drop filler words.
-            </p>
           </div>
 
         </section>
