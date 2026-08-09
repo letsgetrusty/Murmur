@@ -201,21 +201,26 @@ pub fn set_neural_voice(state: State<AppState>, enabled: bool) -> Result<(), Str
 }
 
 /// Kick off the Kokoro model + voice download from onboarding so its progress bar
-/// fills alongside Whisper/Qwen. Idempotent — no-ops (and reports a full bar) if
-/// the assets are already on disk. Progress is emitted on the `model-download`
-/// event with id `kokoro`.
+/// fills alongside Whisper/Qwen. Idempotent + guarded (no-op if already on disk or
+/// already downloading). Progress is emitted on `model-download` with id `kokoro`.
 #[tauri::command]
 pub fn download_neural_voice(app: AppHandle) {
-    let dl_app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let emit = |downloaded, total| {
-            crate::emit_download_progress(&dl_app, crate::ipc::download::KOKORO, downloaded, total)
-        };
-        if let Err(e) = crate::tts::ensure_kokoro_assets(emit).await {
-            log::warn!("tts/kokoro: onboarding download failed: {e}");
-            crate::emit_download_error(&dl_app, crate::ipc::download::KOKORO);
-        }
-    });
+    crate::spawn_download(&app, crate::ipc::download::KOKORO);
+}
+
+/// Retry (or start) a model download after a failure — powers the onboarding
+/// "Retry" buttons and any in-app retry. `id` is "whisper" | "llm" | "kokoro".
+/// Guarded, so a click while a download is running is a harmless no-op.
+#[tauri::command]
+pub fn retry_download(app: AppHandle, id: String) -> Result<(), String> {
+    let id = match id.as_str() {
+        "whisper" => crate::ipc::download::WHISPER,
+        "llm" => crate::ipc::download::LLM,
+        "kokoro" => crate::ipc::download::KOKORO,
+        other => return Err(format!("unknown download id: {other}")),
+    };
+    crate::spawn_download(&app, id);
+    Ok(())
 }
 
 // --- Onboarding (first-run setup) --------------------------------------------

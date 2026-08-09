@@ -3,7 +3,6 @@
 
 use std::fs;
 use std::future::Future;
-use std::io::Write;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -33,9 +32,9 @@ pub fn model_path(name: &str) -> Result<PathBuf> {
 }
 
 /// Ensure the given local Whisper model is present, downloading it from the
-/// whisper.cpp model repo on Hugging Face if missing. Returns the file path.
-/// Downloads to a `.part` file and renames into place, so a model that exists
-/// at the final path is always complete.
+/// whisper.cpp model repo on Hugging Face if missing. Returns the file path. The
+/// download streams to a `.part` file (resumable) and renames into place only when
+/// complete, so a model that exists at the final path is always whole.
 pub async fn ensure_local_model(name: &str, on_progress: impl Fn(u64, u64)) -> Result<PathBuf> {
     let path = model_path(name)?;
     if path.exists() {
@@ -44,36 +43,8 @@ pub async fn ensure_local_model(name: &str, on_progress: impl Fn(u64, u64)) -> R
     fs::create_dir_all(models_dir()?).context("create models dir")?;
     let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{name}.bin");
     log::info!("stt: downloading Whisper model '{name}' from {url}");
-    let mut resp = reqwest::Client::new()
-        .get(&url)
-        .send()
-        .await
-        .context("GET whisper model")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!(
-            "download whisper model '{name}' failed: HTTP {}",
-            resp.status()
-        ));
-    }
-    let total = resp.content_length().unwrap_or(0);
-    let part = path.with_extension("part");
-    let mut file = fs::File::create(&part).context("create model .part")?;
-    let mut written: u64 = 0;
-    let mut last_emit: u64 = 0;
-    // Throttle progress to ~1 MB steps so we don't flood the event bus.
-    while let Some(chunk) = resp.chunk().await.context("read model chunk")? {
-        file.write_all(&chunk).context("write model chunk")?;
-        written += chunk.len() as u64;
-        if written - last_emit >= 1_000_000 {
-            on_progress(written, total);
-            last_emit = written;
-        }
-    }
-    file.flush().ok();
-    drop(file);
-    fs::rename(&part, &path).context("finalize model file")?;
-    on_progress(written, total.max(written));
-    log::info!("stt: Whisper model '{name}' ready ({written} bytes)");
+    crate::download::to_file(&url, &path, on_progress).await?;
+    log::info!("stt: Whisper model '{name}' ready");
     Ok(path)
 }
 

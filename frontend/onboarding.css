@@ -193,18 +193,24 @@ body {
 }
 .dl-head {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+  gap: var(--space-sm);
   margin-bottom: var(--space-sm);
 }
 .dl-name {
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
+  /* Push the % and Retry button together to the right edge. */
+  margin-right: auto;
 }
 .dl-pct {
   font-size: var(--fs-xs);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+.dl-retry {
+  padding: 1px 9px;
+  font-size: var(--fs-2xs);
 }
 .dl-track {
   height: 7px;

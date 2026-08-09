@@ -146,6 +146,13 @@ function updateReadyNote(ready) {
     : "⏳ Speech model still downloading — dictation works once it finishes (it keeps going in the background).";
 }
 
+// Show/hide a row's Retry button (shown only when its download has failed).
+function setRetry(id, show) {
+  const row = $(`#${DL_EL[id]}`);
+  const btn = row && $("[data-retry]", row);
+  if (btn) btn.hidden = !show;
+}
+
 function markDownloadDone(id) {
   dlDone[id] = true;
   const row = $(`#${DL_EL[id]}`);
@@ -154,6 +161,7 @@ function markDownloadDone(id) {
   fill.style.width = "100%";
   fill.classList.add("done");
   fill.classList.remove("failed");
+  setRetry(id, false);
   $("[data-pct]", row).textContent = "Ready ✓";
 }
 
@@ -164,9 +172,13 @@ function renderDownload({ id, downloaded, total, failed }) {
   const pct = $("[data-pct]", row);
   if (failed) {
     fill.classList.add("failed");
-    pct.textContent = "Failed — retries on next launch";
+    pct.textContent = "Download failed";
+    setRetry(id, true);
     return;
   }
+  // Any progress means a (re)try is underway — hide the Retry button.
+  setRetry(id, false);
+  fill.classList.remove("failed");
   if (total > 0) {
     const frac = Math.min(1, downloaded / total);
     fill.style.width = `${(frac * 100).toFixed(1)}%`;
@@ -257,6 +269,25 @@ function init() {
     if (row) row.hidden = !neural.checked;
     if (neural.checked) maybeStartNeural();
   });
+
+  // Retry a failed download. spawn_download is guarded backend-side, so a
+  // double-tap is harmless; reset the row optimistically for instant feedback.
+  $$("[data-retry]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const id = b.dataset.retry;
+      b.hidden = true;
+      const row = $(`#${DL_EL[id]}`);
+      if (row) {
+        const fill = $("[data-fill]", row);
+        fill.classList.remove("failed");
+        fill.style.width = "0%";
+        $("[data-pct]", row).textContent = "Starting…";
+      }
+      invoke?.(CMD.RETRY_DOWNLOAD, { id }).catch(() => {
+        b.hidden = false;
+      });
+    })
+  );
 
   // Model-download progress from the backend's prefetch.
   listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));

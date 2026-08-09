@@ -9,12 +9,11 @@
 // input); the no-think path (`think = false`) pre-fills an empty <think></think>
 // block for speed.
 
-use std::io::Write;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -39,8 +38,9 @@ pub fn assets_present(name: &str) -> bool {
     model_path(name).map(|p| p.exists()).unwrap_or(false)
 }
 
-/// Download the GGUF model from Hugging Face (unsloth Qwen3 repo) if missing,
-/// via a `.part` temp + rename so the final file is always complete.
+/// Download the GGUF model from Hugging Face (unsloth Qwen3 repo) if missing. The
+/// download streams to a resumable `.part` temp and renames into place only when
+/// complete, so the final file is always whole.
 pub async fn ensure_local_llm(name: &str, on_progress: impl Fn(u64, u64)) -> Result<PathBuf> {
     let path = model_path(name)?;
     if path.exists() {
@@ -49,34 +49,7 @@ pub async fn ensure_local_llm(name: &str, on_progress: impl Fn(u64, u64)) -> Res
     std::fs::create_dir_all(crate::stt::models_dir()?).ok();
     let url = format!("{REPO}/{name}.gguf");
     log::info!("llm: downloading local model '{name}' (~1 GB, one-time)…");
-    let mut resp = reqwest::Client::new()
-        .get(&url)
-        .send()
-        .await
-        .context("GET llm model")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!(
-            "download llm model '{name}' failed: HTTP {}",
-            resp.status()
-        ));
-    }
-    let total = resp.content_length().unwrap_or(0);
-    let part = path.with_extension("part");
-    let mut file = std::fs::File::create(&part).context("create llm .part")?;
-    let mut written: u64 = 0;
-    let mut last_emit: u64 = 0;
-    while let Some(chunk) = resp.chunk().await.context("read llm chunk")? {
-        file.write_all(&chunk).context("write llm chunk")?;
-        written += chunk.len() as u64;
-        if written - last_emit >= 1_000_000 {
-            on_progress(written, total);
-            last_emit = written;
-        }
-    }
-    file.flush().ok();
-    drop(file);
-    std::fs::rename(&part, &path).context("finalize llm model")?;
-    on_progress(written, total.max(written));
+    crate::download::to_file(&url, &path, on_progress).await?;
     log::info!("llm: local model '{name}' ready");
     Ok(path)
 }

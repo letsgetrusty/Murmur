@@ -3,6 +3,7 @@
 mod audio;
 mod commands;
 mod config;
+mod download;
 mod fn_key;
 mod focus;
 mod history;
@@ -102,6 +103,9 @@ pub struct DlProgress {
     pub downloaded: u64,
     pub total: u64,
     pub failed: bool,
+    /// A download task is currently running for this model. Guards against a retry
+    /// spawning a second task that would truncate the same `.part` file.
+    pub in_flight: bool,
 }
 
 /// Latest download progress per model, for the overlay's pre-download dictation
@@ -208,6 +212,7 @@ pub fn run() {
             commands::set_dictation_trigger,
             commands::set_neural_voice,
             commands::download_neural_voice,
+            commands::retry_download,
             commands::get_usage,
             commands::list_history,
             commands::delete_history,
@@ -231,22 +236,12 @@ pub fn run() {
             let config_state = Arc::new(Mutex::new(cfg.clone()));
 
             // Speech-to-text: local on-device Whisper (whisper-rs).
+            // Speech-to-text: local on-device Whisper (whisper-rs). The model is
+            // fetched in the background after AppState is managed (see the
+            // spawn_download calls below), so the first dictation isn't blocked on
+            // a ~0.5 GB download; WhisperStt loads it lazily on first transcribe.
             let transcriber: Arc<dyn stt::Transcriber> = {
                 log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
-                // Fetch the model in the background so the first dictation isn't
-                // blocked on a ~0.5 GB download. Progress is emitted for the
-                // onboarding window's download bars.
-                let model = cfg.stt_model.clone();
-                let dl_app = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let emit = |downloaded, total| {
-                        emit_download_progress(&dl_app, ipc::download::WHISPER, downloaded, total)
-                    };
-                    if let Err(e) = stt::ensure_local_model(&model, emit).await {
-                        log::warn!("stt: local model prefetch failed: {e}");
-                        emit_download_error(&dl_app, ipc::download::WHISPER);
-                    }
-                });
                 Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
             };
 
@@ -258,25 +253,15 @@ pub fn run() {
 
             // LLM for the Fn+Ctrl refine pass: the embedded llama.cpp engine
             // (Qwen3), loaded on first use.
+            // LLM for the Fn+Ctrl refine pass (Qwen3 via embedded llama.cpp),
+            // loaded on first use. The ~1 GB model is fetched in the background
+            // after AppState is managed (spawn_download below).
             let chat: Arc<dyn llm::LlmChat> = {
                 if local_llm::assets_present(&cfg.llm_model) {
                     log::info!("llm: local backend (model '{}')", cfg.llm_model);
                 } else {
-                    log::info!("llm: local backend; model missing — downloading…");
+                    log::info!("llm: local backend; model missing — will download");
                 }
-                // Download the model in the background so the first refine isn't
-                // blocked on a ~1 GB fetch; it loads on first use.
-                let model = cfg.llm_model.clone();
-                let dl_app = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let emit = |downloaded, total| {
-                        emit_download_progress(&dl_app, ipc::download::LLM, downloaded, total)
-                    };
-                    if let Err(e) = local_llm::ensure_local_llm(&model, emit).await {
-                        log::warn!("llm: model prefetch failed: {e}");
-                        emit_download_error(&dl_app, ipc::download::LLM);
-                    }
-                });
                 let engine = Arc::new(local_llm::LocalLlm::new(
                     local_llm::model_path(&cfg.llm_model).unwrap_or_default(),
                 ));
@@ -297,29 +282,10 @@ pub fn run() {
                     } else {
                         log::info!("tts: Kokoro backend; assets missing — downloading…");
                     }
-                    // Fetch model + voices in the background so the first
-                    // read-aloud isn't blocked on a ~310 MB download. Gated on
-                    // `onboarding_done`: on first run we wait until onboarding
-                    // records the user's opt-out choice (`set_neural_voice`) and
-                    // relaunches, so opting out never triggers the download and
-                    // the two paths can't race on the same files.
-                    if cfg.onboarding_done {
-                        let dl_app = app.handle().clone();
-                        tauri::async_runtime::spawn(async move {
-                            let emit = |downloaded, total| {
-                                emit_download_progress(
-                                    &dl_app,
-                                    ipc::download::KOKORO,
-                                    downloaded,
-                                    total,
-                                )
-                            };
-                            if let Err(e) = tts::ensure_kokoro_assets(emit).await {
-                                log::warn!("tts/kokoro: asset prefetch failed: {e}");
-                                emit_download_error(&dl_app, ipc::download::KOKORO);
-                            }
-                        });
-                    }
+                    // The ~310 MB model + voices are fetched in the background
+                    // after AppState is managed (spawn_download below), gated on
+                    // `onboarding_done` so opting out on first run never triggers
+                    // the download and the two paths can't race on the same files.
                     let s = tts::KokoroSpeaker::new(
                         tts::kokoro_model_path().unwrap_or_default(),
                         tts::kokoro_voices_dir().unwrap_or_default(),
@@ -362,6 +328,47 @@ pub fn run() {
                 recording_armed: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
             });
+
+            // Clean up orphaned `.part` temps from interrupted downloads of models
+            // that are no longer selected. Keep the ones for the currently
+            // configured models so their downloads resume instead of restarting.
+            {
+                use std::collections::HashSet;
+                let mut keep: HashSet<std::path::PathBuf> = HashSet::new();
+                let part_of = |p: std::path::PathBuf| p.with_extension("part");
+                if let Ok(p) = stt::model_path(&cfg.stt_model) {
+                    keep.insert(part_of(p));
+                }
+                if let Ok(p) = local_llm::model_path(&cfg.llm_model) {
+                    keep.insert(part_of(p));
+                }
+                if cfg.tts_provider == "kokoro" {
+                    if let Ok(p) = tts::kokoro_model_path() {
+                        keep.insert(part_of(p));
+                    }
+                    if let Ok(dir) = tts::kokoro_voices_dir() {
+                        for (id, _) in tts::KOKORO_VOICES {
+                            keep.insert(dir.join(format!("{id}.part")));
+                        }
+                    }
+                }
+                let dirs: Vec<std::path::PathBuf> = [stt::models_dir(), tts::kokoro_voices_dir()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                download::sweep_stale_parts(&dirs, &keep);
+            }
+
+            // Prefetch the models in the background so the first dictation/refine/
+            // read-aloud isn't blocked on a download. These route through
+            // spawn_download (guarded + idempotent), which is also the retry path,
+            // and re-attempt any model still missing from a prior failed launch.
+            // Kokoro is gated on onboarding so opting out never fetches it.
+            spawn_download(app.handle(), ipc::download::WHISPER);
+            spawn_download(app.handle(), ipc::download::LLM);
+            if cfg.onboarding_done && cfg.tts_provider == "kokoro" {
+                spawn_download(app.handle(), ipc::download::KOKORO);
+            }
 
             // The tray icon itself is auto-created from the `trayIcon` block
             // in `tauri.conf.json`. Attaching the menu to that single
@@ -578,26 +585,37 @@ struct DownloadProgress {
     failed: bool,
 }
 
-/// Update the shared download tracker for `id`. Silently no-ops if AppState
-/// isn't managed yet (the very first prefetch bytes can land during setup) — the
-/// overlay watcher falls back to file-existence for readiness regardless.
-fn track_download<R: Runtime>(app: &AppHandle<R>, id: &'static str, p: DlProgress) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    let Ok(mut d) = state.downloads.lock() else {
-        return;
-    };
-    let slot = if id == ipc::download::WHISPER {
-        &mut d.whisper
+/// The tracker slot for a model id, or `None` for an unknown id.
+fn dl_slot<'a>(d: &'a mut Downloads, id: &str) -> Option<&'a mut DlProgress> {
+    if id == ipc::download::WHISPER {
+        Some(&mut d.whisper)
     } else if id == ipc::download::LLM {
-        &mut d.llm
+        Some(&mut d.llm)
     } else if id == ipc::download::KOKORO {
-        &mut d.kokoro
+        Some(&mut d.kokoro)
     } else {
-        return;
-    };
-    *slot = p;
+        None
+    }
+}
+
+/// Update the progress fields of the shared tracker for `id`, leaving `in_flight`
+/// (owned by spawn_download) untouched. No-ops if AppState isn't managed yet.
+fn track_download<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &'static str,
+    downloaded: u64,
+    total: u64,
+    failed: bool,
+) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut d) = state.downloads.lock() {
+            if let Some(slot) = dl_slot(&mut d, id) {
+                slot.downloaded = downloaded;
+                slot.total = total;
+                slot.failed = failed;
+            }
+        }
+    }
 }
 
 pub(crate) fn emit_download_progress<R: Runtime>(
@@ -606,15 +624,7 @@ pub(crate) fn emit_download_progress<R: Runtime>(
     downloaded: u64,
     total: u64,
 ) {
-    track_download(
-        app,
-        id,
-        DlProgress {
-            downloaded,
-            total,
-            failed: false,
-        },
-    );
+    track_download(app, id, downloaded, total, false);
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
@@ -627,15 +637,7 @@ pub(crate) fn emit_download_progress<R: Runtime>(
 }
 
 pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
-    track_download(
-        app,
-        id,
-        DlProgress {
-            downloaded: 0,
-            total: 0,
-            failed: true,
-        },
-    );
+    track_download(app, id, 0, 0, true);
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
@@ -645,6 +647,67 @@ pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static s
             failed: true,
         },
     );
+}
+
+/// Start (or restart) a model download in the background, emitting progress on the
+/// `model-download` event. Idempotent and self-guarding: a no-op if that model is
+/// already downloading, so it doubles as the retry entry point (onboarding retry
+/// button, the dictation/refine gates, and startup prefetch all route through it).
+/// AppState must be managed before this is called.
+pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
+    // Claim the slot: bail if a task is already running, else mark in-flight and
+    // clear any prior progress/failure so the UI resets cleanly.
+    {
+        let state = app.state::<AppState>();
+        let Ok(mut d) = state.downloads.lock() else {
+            return;
+        };
+        let Some(slot) = dl_slot(&mut d, id) else {
+            return;
+        };
+        if slot.in_flight {
+            return;
+        }
+        *slot = DlProgress {
+            in_flight: true,
+            ..Default::default()
+        };
+    }
+    // Model names come from live config so a retry after a settings change fetches
+    // the right file.
+    let (stt_model, llm_model) = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .map(|c| (c.stt_model.clone(), c.llm_model.clone()))
+        .unwrap_or_default();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let emit = |downloaded, total| emit_download_progress(&app, id, downloaded, total);
+        let res = if id == ipc::download::WHISPER {
+            stt::ensure_local_model(&stt_model, emit).await.map(|_| ())
+        } else if id == ipc::download::LLM {
+            local_llm::ensure_local_llm(&llm_model, emit)
+                .await
+                .map(|_| ())
+        } else if id == ipc::download::KOKORO {
+            tts::ensure_kokoro_assets(emit).await.map(|_| ())
+        } else {
+            Ok(())
+        };
+        if let Err(e) = res {
+            log::warn!("download: {id} failed: {e}");
+            emit_download_error(&app, id);
+        }
+        // Release the slot so a later retry can run.
+        if let Some(state) = app.try_state::<AppState>() {
+            if let Ok(mut d) = state.downloads.lock() {
+                if let Some(slot) = dl_slot(&mut d, id) {
+                    slot.in_flight = false;
+                }
+            }
+        }
+    });
 }
 
 /// Whether the configured speech-to-text model is downloaded and ready.
@@ -672,6 +735,9 @@ pub(crate) fn begin_model_wait<R: Runtime>(app: &AppHandle<R>) {
             .map(|d| d.whisper)
             .unwrap_or_default()
     };
+    // Trying to dictate is a natural retry trigger: (re)start the download if it
+    // isn't already running (no-op if a prior attempt is still in flight).
+    spawn_download(app, ipc::download::WHISPER);
     show_overlay(app);
     let p = whisper(app);
     emit_state(
@@ -1383,13 +1449,24 @@ async fn run_dictation<R: Runtime>(
 ) -> (OverlayState, u64) {
     let raw = text.clone(); // keep the original transcript for history
     let mut was_refined = false;
+    // The refine prompt + model come from live config so edits apply without restart.
+    let (prompt, llm_model) = match app.state::<AppState>().config.lock() {
+        Ok(c) => (c.refine_prompt.clone(), c.llm_model.clone()),
+        Err(_) => (String::new(), String::new()),
+    };
+    // If refine is requested but its model hasn't downloaded yet, (re)start the
+    // download in the background and paste the raw transcript this time rather
+    // than stall — the next refine picks it up once it's ready.
+    let refine = refine && {
+        let ready = local_llm::assets_present(&llm_model);
+        if !ready {
+            log::info!("dictation: refine model not ready — downloading, pasting raw for now");
+            spawn_download(app, ipc::download::LLM);
+        }
+        ready
+    };
     let final_text = if refine {
         emit_state(app, OverlayState::Refining);
-        // The refine prompt comes from live config so edits apply without restart.
-        let prompt = match app.state::<AppState>().config.lock() {
-            Ok(c) => c.refine_prompt.clone(),
-            Err(_) => String::new(),
-        };
         match llm::transform(chat, &prompt, &text).await {
             Ok(refined) => {
                 log::info!(
