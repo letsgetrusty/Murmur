@@ -1,8 +1,9 @@
 // Phase 3: capture the user's selected text by synthesizing Cmd+C and reading
 // the clipboard. Mirror of `inject` — same change-count watch, same don't-touch-
-// binary policy, same main-thread-only requirement on enigo. The selection
-// capture intentionally restores the clipboard so the user's existing copy
-// isn't clobbered.
+// binary policy, same main-thread-only requirement on enigo. Afterwards it puts
+// the clipboard back the way it was: restoring prior text, or clearing when
+// there was none — so read-aloud never leaves the just-copied selection behind
+// for a later dictation's paste to accidentally restore.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -43,11 +44,22 @@ pub fn capture_selection() -> Result<Option<String>> {
         None
     };
 
-    // Restore the original text. Best-effort — if the user had something
-    // non-text on the clipboard we don't replace it (matches inject policy).
-    if let Some(prev) = saved_text {
-        if let Err(e) = clipboard.set_text(prev) {
-            log::warn!("selection: clipboard restore failed: {e}");
+    // Put the clipboard back the way we found it. When there was prior text,
+    // restore it. When there wasn't, CLEAR the selection we just copied — leaving
+    // it there means a later dictation would treat it as the "previous" clipboard
+    // and, if that paste's restore races the Cmd+V, paste the read-aloud text
+    // instead of the transcript. Cmd+C already overwrote any non-text item, so
+    // clearing loses nothing we could have restored anyway.
+    match saved_text {
+        Some(prev) => {
+            if let Err(e) = clipboard.set_text(prev) {
+                log::warn!("selection: clipboard restore failed: {e}");
+            }
+        }
+        None => {
+            if let Err(e) = clipboard.clear() {
+                log::warn!("selection: clipboard clear failed: {e}");
+            }
         }
     }
 
