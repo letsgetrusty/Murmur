@@ -6,16 +6,16 @@
   box-sizing: border-box;
 }
 
-/* Auto-update banner ------------------------------------------------------ */
+/* Auto-update banner — a persistent bar spanning the top of the whole window
+   (both grid columns), so it's visible on every tab, not just Settings. */
 .update-banner {
+  grid-area: banner;
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  margin-bottom: var(--space-lg);
+  padding: var(--space-sm) var(--space-lg);
   background: var(--accent-soft-bg);
-  border: 1px solid var(--accent-soft-border);
-  border-radius: var(--radius);
+  border-bottom: 1px solid var(--accent-soft-border);
 }
 .update-banner[hidden] {
   display: none;
@@ -66,7 +66,14 @@ body {
 .app {
   display: grid;
   grid-template-columns: 180px 1fr;
-  grid-template-rows: minmax(0, 1fr);
+  /* Row 1 (auto) is the persistent update bar — collapses to 0 when hidden.
+     Pin the areas explicitly: the banner is display:none when there's no update,
+     which drops it from grid layout, and without named areas auto-placement would
+     then push the sidebar/content up into row 1 and leave row 2 as gray blank. */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "banner  banner"
+    "sidebar content";
   /* Fill the actual client box via the html/body 100% chain — NOT 100vh.
      In WKWebView, 100vh resolves taller than the visible webview, so an
      .app sized to it overflows and the bottom of the scroll area is
@@ -76,6 +83,7 @@ body {
 
 /* Sidebar ----------------------------------------------------------------- */
 .sidebar {
+  grid-area: sidebar;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   padding: var(--space-3xl) var(--space-lg);
@@ -106,6 +114,7 @@ nav {
 
 /* Content ----------------------------------------------------------------- */
 .content {
+  grid-area: content;
   min-height: 0;
   overflow-y: auto;
   /* No padding-bottom here: WKWebView drops a scroll container's bottom

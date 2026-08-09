@@ -10,6 +10,13 @@
   </head>
   <body>
     <div class="app">
+      <!-- Persistent update bar: spans the whole window, above every tab. -->
+      <div id="update-banner" class="update-banner" hidden>
+        <span class="update-icon" aria-hidden="true">↑</span>
+        <span class="update-text" id="update-text"></span>
+        <button id="update-install" class="primary small">Install &amp; Restart</button>
+      </div>
+
       <aside class="sidebar">
         <div class="brand">
           <svg class="brand-mark" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
@@ -38,12 +45,6 @@
             <h1>Settings</h1>
             <span id="status" class="status"></span>
           </header>
-
-          <div id="update-banner" class="update-banner" hidden>
-            <span class="update-icon" aria-hidden="true">↑</span>
-            <span class="update-text" id="update-text"></span>
-            <button id="update-install" class="primary small">Install &amp; Restart</button>
-          </div>
 
           <div class="card">
             <h2>Models</h2>
