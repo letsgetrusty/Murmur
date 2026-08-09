@@ -38,16 +38,44 @@ jobs:
             exit 1
           fi
 
+      # Guardrail: without the Apple secrets this workflow can't publish. A real
+      # release is cut LOCALLY (scripts/publish-release.sh), which creates the tag
+      # AND its GitHub release together — so if this tag has no release, someone
+      # hand-pushed a bare tag expecting CI to publish. Fail loudly instead of a
+      # silent no-op that looks like success. Poll briefly first so we don't race
+      # publish-release.sh's own tag+release creation.
+      - name: Require a release when CI can't publish
+        if: env.APPLE_CONFIGURED != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+              echo "Release ${GITHUB_REF_NAME} exists — cut locally via scripts/publish-release.sh; nothing for CI to publish (Apple signing not configured)."
+              exit 0
+            fi
+            echo "No release for ${GITHUB_REF_NAME} yet (attempt ${attempt}/6); waiting…"
+            sleep 10
+          done
+          echo "::error::Tag ${GITHUB_REF_NAME} has no GitHub release and CI cannot publish one (Apple signing secrets are unset). Do NOT hand-push release tags — cut releases with ./scripts/publish-release.sh, which builds + publishes locally. Delete this tag, then re-cut with the script."
+          exit 1
+
+      # The steps below exist only to build + publish, which happens once the
+      # Apple secrets are set — so gate them on APPLE_CONFIGURED. When it's unset,
+      # the guardrail above is the whole job.
       - uses: actions/setup-node@v4
+        if: env.APPLE_CONFIGURED == 'true'
         with:
           node-version: 22
           cache: npm
 
       # rustup reads rust-toolchain.toml (pins the compiler); this warms it.
       - name: Rust toolchain
+        if: env.APPLE_CONFIGURED == 'true'
         run: rustup show
 
       - uses: Swatinem/rust-cache@v2
+        if: env.APPLE_CONFIGURED == 'true'
         with:
           # Cargo project lives in src-tauri/. Caches the registry AND target/,
           # so the heavy whisper.cpp/llama.cpp/onnxruntime C++ builds are reused.
@@ -56,9 +84,11 @@ jobs:
       # esbuild 0.28's platform-optional packages trip a bug in npm 10 (bundled
       # with Node 22); npm 11 handles `npm ci` correctly.
       - name: Use npm 11
+        if: env.APPLE_CONFIGURED == 'true'
         run: npm install -g npm@11
 
       - name: Install frontend deps
+        if: env.APPLE_CONFIGURED == 'true'
         run: npm ci
 
       # ── Apple Developer ID + notarization — OPTIONAL (add later) ──────────

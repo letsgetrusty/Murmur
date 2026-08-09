@@ -69,24 +69,30 @@ trusts it. Pick **one** of these:
 
 ---
 
-## Releasing via CI (recommended)
+## Cutting a release — use `./scripts/publish-release.sh`
 
-`.github/workflows/release.yml` builds + publishes automatically when you push a
-**version tag**. Merges to `main` do nothing on their own — releasing is a
-deliberate act, so you control exactly when users get an update.
+**This is the one command that cuts a release.** It computes the next version
+from the highest released tag, bumps all three manifests **and**
+`package-lock.json`, commits, pushes `main`, builds a self-signed `.dmg` +
+updater artifacts, tags, and creates the GitHub release with `latest.json` —
+atomically. Full detail under
+[Internal distribution without an Apple account](#internal-distribution-without-an-apple-account).
 
-**To cut a release:**
+> **Do NOT hand-bump the version files or `git tag && git push` a release tag.**
+> `publish-release.sh` owns both, and it refuses a tag that already exists — so a
+> manual tag only *blocks* it. And **pushing a tag does not publish on its own:**
+> `release.yml`'s build/publish step is gated on the Apple secrets below (unset
+> today), so on a tag push it no-ops — and its guardrail now **fails** a bare tag
+> push that has no release, so a stray tag can't masquerade as a shipped release.
 
-1. Bump the version in **all three**: `package.json`, `src-tauri/tauri.conf.json`,
-   `src-tauri/Cargo.toml`. Commit + merge to `main`.
-2. Tag it and push the tag:
-   ```sh
-   git tag v0.2.0 && git push origin v0.2.0
-   ```
+## Releasing via CI (once the Apple secrets are set)
 
-CI (an Apple-Silicon runner) then builds, signs the updater artifact, and creates
-a **GitHub Release** for the tag with the `.dmg` + `latest.json` + `.app.tar.gz`
-attached. The workflow first fails fast if the tag doesn't match the app version.
+Once the Apple signing secrets below exist, `.github/workflows/release.yml`
+builds, signs + notarizes, and publishes when you push a **version tag** (an
+Apple-Silicon runner; it fails fast if the tag doesn't match the app version).
+Until then CI cannot publish — `publish-release.sh` is the path. Keep cutting
+releases with the script either way; adding the Apple secrets just upgrades the
+same artifacts from self-signed to notarized, no workflow edits needed.
 
 ### Secrets
 
@@ -98,11 +104,13 @@ Repo → Settings → Secrets and variables → Actions:
 | `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY` | later | Developer ID signing (base64 of the `.p12`, its password, and the identity string). |
 | `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` | later | Notarization (or use the App Store Connect API-key trio). |
 
-**Until the Apple secrets are set, CI still runs** — it just produces an
-**ad-hoc / unsigned** build. It installs, but downloaders hit a Gatekeeper
-"unidentified developer" warning (right-click → Open). Add the Apple secrets and
-the *same* workflow notarizes — no other change. Fine for internal/testing;
-notarize before a public launch.
+**Until the Apple secrets are set, CI does not build or publish on a tag push.**
+The workflow verifies the tag matches the app version, then its guardrail checks
+whether the tag already has a GitHub release: if it does (the normal case —
+`publish-release.sh` created the tag *and* its release together), CI has nothing
+to do and passes; if it doesn't (someone hand-pushed a bare tag), CI **fails**
+loudly pointing back at `publish-release.sh`. Add the Apple secrets and the
+*same* workflow starts building + notarizing + publishing — no other change.
 
 > **Public-repo requirement:** the updater endpoint is
 > `…/releases/latest/download/latest.json`. GitHub serves release assets of a
