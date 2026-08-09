@@ -20,8 +20,13 @@
 #         APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 #
 # Usage:
-#   ./scripts/release.sh              # signed + notarized (needs the env above)
-#   ./scripts/release.sh --unsigned   # ad-hoc, NOT distributable — pipeline test
+#   ./scripts/release.sh               # signed + notarized (needs the env above)
+#   ./scripts/release.sh --self-signed # stable self-signed "murmur dev" identity —
+#                                      # internal distribution WITHOUT an Apple account.
+#                                      # Gatekeeper warns once per Mac, but the stable
+#                                      # signature keeps Accessibility/mic grants across
+#                                      # updates. Still builds the updater artifacts.
+#   ./scripts/release.sh --unsigned    # ad-hoc, NOT distributable — pipeline test only
 
 set -euo pipefail
 
@@ -35,34 +40,61 @@ die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(uname)" = "Darwin" ] || die "macOS only."
 
-UNSIGNED=0
-[ "${1:-}" = "--unsigned" ] && UNSIGNED=1
+MODE="developerid"
+case "${1:-}" in
+  --unsigned)    MODE="unsigned" ;;
+  --self-signed) MODE="selfsigned" ;;
+  "")            MODE="developerid" ;;
+  *) die "unknown option '$1' — use --self-signed or --unsigned (or no flag for a Developer ID release)." ;;
+esac
 
-if [ "$UNSIGNED" -eq 1 ]; then
-  warn "Building UNSIGNED (ad-hoc). For local pipeline testing only — this .dmg"
-  warn "will NOT pass Gatekeeper on other Macs. Omit --unsigned for a real release."
-  # Make sure no stray identity/notarization env sneaks in.
-  unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
-        APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH 2>/dev/null || true
-else
-  # --- Signing identity (required) ------------------------------------------
-  [ -n "${APPLE_SIGNING_IDENTITY:-}" ] \
-    || die "APPLE_SIGNING_IDENTITY unset. e.g. 'Developer ID Application: Your Name (TEAMID)'. See docs/releasing.md"
-  security find-identity -v -p codesigning 2>/dev/null | grep -qF "$APPLE_SIGNING_IDENTITY" \
-    || die "signing identity '$APPLE_SIGNING_IDENTITY' not found in your keychain. Import your Developer ID cert first (docs/releasing.md)."
-  ok "Signing identity: $APPLE_SIGNING_IDENTITY"
+case "$MODE" in
+  unsigned)
+    warn "Building UNSIGNED (ad-hoc). For local pipeline testing only — this .dmg"
+    warn "won't pass Gatekeeper, and its ad-hoc signature changes every build, so"
+    warn "Accessibility/mic grants won't survive updates. Use --self-signed for"
+    warn "internal distribution instead."
+    # Make sure no stray identity/notarization env sneaks in.
+    unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+          APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH 2>/dev/null || true
+    ;;
 
-  # --- Notarization credentials (warn, don't block) -------------------------
-  if [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; then
-    ok "Notarization: App Store Connect API key"
-  elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
-    ok "Notarization: Apple ID + app-specific password"
-  else
-    warn "No notarization credentials set — the build will be SIGNED but NOT"
-    warn "notarized, so first-launch Gatekeeper will still warn users. See"
-    warn "docs/releasing.md to finish this properly."
-  fi
-fi
+  selfsigned)
+    # Internal distribution without an Apple Developer account: sign with the
+    # STABLE self-signed "murmur dev" identity (created by scripts/setup.sh), so
+    # each Mac's Accessibility/mic grant persists across updates (a stable
+    # designated requirement — see AGENTS.md rule #5). It isn't notarized, so
+    # Gatekeeper still warns on first open (one-time bypass).
+    SELF_ID="murmur dev"
+    security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SELF_ID" \
+      || die "self-signed identity '$SELF_ID' not found. Run ./scripts/setup.sh first to create + trust it."
+    export APPLE_SIGNING_IDENTITY="$SELF_ID"
+    # No notarization for a self-signed build.
+    unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+          APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH 2>/dev/null || true
+    ok "Signing identity: $SELF_ID (self-signed, not notarized — internal use)"
+    ;;
+
+  developerid)
+    # --- Signing identity (required) ----------------------------------------
+    [ -n "${APPLE_SIGNING_IDENTITY:-}" ] \
+      || die "APPLE_SIGNING_IDENTITY unset. e.g. 'Developer ID Application: Your Name (TEAMID)'. See docs/releasing.md (or use --self-signed for internal builds)."
+    security find-identity -v -p codesigning 2>/dev/null | grep -qF "$APPLE_SIGNING_IDENTITY" \
+      || die "signing identity '$APPLE_SIGNING_IDENTITY' not found in your keychain. Import your Developer ID cert first (docs/releasing.md)."
+    ok "Signing identity: $APPLE_SIGNING_IDENTITY"
+
+    # --- Notarization credentials (warn, don't block) -----------------------
+    if [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+      ok "Notarization: App Store Connect API key"
+    elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+      ok "Notarization: Apple ID + app-specific password"
+    else
+      warn "No notarization credentials set — the build will be SIGNED but NOT"
+      warn "notarized, so first-launch Gatekeeper will still warn users. See"
+      warn "docs/releasing.md to finish this properly."
+    fi
+    ;;
+esac
 
 # --- Updater signing key (always needed) -------------------------------------
 # createUpdaterArtifacts is on, so EVERY build signs the update archive with the
@@ -148,7 +180,7 @@ PY
   say "$TARGZ_NAME and latest.json to it (CI does this automatically on tag push)."
 fi
 
-if [ "$UNSIGNED" -eq 0 ] && [ -d "$APP" ]; then
+if [ "$MODE" = "developerid" ] && [ -d "$APP" ]; then
   echo
   say "Verifying signature + notarization…"
   # Gatekeeper assessment: "accepted" + "source=Notarized Developer ID" is the goal.
@@ -159,6 +191,11 @@ if [ "$UNSIGNED" -eq 0 ] && [ -d "$APP" ]; then
   else
     warn "No stapled ticket (expected if notarization was skipped)."
   fi
+elif [ "$MODE" = "selfsigned" ] && [ -d "$APP" ]; then
+  echo
+  ok "Signed with a stable identity → Accessibility/mic grants persist across updates."
+  warn "Not notarized: on first open each teammate gets a Gatekeeper prompt — they"
+  warn "right-click the app → Open (or System Settings → Privacy & Security → Open Anyway)."
 fi
 
 echo

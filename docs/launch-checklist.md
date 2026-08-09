@@ -7,25 +7,25 @@ membership, secrets). Details for each live in [`releasing.md`](releasing.md).
 
 ## 1. Go public  ← the key unlock
 
-- [ ] **Make the repository public.** This single switch unlocks three things at
-      once, so several items below are blocked until it's done:
-  - **Auto-update + public downloads** — the updater fetches
-    `…/releases/latest/download/latest.json`; GitHub serves a *private* repo's
-    release assets only to authenticated users, so auto-update and the README /
-    landing-page download links only work once the repo is public.
-  - **Branch rulesets / required status checks** — disabled on a private
-    free-plan repo (creating one returns `403 "Upgrade to GitHub Pro or make this
-    repository public"`).
-- [ ] **Enable the branch ruleset** (do this right after going public): require
+- [x] **Make the repository public.** ✅ Done. This unlocked auto-update +
+      anonymous downloads (the updater fetches `…/releases/latest/download/
+      latest.json`, which a private repo served only to authenticated users) and
+      branch rulesets (disabled on a private free-plan repo).
+- [ ] **Enable the branch ruleset** (now available since the repo is public):
+      require
       the `check` and `audit` status checks on `main`, admins bypass. Ready-to-run
       `gh api` command + UI steps in [`releasing.md`](releasing.md) →
       "Keeping `main` green".
 
 ## 2. Apple signing (can trail the public switch)
 
-Until these are set, CI still produces a working build — just **unsigned /
-ad-hoc**, so downloaders hit a Gatekeeper "unidentified developer" warning
-(right-click → Open). Fine for internal testing; do before a wide public launch.
+Until these are set, CI produces an **unsigned / ad-hoc** build — a Gatekeeper
+"unidentified developer" warning on first open, and (because the ad-hoc signature
+changes each build) Accessibility/mic grants that don't survive updates. For
+**internal distribution without an Apple account**, build with
+`./scripts/release.sh --self-signed` instead: it signs with the stable
+`murmur dev` identity, so grants persist across updates (still one Gatekeeper
+prompt per Mac). Do the Apple steps below before a wide public launch.
 
 - [ ] **Apple Developer Program** membership + a **Developer ID Application**
       certificate ([`releasing.md`](releasing.md) → one-time prerequisites).

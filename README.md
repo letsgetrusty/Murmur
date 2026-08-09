@@ -1,172 +1,75 @@
 # Murmur
 
-A fast, native macOS voice tool: **dictation** and **read-aloud**, with
-on-device LLM refinement over your dictation. Built as
-a Tauri v2 app with a Rust engine and a thin webview for the overlay and
-settings — deliberately *not* an 800MB Electron app.
+**Voice to text, for developers.** Fast, native macOS dictation and read-aloud,
+with one-key on-device cleanup of what you say. 100% on your Mac — no cloud, no
+accounts, no API keys.
 
-**Everything runs on-device** — local Whisper, a local LLM, and native/neural
-speech. No cloud providers, API keys, or accounts. The only network traffic is a
-one-time model download. macOS only, single-user, no telemetry.
+## ⬇ Download
 
----
+### **[Download Murmur for macOS »](https://github.com/letsgetrusty/murmur/releases/latest)**
 
-## Download
+Open `Murmur_<version>_aarch64.dmg` and drag **Murmur** to Applications.
 
-**[⬇ Download the latest release »](https://github.com/letsgetrusty/murmur/releases/latest)**
-— grab `Murmur_<version>_aarch64.dmg`, open it, and drag **Murmur** into
-Applications.
+**Requires macOS 11+ on Apple Silicon (M1 or later).**
 
-- **Requirements:** macOS 11+ · Apple Silicon.
-- **First launch:** the app walks you through granting **Accessibility** and
-  **Microphone** — the two permissions it needs.
-- **Updates:** Murmur checks for new versions in the background and shows a
-  one-click **Restart to update** prompt; nothing installs behind your back.
+> Not notarized yet, so macOS shows an "unidentified developer" warning the first
+> time. Right-click Murmur → **Open** → **Open** (or System Settings → Privacy &
+> Security → **Open Anyway**) — once only.
 
-> Builds aren't notarized yet, so macOS may warn "unidentified developer" on
-> first open. Right-click the app → **Open** → **Open** to bypass it (one time).
-> This note goes away once notarized builds ship.
-
----
+On first launch Murmur walks you through the one permission it needs
+(**Accessibility**) plus your **microphone**. New versions install with a
+one-click "Restart to update" — nothing happens behind your back.
 
 ## What it does
 
-- **Dictation** — hold **Fn** (or hold the chord `Cmd+Shift+D`), speak, and
-  release. Audio is transcribed on-device with local Whisper (`whisper-rs`,
-  Metal-accelerated) and pasted at your cursor.
-- **Refined dictation** — hold **Fn+Ctrl** while dictating to run the transcript
-  through a local LLM (Qwen3 via llama.cpp) that cleans up spoken filler into
-  polished text before it's pasted. Falls back to the raw transcript if the call
-  fails, so a hiccup never loses your words.
-- **Read-aloud** — select text and press **`Cmd+Shift+R`** to hear it, press again
-  to stop. With nothing selected it reads the **clipboard** instead — handy for
-  mouse-capturing terminal apps where you can't drag-select. Uses the macOS system
-  voice (`AVSpeechSynthesizer`) by default, or local neural **Kokoro** (opt-in).
-- **Playback speed** — `Cmd+Ctrl+S` cycles read-aloud speed.
-- **Overlay pill** — a small status pill appears at the bottom of the screen
-  holding the *active window* (not wherever the mouse happens to be) and shows
-  recording / transcribing / done state.
-- **Settings window** — rebind hotkeys, pick the Whisper model and TTS engine,
-  choose microphone and voice, edit the refine prompt, and see local usage
-  insights.
-- **Dictation history** — every dictation is saved to a local SQLite database
-  (with an enable toggle and retention cap) and browsable in the settings window.
+- **Dictate anywhere** — hold **Fn**, speak, release. On-device Whisper types it
+  at your cursor, in any app.
+- **Clean it up** — hold **Fn + Ctrl** to run your words through a local LLM
+  (fix grammar and punctuation, drop filler) before it's pasted.
+- **Read aloud** — **⌘⇧R** speaks the selected text (or the clipboard), in the
+  built-in macOS voice or a higher-quality neural voice.
+- **Private by design** — Whisper, the LLM, and speech all run on your Mac; your
+  voice never leaves it. See [PRIVACY.md](PRIVACY.md).
 
-### Hotkeys
+### Shortcuts
 
-| Action | Trigger |
+| Action | Keys |
 | --- | --- |
-| Dictate | Hold **Fn** &nbsp;·&nbsp; or hold `Cmd+Shift+D` |
-| Refined dictation | Hold **Fn+Ctrl** |
-| Read-aloud (toggle) | `Cmd+Shift+R` |
-| Cycle read-aloud speed | `Cmd+Ctrl+S` |
-| Cancel in-flight dictation | `Esc` |
+| Dictate | Hold **Fn** &nbsp;·&nbsp; or **⌘⇧D** |
+| Dictate & refine | Hold **Fn + Ctrl** |
+| Read aloud | **⌘⇧R** |
+| Cycle read-aloud speed | **⌘⌃S** |
+| Cancel dictation | **Esc** |
 
-The chord bindings are configurable in the settings window; the Fn gesture is a
-hardware event tap and is fixed.
+Shortcuts are rebindable in Settings; the **Fn** gesture is fixed. Dictation
+history and usage insights live in the settings window.
 
----
-
-## Requirements
-
-- **macOS only** (11+). The app leans on macOS-native APIs (CoreGraphics event
-  taps, AVFoundation, the Accessibility API) with no cross-platform abstraction.
-- **Toolchain**: Xcode Command Line Tools (`xcode-select --install`), Rust via
-  [rustup](https://rustup.rs) (the pinned version installs automatically from
-  `rust-toolchain.toml`), and Node 18+ (`.nvmrc` pins 22).
-- **Accessibility permission** — the one grant Murmur needs. It authorizes both
-  paste-injection and the Fn-key event tap. Grant it under *System Settings →
-  Privacy & Security → Accessibility*. See
-  [`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md).
-- **Models** download automatically on first use (no keys, no accounts): the
-  default Whisper model (`small.en`, ~466 MB) is fetched by `setup.sh`; the Qwen3
-  refine model and the optional Kokoro voice download on first refine/selection.
-
-This section is for building from source. To just use the app, see
-[Download](#download) above.
-
----
-
-## Getting Started
-
-From a fresh clone, one script does the machine setup:
+## Build from source
 
 ```sh
-git clone <repo-url> && cd murmur
-./scripts/setup.sh      # toolchain check · npm install · create+trust the
-                        # 'murmur dev' signing cert · build · fetch Whisper model
-./scripts/dev.sh        # build, sign, wrap in Murmur.app, launch
+git clone https://github.com/letsgetrusty/murmur && cd murmur
+./scripts/setup.sh   # toolchain check, deps, signing cert, first build + model
+./scripts/dev.sh     # build, sign, launch — use this, NOT `tauri dev`
 ```
 
-`setup.sh` is idempotent and walks you through it. It handles everything that
-*can* be automated; one step is yours to do once:
-
-1. **Grant Accessibility.** On the first `./scripts/dev.sh`, macOS won't have the
-   grant yet — enable **Murmur** under *System Settings → Privacy & Security →
-   Accessibility*, then re-run `./scripts/dev.sh`.
-
-Why the signing dance? A stable, *trusted* self-signed identity keeps the
-Accessibility grant from re-prompting on every rebuild — see
-[`docs/macos-signing-and-permissions.md`](docs/macos-signing-and-permissions.md)
-for the full story.
-
-## Development
+`dev.sh` signs with a stable self-signed identity so the Accessibility grant
+survives rebuilds (a bare `tauri dev` breaks the Fn tap). Grant **Accessibility**
+to Murmur on first run, then re-run `dev.sh`.
 
 ```sh
-./scripts/dev.sh        # build, sign (stable 'murmur dev' identity), wrap in
-                        # Murmur.app, and relaunch. Use this, NOT `tauri dev`.
+cd src-tauri && cargo test          # Rust tests
+npm test                            # frontend tests
 ```
 
-`./scripts/dev.sh` signs with a stable identity so the Accessibility grant
-survives rebuilds. A bare `tauri dev` ad-hoc-signs the binary, which breaks the
-Fn-key tap and permission persistence.
+A pre-commit hook runs `cargo fmt --check` + `cargo clippy -D warnings` on Rust
+changes. Logs stream to `~/Library/Logs/murmur.log`.
 
-```sh
-cd src-tauri && cargo check     # type-check
-cd src-tauri && cargo test      # tests
-npm run tauri build             # release build
-```
-
-A **pre-commit hook** (enabled by `setup.sh` via `git config core.hooksPath
-.githooks`) runs `cargo fmt --check` + `cargo clippy -D warnings` on any commit
-that touches Rust — bypass a WIP commit with `git commit --no-verify`. Check
-dependencies against the RustSec advisory database on demand with
-`./scripts/audit.sh` (it's intentionally not in the hook).
-
-Logs stream to `~/Library/Logs/murmur.log`.
-
----
-
-## Architecture
-
-Rust engine with each capability behind a trait (STT, TTS, refinement) so the
-backend is chosen by config, not hardcoded at call sites. All implementations run
-on-device. The webview is only the overlay and settings UI.
-
-Modules (`src-tauri/src/`): `audio` (cpal capture) · `stt` (local Whisper) ·
-`llm` (local Qwen3 refine) · `tts` (AVSpeechSynthesizer / Kokoro) ·
-`inject` (clipboard-paste injection) · `selection` (clipboard-based capture) ·
-`fn_key` (CGEventTap Fn trigger) · `hotkeys` (global-shortcut chords) ·
-`focus` (active-window screen for overlay placement) · `history` (SQLite) ·
-`usage` · `config`.
-
-The full design lives in [`docs/voice-tool-architecture.md`](docs/voice-tool-architecture.md).
-
-### Stack
-
-Tauri v2 · `tauri-plugin-global-shortcut` · `cpal` (audio in) · AVFoundation via
-`objc2` (audio out) · `whisper-rs` (STT) · `llama-cpp-2` (refine LLM) ·
-`kokoro-en` / `ort` (neural TTS) · `reqwest` (model downloads) · `enigo` +
-`arboard` (inject/selection) · `objc2*` (native macOS FFI) · `rusqlite` (history) ·
-`tokio` (async).
-
----
+Deeper docs: [architecture](docs/voice-tool-architecture.md) ·
+[signing & permissions](docs/macos-signing-and-permissions.md) ·
+[releasing](docs/releasing.md).
 
 ## License
 
-Murmur is free and open source under the [MIT License](LICENSE).
-
-- Third-party components and bundled/downloaded models are attributed in
-  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — all permissive licenses,
-  no copyleft code linked into the binary.
-- Privacy: everything runs on-device; see [`PRIVACY.md`](PRIVACY.md).
+MIT — see [LICENSE](LICENSE). Third-party components and models are attributed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) (all permissive; no copyleft
+linked into the binary).

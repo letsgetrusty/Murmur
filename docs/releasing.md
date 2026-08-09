@@ -222,16 +222,35 @@ exists). Update it in **all three**:
 - `src-tauri/tauri.conf.json` → `version`
 - `src-tauri/Cargo.toml` → `version`
 
+### Internal distribution without an Apple account
+
+To hand builds to an internal team before you have a Developer ID:
+
+```sh
+./scripts/release.sh --self-signed
+```
+
+Signs the `.dmg` with the stable self-signed **`murmur dev`** identity (created by
+`./scripts/setup.sh`). Teammates get a one-time Gatekeeper "unidentified
+developer" prompt on first open (right-click → **Open**, or System Settings →
+Privacy & Security → **Open Anyway**), but because the signature is stable their
+Accessibility/mic grants **persist across updates**. It still builds the updater
+artifacts, so auto-update works once the release assets are reachable (the repo is
+public). Notarize with a Developer ID before a wide public launch to drop the
+Gatekeeper prompt.
+
 ### Pipeline test without a certificate
 
-To confirm the bundling works before you have the Apple account:
+To just confirm the bundling works:
 
 ```sh
 ./scripts/release.sh --unsigned
 ```
 
-Produces an ad-hoc-signed `.dmg`. It builds and mounts, but **won't run on other
-Macs** — it only proves the compile + packaging path.
+Produces an **ad-hoc**-signed `.dmg`. It builds and mounts, but **won't run on
+other Macs** and its signature changes each build (permissions won't persist) —
+it only proves the compile + packaging path. Use `--self-signed` for anything you
+actually hand to people.
 
 ---
 
