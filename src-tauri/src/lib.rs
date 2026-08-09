@@ -18,6 +18,7 @@ mod tts;
 mod update;
 mod usage;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -82,6 +83,34 @@ pub struct AppState {
     /// The tray item that flips from "Check for Updates…" to
     /// "Restart to update (vX)" when an update is staged.
     pub update_item: tauri::menu::MenuItem<Wry>,
+    /// Latest per-model download progress, mirrored from `emit_download_progress`
+    /// so the overlay can show a live bar when the user tries to dictate before
+    /// the speech model has finished downloading.
+    pub downloads: Arc<Mutex<Downloads>>,
+    /// True while a dictation press actually started a recording, so the matching
+    /// release only transcribes when a recording is in flight — guards the
+    /// model-download gate and the race where the model becomes ready mid-hold.
+    pub recording_armed: AtomicBool,
+    /// True while the "waiting for the speech model" overlay watcher is running,
+    /// so a second press doesn't spawn a duplicate.
+    pub model_wait_active: AtomicBool,
+}
+
+/// Latest download progress for one model, mirrored from the download tasks.
+#[derive(Default, Clone, Copy)]
+pub struct DlProgress {
+    pub downloaded: u64,
+    pub total: u64,
+    pub failed: bool,
+}
+
+/// Latest download progress per model, for the overlay's pre-download dictation
+/// message. Updated by `emit_download_progress` / `emit_download_error`.
+#[derive(Default)]
+pub struct Downloads {
+    pub whisper: DlProgress,
+    pub llm: DlProgress,
+    pub kokoro: DlProgress,
 }
 
 /// State the overlay renders, emitted by the action router over the
@@ -95,6 +124,13 @@ pub struct AppState {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OverlayState {
     Idle,
+    /// A required model (speech-to-text) is still downloading, so dictation can't
+    /// run yet. `downloaded`/`total` fill the overlay's progress bar; total is 0
+    /// when the server sent no Content-Length.
+    Preparing {
+        downloaded: u64,
+        total: u64,
+    },
     Recording,
     Transcribing,
     /// Fn+Ctrl only: the transcript is being cleaned up by the LLM.
@@ -169,6 +205,7 @@ pub fn run() {
             commands::set_mic,
             commands::set_hotkey,
             commands::set_refine_modifier,
+            commands::set_dictation_trigger,
             commands::set_neural_voice,
             commands::download_neural_voice,
             commands::get_usage,
@@ -178,6 +215,8 @@ pub fn run() {
             commands::history_stats,
             commands::copy_text,
             commands::relaunch_app,
+            commands::app_version,
+            commands::open_url,
             commands::onboarding_status,
             commands::open_accessibility_settings,
             commands::open_microphone_settings,
@@ -319,6 +358,9 @@ pub fn run() {
                 history: history_state.clone(),
                 pending_update: Arc::new(Mutex::new(None)),
                 update_item,
+                downloads: Arc::new(Mutex::new(Downloads::default())),
+                recording_armed: AtomicBool::new(false),
+                model_wait_active: AtomicBool::new(false),
             });
 
             // The tray icon itself is auto-created from the `trayIcon` block
@@ -536,12 +578,43 @@ struct DownloadProgress {
     failed: bool,
 }
 
+/// Update the shared download tracker for `id`. Silently no-ops if AppState
+/// isn't managed yet (the very first prefetch bytes can land during setup) — the
+/// overlay watcher falls back to file-existence for readiness regardless.
+fn track_download<R: Runtime>(app: &AppHandle<R>, id: &'static str, p: DlProgress) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(mut d) = state.downloads.lock() else {
+        return;
+    };
+    let slot = if id == ipc::download::WHISPER {
+        &mut d.whisper
+    } else if id == ipc::download::LLM {
+        &mut d.llm
+    } else if id == ipc::download::KOKORO {
+        &mut d.kokoro
+    } else {
+        return;
+    };
+    *slot = p;
+}
+
 pub(crate) fn emit_download_progress<R: Runtime>(
     app: &AppHandle<R>,
     id: &'static str,
     downloaded: u64,
     total: u64,
 ) {
+    track_download(
+        app,
+        id,
+        DlProgress {
+            downloaded,
+            total,
+            failed: false,
+        },
+    );
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
@@ -554,6 +627,15 @@ pub(crate) fn emit_download_progress<R: Runtime>(
 }
 
 pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
+    track_download(
+        app,
+        id,
+        DlProgress {
+            downloaded: 0,
+            total: 0,
+            failed: true,
+        },
+    );
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
@@ -563,6 +645,81 @@ pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static s
             failed: true,
         },
     );
+}
+
+/// Whether the configured speech-to-text model is downloaded and ready.
+/// Dictation can't run until this is true; it gates the hold-to-talk trigger and
+/// drives the overlay's "downloading model" message.
+pub(crate) fn stt_model_ready<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let model = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .map(|c| c.stt_model.clone())
+        .unwrap_or_default();
+    stt::model_path(&model).map(|p| p.exists()).unwrap_or(false)
+}
+
+/// The user tried to dictate before the speech model finished downloading: show
+/// its progress in the overlay and, once, start a watcher that keeps the bar
+/// updated until the model is ready (then clears it) or the download fails.
+pub(crate) fn begin_model_wait<R: Runtime>(app: &AppHandle<R>) {
+    let whisper = |app: &AppHandle<R>| {
+        app.state::<AppState>()
+            .downloads
+            .lock()
+            .ok()
+            .map(|d| d.whisper)
+            .unwrap_or_default()
+    };
+    show_overlay(app);
+    let p = whisper(app);
+    emit_state(
+        app,
+        OverlayState::Preparing {
+            downloaded: p.downloaded,
+            total: p.total,
+        },
+    );
+    // Only one watcher at a time.
+    if app
+        .state::<AppState>()
+        .model_wait_active
+        .swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            if stt_model_ready(&app) {
+                emit_state(&app, OverlayState::Idle);
+                break;
+            }
+            let p = whisper(&app);
+            if p.failed {
+                emit_state(
+                    &app,
+                    OverlayState::Error {
+                        message: "speech model download failed — will retry on relaunch".into(),
+                    },
+                );
+                idle_after(app.clone(), Duration::from_millis(3500));
+                break;
+            }
+            emit_state(
+                &app,
+                OverlayState::Preparing {
+                    downloaded: p.downloaded,
+                    total: p.total,
+                },
+            );
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        app.state::<AppState>()
+            .model_wait_active
+            .store(false, Ordering::Release);
+    });
 }
 
 pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {

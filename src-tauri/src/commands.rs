@@ -155,6 +155,34 @@ pub fn set_refine_modifier(state: State<AppState>, modifier: String) -> Result<(
     Ok(())
 }
 
+/// Set the hold-to-talk trigger key (for keyboards without an Fn key, or to use a
+/// dedicated modifier). Read live by the hardware tap, so it applies without a
+/// restart. One of "Fn" | "RightCtrl" | "RightAlt" | "RightCmd" | "Ctrl" | "Alt"
+/// | "Cmd".
+#[tauri::command]
+pub fn set_dictation_trigger(state: State<AppState>, trigger: String) -> Result<(), String> {
+    const ACCEPTED: &[&str] = &[
+        "Fn",
+        "RightCtrl",
+        "RightAlt",
+        "RightCmd",
+        "Ctrl",
+        "Alt",
+        "Cmd",
+    ];
+    if !ACCEPTED.contains(&trigger.as_str()) {
+        return Err(format!("invalid trigger: {trigger}"));
+    }
+    let snapshot = {
+        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
+        cfg.dictation_trigger = trigger.clone();
+        cfg.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    log::info!("config: dictation trigger → {trigger}");
+    Ok(())
+}
+
 /// Onboarding opt-out for the neural read-aloud voice. Persists the choice of
 /// TTS backend (Kokoro when enabled, native macOS otherwise). Persists the
 /// choice only; the actual ~310 MB fetch is kicked off by `download_neural_voice`
@@ -330,4 +358,25 @@ pub fn copy_text(text: String) -> Result<(), String> {
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
     crate::relaunch(&app);
+}
+
+/// Murmur's version (compile-time), for the Support tab's "About" card.
+#[tauri::command]
+pub fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Open a web URL in the user's default browser (Support tab's GitHub links).
+/// Restricted to http(s) so it can't be coerced into `open`-ing a local path or
+/// arbitrary URL scheme.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) URLs are allowed".into());
+    }
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

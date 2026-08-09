@@ -82,6 +82,30 @@ pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<
     Ok(())
 }
 
+/// Chords Murmur must never register globally: they'd shadow core macOS editing
+/// or the app's own synthesized Cmd+V / Cmd+C (binding one there swallows the
+/// paste, so dictation silently stops working). Guards against the settings
+/// recorder capturing a stray combo — including the app's own paste keystroke.
+pub fn is_reserved_shortcut(sc: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "Cmd+V",
+        "Cmd+C",
+        "Cmd+X",
+        "Cmd+A",
+        "Cmd+Z",
+        "Cmd+Q",
+        "Cmd+W",
+        "CmdOrCtrl+V",
+        "CmdOrCtrl+C",
+        "CmdOrCtrl+X",
+        "CmdOrCtrl+A",
+        "CmdOrCtrl+Z",
+        "CmdOrCtrl+Q",
+        "CmdOrCtrl+W",
+    ];
+    RESERVED.contains(&sc)
+}
+
 /// Swap an action's chord live: validate the new one, unregister the old, then
 /// register the new — restoring the old if the new registration fails.
 pub fn rebind<R: Runtime>(
@@ -90,6 +114,11 @@ pub fn rebind<R: Runtime>(
     old: &str,
     new: &str,
 ) -> anyhow::Result<()> {
+    if is_reserved_shortcut(new) {
+        return Err(anyhow::anyhow!(
+            "'{new}' is reserved by macOS/Murmur — pick another combo"
+        ));
+    }
     // Validate before we touch the live registration.
     let _: Shortcut = new
         .parse()
@@ -109,7 +138,17 @@ pub fn rebind<R: Runtime>(
 /// `AppHandle`; called by both the chord callback (this module) and the
 /// Fn-key event tap (`fn_key`).
 pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
+    // If the speech model is still downloading, show its progress instead of
+    // recording audio we couldn't transcribe. `on_release` is a no-op because
+    // `recording_armed` stays false.
+    if !crate::stt_model_ready(app) {
+        crate::begin_model_wait(app);
+        return;
+    }
     log::info!("hotkey: press");
+    app.state::<AppState>()
+        .recording_armed
+        .store(true, std::sync::atomic::Ordering::Release);
     show_overlay(app);
     emit_state(app, OverlayState::Recording);
     register_escape(app);
@@ -122,8 +161,19 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 /// Done/Error and schedules the idle render once transcribe + inject return.
 /// `mode` selects plain / refined / command handling of the transcript.
 pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
-    log::info!("hotkey: release (mode={mode:?})");
+    // Always release the Esc hijack (harmless if it was never registered, e.g.
+    // the model-download gate). Only commit a transcription if this press
+    // actually started a recording — skipping it when the press hit the gate or
+    // after an Esc-cancel, so we don't strand the overlay on "Transcribing…".
     unregister_escape(app);
+    if !app
+        .state::<AppState>()
+        .recording_armed
+        .swap(false, std::sync::atomic::Ordering::AcqRel)
+    {
+        return;
+    }
+    log::info!("hotkey: release (mode={mode:?})");
     emit_state(app, OverlayState::Transcribing);
     if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop { mode }) {
         log::warn!("hotkey: dictation worker unreachable: {e}");
@@ -156,6 +206,11 @@ fn register_escape<R: Runtime>(app: &AppHandle<R>) {
                 |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
                     if event.state() == ShortcutState::Pressed {
                         log::info!("hotkey: cancel (Esc)");
+                        // Disarm so the trigger release doesn't re-emit
+                        // Transcribing over the Idle the Cancel produces.
+                        app.state::<AppState>()
+                            .recording_armed
+                            .store(false, std::sync::atomic::Ordering::Release);
                         // Don't unregister here — this runs inside the
                         // global-shortcut callback and would deadlock; on_release
                         // frees Esc when the user lets go.
@@ -253,5 +308,18 @@ mod tests {
         assert!(HotkeyAction::parse("").is_none());
         assert!(HotkeyAction::parse("command").is_none());
         assert!(HotkeyAction::parse("Dictate").is_none());
+    }
+
+    #[test]
+    fn reserved_shortcuts_are_blocked() {
+        // The app synthesizes Cmd+V / Cmd+C; binding a global chord to them would
+        // swallow paste/selection and break dictation.
+        assert!(super::is_reserved_shortcut("Cmd+V"));
+        assert!(super::is_reserved_shortcut("Cmd+C"));
+        assert!(super::is_reserved_shortcut("CmdOrCtrl+V"));
+        // Real defaults must stay allowed.
+        assert!(!super::is_reserved_shortcut("CmdOrCtrl+Shift+R"));
+        assert!(!super::is_reserved_shortcut("CmdOrCtrl+Shift+D"));
+        assert!(!super::is_reserved_shortcut("Cmd+Ctrl+S"));
     }
 }

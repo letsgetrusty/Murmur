@@ -159,6 +159,13 @@ nav {
   color: var(--text);
 }
 
+/* Support tab: the version value sitting opposite its row label. */
+.support-value {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Engines: "relaunch to apply" prompt shown after an engine change ---------- */
 .engine-relaunch {
   display: flex;

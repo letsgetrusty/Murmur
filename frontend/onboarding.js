@@ -102,6 +102,9 @@ async function refreshStatus() {
     if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
     if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
     if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
+    // Reflect speech-model readiness on the final step, so the user knows whether
+    // dictation will work the moment they finish (the model must download first).
+    updateReadyNote(status.whisper_ready);
   } catch (e) {
     /* transient; polled again shortly */
   }
@@ -130,6 +133,17 @@ function maybeStartNeural() {
   invoke(CMD.DOWNLOAD_NEURAL_VOICE).catch(() => {
     neuralStarted = false; // let a later attempt retry
   });
+}
+
+// The final step's speech-model readiness line: green when Whisper is on disk,
+// otherwise a reassurance that dictation works once the download finishes.
+function updateReadyNote(ready) {
+  const note = $("#ob-ready-note");
+  if (!note) return;
+  note.dataset.ready = ready ? "yes" : "pending";
+  note.textContent = ready
+    ? "✓ Speech model ready — you can dictate as soon as you finish."
+    : "⏳ Speech model still downloading — dictation works once it finishes (it keeps going in the background).";
 }
 
 function markDownloadDone(id) {

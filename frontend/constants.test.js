@@ -21,9 +21,9 @@ describe("constants integrity", () => {
     });
   }
 
-  it("TABS covers exactly the three settings tabs", () => {
+  it("TABS covers exactly the settings tabs", () => {
     expect(new Set(Object.values(TABS))).toEqual(
-      new Set(["history", "insights", "settings"])
+      new Set(["history", "insights", "settings", "support"])
     );
   });
 });

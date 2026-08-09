@@ -109,6 +109,17 @@ body {
   z-index: -1;
 }
 
+/* Preparing — a required model is still downloading. Pulsing dot + the
+   .pill-fill bar shows download progress; roomier so the label isn't clipped. */
+.pill[data-state="preparing"] {
+  max-width: 340px;
+}
+.pill[data-state="preparing"] .dot {
+  background: var(--state-transcribing);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
+  animation: pulse 1s ease-in-out infinite;
+}
+
 /* Transcribing — pulsing dot (mid-gray). */
 .pill[data-state="transcribing"] .dot {
   background: var(--state-transcribing);

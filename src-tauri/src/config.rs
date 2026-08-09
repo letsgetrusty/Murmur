@@ -32,18 +32,25 @@ pub struct Config {
     #[serde(default = "default_history_limit")]
     pub history_limit: u32,
     /// Global-shortcut chords (the tauri-plugin-global-shortcut format, e.g.
-    /// "Alt+A"). The Fn-hold dictation trigger is a hardware tap and is not
-    /// configurable here.
+    /// "Alt+A"). The hold-to-talk trigger is a hardware tap (`dictation_trigger`
+    /// below), separate from these chords.
     #[serde(default = "default_hotkey_dictate")]
     pub hotkey_dictate: String,
     #[serde(default = "default_hotkey_tts")]
     pub hotkey_tts: String,
     #[serde(default = "default_hotkey_tts_speed")]
     pub hotkey_tts_speed: String,
-    /// Modifier held together with Fn to trigger refined dictation.
+    /// Modifier held together with the dictation trigger to refine dictation.
     /// One of "Ctrl" | "Shift" | "Alt" | "Cmd".
     #[serde(default = "default_refine_modifier")]
     pub refine_modifier: String,
+    /// The hold-to-talk trigger, read live by the hardware key tap (`fn_key`).
+    /// "Fn" (default); a right-side modifier ("RightCtrl" | "RightAlt" |
+    /// "RightCmd") — a dedicated key that won't clash with normal shortcuts, for
+    /// keyboards without an Fn key; or a plain modifier ("Ctrl" | "Alt" | "Cmd"),
+    /// which also fires alongside ordinary shortcuts that use it.
+    #[serde(default = "default_dictation_trigger")]
+    pub dictation_trigger: String,
     /// Local Whisper model name (a whisper.cpp ggml model, e.g. "small.en").
     /// The GGML file is fetched to <app-support>/murmur/models/ggml-<name>.bin.
     #[serde(default = "default_stt_model")]
@@ -64,6 +71,11 @@ pub struct Config {
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
 fn default_refine_modifier() -> String {
     DEFAULT_REFINE_MODIFIER.to_string()
+}
+
+pub const DEFAULT_DICTATION_TRIGGER: &str = "Fn";
+fn default_dictation_trigger() -> String {
+    DEFAULT_DICTATION_TRIGGER.to_string()
 }
 
 // Alternate dictation chord (Fn hold-to-dictate is the primary trigger and is
@@ -120,6 +132,7 @@ impl Default for Config {
             hotkey_tts: default_hotkey_tts(),
             hotkey_tts_speed: default_hotkey_tts_speed(),
             refine_modifier: default_refine_modifier(),
+            dictation_trigger: default_dictation_trigger(),
             stt_model: default_stt_model(),
             tts_provider: default_tts_provider(),
             llm_model: default_llm_model(),
@@ -187,6 +200,7 @@ mod tests {
         assert_eq!(c.hotkey_tts, DEFAULT_HOTKEY_TTS);
         assert_eq!(c.hotkey_dictate, DEFAULT_HOTKEY_DICTATE);
         assert_eq!(c.refine_modifier, DEFAULT_REFINE_MODIFIER);
+        assert_eq!(c.dictation_trigger, DEFAULT_DICTATION_TRIGGER);
         assert_eq!(c.mic_name, None);
         assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
         assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);

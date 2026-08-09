@@ -27,6 +27,7 @@
           <button class="nav-item active" data-tab="history">History</button>
           <button class="nav-item" data-tab="settings">Settings</button>
           <button class="nav-item" data-tab="insights">Insights</button>
+          <button class="nav-item" data-tab="support">Support</button>
         </nav>
       </aside>
 
@@ -96,7 +97,19 @@
             <h2>Keyboard shortcuts</h2>
             <div class="row">
               <span class="row-label">Dictate — hold to talk</span>
-              <span class="fn-badge" title="Always on; can't be changed">Fn</span>
+              <select id="dictation-trigger">
+                <option value="Fn">Fn key</option>
+                <optgroup label="Dedicated key — no Fn needed">
+                  <option value="RightCtrl">Right ⌃ Control</option>
+                  <option value="RightAlt">Right ⌥ Option</option>
+                  <option value="RightCmd">Right ⌘ Command</option>
+                </optgroup>
+                <optgroup label="Any-side modifier — also fires with shortcuts">
+                  <option value="Ctrl">⌃ Control</option>
+                  <option value="Alt">⌥ Option</option>
+                  <option value="Cmd">⌘ Command</option>
+                </optgroup>
+              </select>
             </div>
             <div class="row">
               <span class="row-label">Dictate — alternate shortcut (hold)</span>
@@ -113,7 +126,7 @@
             <div class="row">
               <span class="row-label">Dictate &amp; refine</span>
               <span class="refine-combo">
-                <span class="fn-badge">Fn</span>
+                <span class="fn-badge" id="refine-trigger-badge">Fn</span>
                 <span class="plus">+</span>
                 <select id="refine-modifier">
                   <option value="Ctrl">⌃ Control</option>
@@ -124,9 +137,9 @@
               </span>
             </div>
             <p id="hotkey-status" class="hint">
-              Hold a shortcut (or the <b>Fn</b> key) to dictate — talk, then
-              release. Hold Fn + the modifier above to also <b>refine</b> (clean
-              up) your words.
+              Hold your dictate key (or an alternate shortcut) to talk, then
+              release to paste. Add the modifier above to also <b>refine</b>
+              (clean up) your words. No Fn key? Pick a different dictate key above.
             </p>
 
             <label class="field">
@@ -174,6 +187,37 @@
             <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
           </div>
 
+        </section>
+
+        <!-- Support -->
+        <section id="tab-support" class="tab">
+          <header class="tab-head">
+            <h1>Support</h1>
+          </header>
+
+          <div class="card">
+            <h2>About</h2>
+            <div class="row">
+              <span class="row-label">Version</span>
+              <span id="app-version" class="support-value">—</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Feedback</h2>
+            <p class="hint">
+              Found a bug or have a feature idea? Open an issue on GitHub — it
+              genuinely helps.
+            </p>
+            <div class="row">
+              <span class="row-label">Report a bug or request a feature</span>
+              <button id="report-issue" class="primary small">Open GitHub Issues</button>
+            </div>
+            <div class="row">
+              <span class="row-label">Source code</span>
+              <button id="view-github" class="small-btn">View on GitHub</button>
+            </div>
+          </div>
         </section>
 
         <!-- History -->

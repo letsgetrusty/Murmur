@@ -220,6 +220,35 @@ const HOTKEY_FIELD = {
   tts_speed: "hotkey_tts_speed",
 };
 
+// Combos we never let a global shortcut take: core macOS editing keys and the
+// ones Murmur synthesizes for paste/copy — binding those would break dictation.
+// Mirrors is_reserved_shortcut() in hotkeys.rs (the backend rejects them too).
+const RESERVED_SHORTCUTS = new Set([
+  "Cmd+V",
+  "Cmd+C",
+  "Cmd+X",
+  "Cmd+A",
+  "Cmd+Z",
+  "Cmd+Q",
+  "Cmd+W",
+]);
+
+// Short label for the "Dictate & refine" combo's leading key — mirrors the
+// chosen hold-to-talk trigger so the refine hint stays accurate.
+const TRIGGER_BADGE = {
+  Fn: "Fn",
+  RightCtrl: "Right ⌃",
+  RightAlt: "Right ⌥",
+  RightCmd: "Right ⌘",
+  Ctrl: "⌃",
+  Alt: "⌥",
+  Cmd: "⌘",
+};
+function syncTriggerBadge() {
+  const badge = el("refine-trigger-badge");
+  if (badge) badge.textContent = TRIGGER_BADGE[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
+}
+
 // The recorder relies on the control itself for confirmation — the button
 // label (or dropdown value) updates to the new binding — so success and cancel
 // need no message. Only errors get feedback, shown inline on the active control
@@ -273,6 +302,14 @@ async function onRecordKey(e) {
   }
 
   const shortcut = [...mods, key].join("+");
+  // Refuse core-editing / app-synthesized combos (Cmd+V, Cmd+C, …). Binding one
+  // globally would swallow the app's own paste and silently break dictation.
+  // Keep listening so the user can pick something else.
+  if (RESERVED_SHORTCUTS.has(shortcut)) {
+    recording.button.classList.add("invalid");
+    recording.button.textContent = "Reserved — pick another";
+    return;
+  }
   const { action, button } = recording;
   stopRecording(false);
   button.textContent = prettyShortcut(shortcut); // label change confirms success
@@ -298,7 +335,26 @@ function initHotkeys() {
     });
   }
 
-  // Refined dictation: Fn + a configurable modifier.
+  // Hold-to-talk trigger: Fn, a right-side modifier (a dedicated key for
+  // keyboards without Fn), or a plain modifier. Applies live (read by the tap).
+  const dt = el("dictation-trigger");
+  if (dt) {
+    dt.value = currentConfig.dictation_trigger ?? "Fn";
+    syncTriggerBadge();
+    dt.addEventListener("change", async (e) => {
+      const trigger = e.target.value;
+      try {
+        await invoke(CMD.SET_DICTATION_TRIGGER, { trigger });
+        currentConfig.dictation_trigger = trigger; // selected value confirms it
+        syncTriggerBadge();
+      } catch (err) {
+        dt.value = currentConfig.dictation_trigger ?? "Fn";
+        flashInvalid(dt);
+      }
+    });
+  }
+
+  // Refined dictation: the trigger + a configurable modifier.
   const rm = el("refine-modifier");
   if (rm) {
     rm.value = currentConfig.refine_modifier ?? "Ctrl";
@@ -525,6 +581,27 @@ function initHistory() {
   });
 }
 
+// --- Support ------------------------------------------------------------------
+
+const REPO_URL = "https://github.com/letsgetrusty/murmur";
+const ISSUES_URL = `${REPO_URL}/issues`;
+
+async function loadSupport() {
+  if (!invoke) return;
+  try {
+    const version = await invoke(CMD.APP_VERSION);
+    el("app-version").textContent = `v${version}`;
+  } catch (_) {
+    el("app-version").textContent = "unknown";
+  }
+}
+
+function initSupport() {
+  const open = (url) => invoke?.(CMD.OPEN_URL, { url }).catch(() => {});
+  el("report-issue")?.addEventListener("click", () => open(ISSUES_URL));
+  el("view-github")?.addEventListener("click", () => open(REPO_URL));
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
@@ -633,6 +710,8 @@ async function init() {
   initUsage();
   initHistory();
   initUpdate();
+  initSupport();
+  loadSupport();
 
   // The settings window is reused across opens (shown/focused, not recreated),
   // so init() runs once. Re-enumerate input devices whenever the window is

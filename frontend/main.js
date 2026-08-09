@@ -19,14 +19,25 @@ function applyState(payload) {
   const kind = payload?.kind ?? "idle";
   pill.dataset.state = kind;
 
-  // Read-aloud progress fill (0..1); cleared for every other state.
+  // Progress fill (0..1): read-aloud progress while "reading", download
+  // progress while "preparing"; cleared for every other state.
   const fill = pill.querySelector(".pill-fill");
   if (fill) {
-    const p = kind === "reading" ? (payload.progress ?? 0) : 0;
+    let p = 0;
+    if (kind === "reading") p = payload.progress ?? 0;
+    else if (kind === "preparing" && (payload.total ?? 0) > 0)
+      p = (payload.downloaded ?? 0) / payload.total;
     fill.style.transform = `scaleX(${Math.max(0, Math.min(1, p))})`;
   }
 
   switch (kind) {
+    case "preparing": {
+      const total = payload.total ?? 0;
+      const pct = total > 0 ? Math.round(((payload.downloaded ?? 0) / total) * 100) : null;
+      label.textContent =
+        pct != null ? `Downloading speech model… ${pct}%` : "Downloading speech model…";
+      break;
+    }
     case "done": {
       const chars = payload.chars ?? 0;
       label.textContent = chars > 0 ? `✓ pasted (${chars} chars)` : "✓ done";

@@ -27,6 +27,7 @@ export const CMD = {
   SET_MIC: "set_mic",
   SET_HOTKEY: "set_hotkey",
   SET_REFINE_MODIFIER: "set_refine_modifier",
+  SET_DICTATION_TRIGGER: "set_dictation_trigger",
   SET_NEURAL_VOICE: "set_neural_voice",
   DOWNLOAD_NEURAL_VOICE: "download_neural_voice",
   GET_USAGE: "get_usage",
@@ -36,6 +37,8 @@ export const CMD = {
   CLEAR_HISTORY: "clear_history",
   COPY_TEXT: "copy_text",
   RELAUNCH_APP: "relaunch_app",
+  APP_VERSION: "app_version",
+  OPEN_URL: "open_url",
   PENDING_UPDATE_VERSION: "pending_update_version",
   INSTALL_STAGED_UPDATE: "install_staged_update",
   ONBOARDING_STATUS: "onboarding_status",
@@ -51,6 +54,7 @@ export const TABS = {
   HISTORY: "history",
   INSIGHTS: "insights",
   SETTINGS: "settings",
+  SUPPORT: "support",
 };
 
 // Model-download ids, carried in the MODEL_DOWNLOAD payload's `id` field.
