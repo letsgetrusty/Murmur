@@ -31,19 +31,6 @@ one-click "Restart to update" — nothing happens behind your back.
 - **Private by design** — Whisper, the LLM, and speech all run on your Mac; your
   voice never leaves it. See [PRIVACY.md](PRIVACY.md).
 
-### Shortcuts
-
-| Action | Keys |
-| --- | --- |
-| Dictate | Hold **Fn** &nbsp;·&nbsp; or **⌘⇧D** |
-| Dictate & refine | Hold **Fn + Ctrl** |
-| Read aloud | **⌘⇧R** |
-| Cycle read-aloud speed | **⌘⌃S** |
-| Cancel dictation | **Esc** |
-
-Shortcuts are rebindable in Settings; the **Fn** gesture is fixed. Dictation
-history and usage insights live in the settings window.
-
 ## Build from source
 
 ```sh
