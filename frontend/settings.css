@@ -65,7 +65,7 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 180px 1fr;
   grid-template-rows: minmax(0, 1fr);
   /* Fill the actual client box via the html/body 100% chain — NOT 100vh.
      In WKWebView, 100vh resolves taller than the visible webview, so an
