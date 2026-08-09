@@ -108,20 +108,6 @@ body {
   margin-top: var(--space-lg);
 }
 
-/* Neural-voice opt-out: a multi-line toggle, so override the base .toggle's
-   single-line (nowrap, centered) layout. */
-.ob-neural {
-  white-space: normal;
-  align-items: flex-start;
-  gap: var(--space-sm);
-  margin-top: var(--space-xl);
-  line-height: var(--lh-snug);
-}
-.ob-neural input {
-  margin-top: 2px; /* align the checkbox with the first text line */
-  flex: 0 0 auto;
-}
-
 /* Footer nav -------------------------------------------------------------- */
 .ob-foot {
   display: flex;

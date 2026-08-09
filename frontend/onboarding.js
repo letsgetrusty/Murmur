@@ -46,9 +46,9 @@ function goTo(n) {
     s.hidden = Number(s.dataset.step) !== step;
   });
   renderDots();
-  // Start the Kokoro download when the user reaches the downloads step (if the
-  // neural voice is kept), so its bar fills alongside Whisper/Qwen.
-  if (step === DOWNLOAD_STEP) maybeStartNeural();
+  // Start the Kokoro download when the user reaches the downloads step, so its
+  // bar fills alongside Whisper/Qwen.
+  if (step === DOWNLOAD_STEP) startNeural();
 }
 
 // --- Permissions -------------------------------------------------------------
@@ -123,12 +123,12 @@ const dlDone = {
   [DOWNLOAD.KOKORO]: false,
 };
 
-// The Kokoro download is opt-out: kicked off (once) only when the neural-voice
-// box is kept, so opting out never fetches the ~310 MB model.
+// Kokoro is the default read-aloud voice, so fetch it (once) when the user reaches
+// the downloads step. They can switch to the built-in macOS voice later in
+// Settings; that never needs this ~310 MB model.
 let neuralStarted = false;
-function maybeStartNeural() {
-  const on = $("#ob-neural")?.checked;
-  if (!on || neuralStarted || !invoke) return;
+function startNeural() {
+  if (neuralStarted || !invoke) return;
   neuralStarted = true;
   invoke(CMD.DOWNLOAD_NEURAL_VOICE).catch(() => {
     neuralStarted = false; // let a later attempt retry
@@ -203,17 +203,9 @@ function fmtMB(bytes) {
 async function finish() {
   const btn = $("#ob-finish");
   btn.disabled = true;
-  // Persist the read-aloud voice choice. When kept (default), the ~310 MB Kokoro
-  // model downloads via the startup prefetch after the relaunch below; when
-  // unchecked, the backend stays on the built-in macOS voice and never fetches it.
-  const neural = $("#ob-neural");
-  if (neural) {
-    try {
-      await invoke(CMD.SET_NEURAL_VOICE, { enabled: neural.checked });
-    } catch (_) {
-      /* non-fatal; default (neural) stands */
-    }
-  }
+  // Read-aloud defaults to Kokoro (already the config default); it's changed in
+  // Settings, not here. The model keeps downloading via the startup prefetch
+  // after the relaunch/close below.
   try {
     await invoke(CMD.FINISH_ONBOARDING);
   } catch (e) {
@@ -259,16 +251,6 @@ function init() {
   });
 
   $("#ob-finish").addEventListener("click", finish);
-
-  // Neural-voice opt-out: persist the choice, hide its download row when off,
-  // and start the download when turned (back) on.
-  const neural = $("#ob-neural");
-  neural?.addEventListener("change", () => {
-    invoke?.(CMD.SET_NEURAL_VOICE, { enabled: neural.checked });
-    const row = $("#dl-kokoro");
-    if (row) row.hidden = !neural.checked;
-    if (neural.checked) maybeStartNeural();
-  });
 
   // Retry a failed download. spawn_download is guarded backend-side, so a
   // double-tap is harmless; reset the row optimistically for instant feedback.

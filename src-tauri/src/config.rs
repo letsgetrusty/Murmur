@@ -100,8 +100,9 @@ fn default_hotkey_tts_speed() -> String {
 }
 pub const DEFAULT_STT_MODEL: &str = "small.en";
 // Default to the higher-quality on-device neural voice. It needs a ~310 MB
-// download, fetched after first-run onboarding (opt-out) — see the kokoro prefetch
-// in lib.rs (gated on `onboarding_done`) and `set_neural_voice`.
+// download, fetched during first-run onboarding — see the kokoro prefetch in
+// lib.rs (gated on `onboarding_done`). Users switch to the built-in macOS voice
+// in Settings if they prefer.
 pub const DEFAULT_TTS_PROVIDER: &str = "kokoro";
 pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
 fn default_stt_model() -> String {

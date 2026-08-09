@@ -183,23 +183,6 @@ pub fn set_dictation_trigger(state: State<AppState>, trigger: String) -> Result<
     Ok(())
 }
 
-/// Onboarding opt-out for the neural read-aloud voice. Persists the choice of
-/// TTS backend (Kokoro when enabled, native macOS otherwise). Persists the
-/// choice only; the actual ~310 MB fetch is kicked off by `download_neural_voice`
-/// when kept, so opting out never downloads it.
-#[tauri::command]
-pub fn set_neural_voice(state: State<AppState>, enabled: bool) -> Result<(), String> {
-    let provider = if enabled { "kokoro" } else { "native" };
-    let snapshot = {
-        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
-        cfg.tts_provider = provider.to_string();
-        cfg.clone()
-    };
-    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
-    log::info!("config: neural voice {} → tts_provider={provider}", enabled);
-    Ok(())
-}
-
 /// Kick off the Kokoro model + voice download from onboarding so its progress bar
 /// fills alongside Whisper/Qwen. Idempotent + guarded (no-op if already on disk or
 /// already downloading). Progress is emitted on `model-download` with id `kokoro`.

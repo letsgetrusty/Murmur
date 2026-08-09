@@ -210,7 +210,6 @@ pub fn run() {
             commands::set_hotkey,
             commands::set_refine_modifier,
             commands::set_dictation_trigger,
-            commands::set_neural_voice,
             commands::download_neural_voice,
             commands::retry_download,
             commands::get_usage,
