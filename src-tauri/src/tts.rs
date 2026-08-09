@@ -817,15 +817,18 @@ impl Speaker for KokoroSpeaker {
                         _ => false,
                     }
                 };
-                if !started_now {
+                // Only clear `active` if we're still the current read — a newer
+                // speak() (e.g. re-triggering read-aloud) now owns it.
+                if !started_now && generation.load(Ordering::Acquire) == n {
                     active.store(false, Ordering::Release);
                 }
             }
             // Wait for playback to finish (or stop()), then release our player and
-            // its temp files — unless a newer read already replaced it.
+            // its temp files — unless a newer read already replaced it, in which
+            // case that read owns `active`/`player` and we must not touch them.
             let _ = prog.await;
-            active.store(false, Ordering::Release);
             if generation.load(Ordering::Acquire) == n {
+                active.store(false, Ordering::Release);
                 *player_slot.lock().expect("player mutex") = None;
             }
         });

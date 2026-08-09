@@ -800,16 +800,6 @@ pub fn emit_state<R: Runtime>(app: &AppHandle<R>, state: OverlayState) {
     }
 }
 
-/// Show the overlay window. After the first call, the window stays
-/// `visible` for the rest of the session — we never call `hide()`,
-/// because AppKit terminates the process when its last visible window
-/// goes away (LSUIElement does not exempt us from that). Subsequent
-/// "hides" are done by emitting `OverlayState::Idle`, which the
-/// frontend renders as nothing.
-/// Toggle TTS: if speaking, stop; otherwise capture the current selection
-/// and read it aloud. Always called on the main thread — both the global
-/// shortcut callback and the Fn tap dispatch into here from main, and both
-/// `selection::capture_selection` and `tts::Speaker::speak` require it.
 /// Cycle TTS playback speed. Currently 1.0 ↔ 2.0; tracked in the Speaker.
 /// Routes through `apply_speed` so the tray checkmarks and the on-disk
 /// config stay in lockstep with the hotkey.
@@ -818,20 +808,22 @@ pub fn tts_speed_cycle<R: Runtime>(app: &AppHandle<R>) {
     apply_speed(app, next);
 }
 
+/// Read the current selection (or clipboard) aloud. If a read is already playing,
+/// cancel it and start the new one. Always called on the main thread — both the
+/// global shortcut callback and the tray dispatch here, and both
+/// `selection::capture_selection` and `tts::Speaker::speak` require it.
 pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<AppState>();
+    // Re-triggering while a read is in progress cancels it and reads the current
+    // selection instead of toggling off — stopping is still available via Esc or
+    // the tray "Stop reading". stop() releases the old player immediately; the new
+    // read below sets up its own overlay state + idle-watcher.
     if state.speaker.is_speaking() {
-        log::info!("tts: stop");
+        log::info!("tts: cancel in-progress read, starting a new one");
         state.speaker.stop();
-        // Esc is released by the idle-watcher once is_speaking() flips false;
-        // don't unregister from this shortcut callback (it would deadlock).
-        show_overlay(app);
-        emit_state(app, OverlayState::Done { chars: 0 });
-        idle_after(app.clone(), Duration::from_millis(400));
-        return;
     }
-    // Neural read-aloud requested but its voice model isn't downloaded yet: show a
-    // modal (and keep the download going) rather than silently doing nothing.
+    // Neural read-aloud requested but its voice model isn't downloaded yet: surface
+    // it on the overlay (and keep the download going) rather than doing nothing.
     let provider = state
         .config
         .lock()
