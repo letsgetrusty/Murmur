@@ -23,8 +23,10 @@ use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 
 const REPO: &str = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main";
-/// Upper bound on generated tokens (refine output ≈ the input length).
-const MAX_TOKENS: i32 = 640;
+/// Upper bound on generated tokens. Must cover Qwen3's reasoning pass *plus* the
+/// rewrite; too low and the model gets cut off mid-`<think>`, leaving no closing
+/// tag and no answer (strip_think then falls back to the raw transcript).
+const MAX_TOKENS: i32 = 1024;
 const N_CTX: u32 = 4096;
 
 /// Local path for a GGUF model by name (e.g. "Qwen3-1.7B-Q4_K_M").
@@ -182,7 +184,12 @@ impl LocalLlm {
             if model.is_eog_token(token) || n_cur >= limit {
                 break;
             }
-            if let Ok(bytes) = model.token_to_piece_bytes(token, 32, false, None) {
+            // Render special tokens as text (special=true): Qwen3's <think> /
+            // </think> are control tokens, so with special=false they'd come out
+            // empty — the reasoning text would leak but the tags marking it
+            // wouldn't, leaving strip_think nothing to cut on. We already stop at
+            // the EOG token, so end-markers never make it into `out`.
+            if let Ok(bytes) = model.token_to_piece_bytes(token, 32, true, None) {
                 out.extend_from_slice(&bytes);
             }
             sampler.accept(token);
@@ -198,13 +205,19 @@ impl LocalLlm {
     }
 }
 
-/// Drop everything up to and including a `</think>` block, in case Qwen3 emits
-/// one despite `/no_think`.
+/// Extract the model's answer, dropping Qwen3's `<think>…</think>` reasoning:
+/// keep everything after the final `</think>`. If a `<think>` was opened but
+/// never closed (reasoning hit the token cap), there is no usable answer — return
+/// "" so the caller falls back to the raw transcript rather than pasting raw
+/// chain-of-thought.
 fn strip_think(s: &str) -> &str {
-    match s.rfind("</think>") {
-        Some(pos) => &s[pos + "</think>".len()..],
-        None => s,
+    if let Some(pos) = s.rfind("</think>") {
+        return &s[pos + "</think>".len()..];
     }
+    if s.contains("<think>") {
+        return "";
+    }
+    s
 }
 
 #[cfg(test)]
@@ -214,10 +227,15 @@ mod tests {
     #[test]
     fn strip_think_keeps_only_the_answer() {
         assert_eq!(
-            strip_think("<think>\nreasoning\n</think>\nHello."),
+            strip_think("<think>\nreasoning\n</think>\nHello.",),
             "\nHello."
         );
         assert_eq!(strip_think("no think tags here"), "no think tags here");
+        // Unclosed <think> (reasoning truncated at the token cap) → no answer, so
+        // drop it entirely rather than leak the chain-of-thought.
+        assert_eq!(strip_think("<think>\nreasoning that never closes"), "");
+        // Only the LAST </think> matters if the answer itself mentions one.
+        assert_eq!(strip_think("<think>a</think>b</think>c"), "c");
     }
 
     /// End-to-end local generation; needs the GGUF model on disk. Ignored by
