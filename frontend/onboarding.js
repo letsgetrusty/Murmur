@@ -102,9 +102,8 @@ async function refreshStatus() {
     if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
     if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
     if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
-    // Reflect speech-model readiness on the final step, so the user knows whether
-    // dictation will work the moment they finish (the model must download first).
-    updateReadyNote(status.whisper_ready);
+    // Reflect speech-model readiness on the Finish button (gated on Whisper).
+    updateFinish();
   } catch (e) {
     /* transient; polled again shortly */
   }
@@ -135,15 +134,29 @@ function startNeural() {
   });
 }
 
-// The final step's speech-model readiness line: green when Whisper is on disk,
-// otherwise a reassurance that dictation works once the download finishes.
-function updateReadyNote(ready) {
-  const note = $("#ob-ready-note");
-  if (!note) return;
-  note.dataset.ready = ready ? "yes" : "pending";
-  note.textContent = ready
-    ? "✓ Speech model ready — you can dictate as soon as you finish."
-    : "⏳ Speech model still downloading — dictation works once it finishes (it keeps going in the background).";
+// Whisper is the one model dictation can't work without, so the Finish button
+// waits for it — nobody exits onboarding into a speech-to-text feature that
+// silently does nothing. Qwen/Kokoro keep downloading in the background and
+// self-heal, so they don't gate finishing.
+const whisper = { ready: false, failed: false, downloaded: 0, total: 0 };
+
+function updateFinish() {
+  const btn = $("#ob-finish");
+  if (!btn) return;
+  if (!invoke || whisper.ready) {
+    // Ready — or IPC unavailable, in which case never trap the user.
+    btn.disabled = false;
+    btn.textContent = "Finish";
+  } else if (whisper.failed) {
+    // Offline / download error — let them out; dictation self-heals on retry.
+    btn.disabled = false;
+    btn.textContent = "Finish anyway";
+  } else {
+    btn.disabled = true;
+    const pct =
+      whisper.total > 0 ? ` ${Math.round((whisper.downloaded / whisper.total) * 100)}%` : "…";
+    btn.textContent = `Downloading speech model${pct}`;
+  }
 }
 
 // Show/hide a row's Retry button (shown only when its download has failed).
@@ -155,6 +168,11 @@ function setRetry(id, show) {
 
 function markDownloadDone(id) {
   dlDone[id] = true;
+  if (id === DOWNLOAD.WHISPER) {
+    whisper.ready = true;
+    whisper.failed = false;
+    updateFinish();
+  }
   const row = $(`#${DL_EL[id]}`);
   if (!row) return;
   const fill = $("[data-fill]", row);
@@ -168,6 +186,13 @@ function markDownloadDone(id) {
 function renderDownload({ id, downloaded, total, failed }) {
   const row = $(`#${DL_EL[id]}`);
   if (!row) return;
+  // Keep the Finish gate in sync with Whisper's live progress.
+  if (id === DOWNLOAD.WHISPER) {
+    whisper.downloaded = downloaded;
+    whisper.total = total;
+    whisper.failed = failed;
+    updateFinish();
+  }
   const fill = $("[data-fill]", row);
   const pct = $("[data-pct]", row);
   if (failed) {
@@ -251,6 +276,7 @@ function init() {
   });
 
   $("#ob-finish").addEventListener("click", finish);
+  updateFinish(); // gate immediately so it never flashes an enabled "Finish"
 
   // Retry a failed download. spawn_download is guarded backend-side, so a
   // double-tap is harmless; reset the row optimistically for instant feedback.
