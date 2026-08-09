@@ -148,7 +148,7 @@ STABLE_DMG="$(dirname "$DMG")/Murmur.dmg"
 cp -f "$DMG" "$STABLE_DMG"
 
 # --- 5. Create the GitHub release + upload assets -----------------------------
-say "Creating GitHub release $TAG…"
+say "Creating GitHub release ${TAG}…"
 gh release create "$TAG" \
   --target "$BRANCH" \
   --title "Murmur $VERSION" \
