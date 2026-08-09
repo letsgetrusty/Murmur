@@ -668,6 +668,7 @@ impl Speaker for KokoroSpeaker {
                     (active.clone(), progress.clone(), player_slot.clone());
                 let (durations, all_enqueued, chunk_chars) =
                     (durations.clone(), all_enqueued.clone(), chunk_chars.clone());
+                let generation = generation.clone();
                 tauri::async_runtime::spawn(async move {
                     let mut last_item: usize = 0; // currentItem ptr as usize (0 = nil)
                     let mut idx: usize = 0; // currently-playing chunk index
@@ -677,7 +678,12 @@ impl Speaker for KokoroSpeaker {
                     let mut drained_polls = 0u32;
                     loop {
                         tokio::time::sleep(Duration::from_millis(30)).await;
-                        if !active.load(Ordering::Acquire) {
+                        // Stop if this read ended (`active` false) or a newer read
+                        // superseded us (generation bumped) — a re-trigger resets
+                        // `active` to true, so `active` alone can't tell us apart.
+                        if !active.load(Ordering::Acquire)
+                            || generation.load(Ordering::Acquire) != n
+                        {
                             break;
                         }
                         let cur = {
@@ -731,8 +737,14 @@ impl Speaker for KokoroSpeaker {
                             }
                         }
                     }
-                    progress.store(1000, Ordering::Release);
-                    active.store(false, Ordering::Release);
+                    // Finalize the shared progress/active only if we're still the
+                    // current read. If a re-trigger superseded us, the new read
+                    // owns these — storing here would flash its bar full and mark
+                    // it "done" immediately.
+                    if generation.load(Ordering::Acquire) == n {
+                        progress.store(1000, Ordering::Release);
+                        active.store(false, Ordering::Release);
+                    }
                 })
             };
 
@@ -749,14 +761,16 @@ impl Speaker for KokoroSpeaker {
             let mut buffered = 0f32;
             let chunk_count = chunks.len();
             for (i, chunk) in chunks.iter().enumerate() {
-                if !active.load(Ordering::Acquire) {
+                // Bail if we were stopped or a newer read superseded us (a
+                // re-trigger resets `active`, so also check our generation).
+                if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
                 }
                 let wav = match synth_chunk_wav(&tts, chunk, voice.as_str()).await {
                     Some(w) => w,
                     None => break,
                 };
-                if !active.load(Ordering::Acquire) {
+                if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
                 }
                 let secs = (wav.len().saturating_sub(44) / 2) as f32 / KOKORO_SAMPLE_RATE as f32;
@@ -767,6 +781,11 @@ impl Speaker for KokoroSpeaker {
                 let ok = {
                     let mut g = player_slot.lock().expect("player mutex");
                     match g.as_mut() {
+                        // A newer read already owns the player slot (re-trigger):
+                        // its generation bump means this queue isn't ours, so
+                        // don't enqueue our chunk into it. Checked under the lock
+                        // the new read installs its queue with, so it's race-free.
+                        Some(_) if generation.load(Ordering::Acquire) != n => false,
                         Some(h) => {
                             // SAFETY: live AVQueuePlayer; enqueue + rate control.
                             let ok = unsafe { enqueue_wav(h.player.as_ptr(), &temp) };
@@ -807,6 +826,8 @@ impl Speaker for KokoroSpeaker {
                 let started_now = {
                     let g = player_slot.lock().expect("player mutex");
                     match g.as_ref() {
+                        // Superseded by a newer read — its queue isn't ours to start.
+                        Some(_) if generation.load(Ordering::Acquire) != n => false,
                         Some(h) if !durations.lock().expect("dur mutex").is_empty() => {
                             // SAFETY: live AVQueuePlayer held under the mutex.
                             unsafe {
