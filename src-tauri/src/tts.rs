@@ -38,6 +38,11 @@ pub trait Speaker: Send + Sync {
         self.speak(text);
     }
 
+    /// Preload a heavy backend (model load + any GPU/ANE graph compile) in the
+    /// background so the first `speak` doesn't stall. Default no-op — native
+    /// TTS is instant and needs no warming.
+    fn warm(&self) {}
+
     // Speed (1.0 = normal, 2.0 = double). Backends without a real speed
     // control no-op these.
     fn cycle_speed(&self) -> f32 {
@@ -592,6 +597,27 @@ impl Speaker for KokoroSpeaker {
                 if write_cache_file(&path, &wav) {
                     play_preview_file(&slot, &path, speed);
                 }
+            }
+        });
+    }
+
+    fn warm(&self) {
+        // Load the ONNX session and run one throwaway synth in the background:
+        // this pays the ~1s model load *and* the first-run CoreML/ANE graph
+        // compile up front, so the first real read-aloud starts promptly rather
+        // than after that one-time cost. Idempotent — the model cell
+        // short-circuits once loaded and the tiny synth is cheap.
+        let model_path = self.model_path.clone();
+        let voices_path = self.voices_path.clone();
+        let tts_cell = self.tts.clone();
+        let voice = self.voice.lock().expect("voice mutex").clone();
+        tauri::async_runtime::spawn(async move {
+            let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
+                return;
+            };
+            // A short synth forces the graph compile; the audio is discarded.
+            if tts.synth("Ready.", &voice).await.is_ok() {
+                log::info!("tts/kokoro: model warmed");
             }
         });
     }

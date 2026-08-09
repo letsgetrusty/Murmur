@@ -146,6 +146,10 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     log::info!("hotkey: press");
+    // Load the model now (in the background) so it's resident by the time the
+    // user releases — overlapping the load with the seconds they're speaking.
+    // No-op once loaded.
+    app.state::<AppState>().transcriber.warm();
     app.state::<AppState>()
         .recording_armed
         .store(true, std::sync::atomic::Ordering::Release);

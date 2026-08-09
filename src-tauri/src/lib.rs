@@ -56,6 +56,10 @@ pub enum DictationCmd {
 pub struct AppState {
     pub tx: UnboundedSender<DictationCmd>,
     pub speaker: Arc<dyn tts::Speaker>,
+    /// The STT backend, shared with the dictation worker. Held here too so the
+    /// hotkey press can `warm()` it — loading the model while the user speaks so
+    /// transcribe doesn't stall on the load when they release.
+    pub transcriber: Arc<dyn stt::Transcriber>,
     /// Tray menu checkmarks for speed, in the same order as `tts::SPEEDS`.
     pub speed_items: Vec<CheckMenuItem<Wry>>,
     /// Tray menu checkmarks for voice, in the same order as
@@ -270,7 +274,7 @@ pub fn run() {
             // The cpal Stream is !Send on macOS; keep it owned by a dedicated
             // worker thread so we never carry it across the global-shortcut
             // callback boundary.
-            let tx = spawn_dictation_worker(app.handle().clone(), transcriber, chat);
+            let tx = spawn_dictation_worker(app.handle().clone(), transcriber.clone(), chat);
 
             // Text-to-speech (both on-device): "kokoro" local neural, or the
             // native macOS AVSpeechSynthesizer (default).
@@ -313,6 +317,7 @@ pub fn run() {
             app.manage(AppState {
                 tx,
                 speaker,
+                transcriber,
                 speed_items,
                 voice_items,
                 mic_items,
@@ -367,6 +372,19 @@ pub fn run() {
             spawn_download(app.handle(), ipc::download::LLM);
             if cfg.onboarding_done && cfg.tts_provider == "kokoro" {
                 spawn_download(app.handle(), ipc::download::KOKORO);
+            }
+
+            // Warm the heavy on-device models in the background so the first
+            // dictation / read-aloud of the session doesn't stall on the model
+            // load. Only when the assets are already on disk — on first run the
+            // downloads above haven't finished, and the first use warms them
+            // then (dictation via `hotkeys::on_press`). Kokoro warming loads
+            // ~310 MB, so it's gated on the user having opted into it.
+            if stt_model_ready(app.handle()) {
+                app.state::<AppState>().transcriber.warm();
+            }
+            if cfg.onboarding_done && cfg.tts_provider == "kokoro" && tts::kokoro_assets_present() {
+                app.state::<AppState>().speaker.warm();
             }
 
             // The tray icon itself is auto-created from the `trayIcon` block

@@ -14,6 +14,11 @@ pub type TranscribeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Se
 
 pub trait Transcriber: Send + Sync {
     fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a>;
+
+    /// Preload the model off the calling thread so the first `transcribe`
+    /// doesn't pay the load. Default no-op; safe to call repeatedly (it's a
+    /// cheap check once the model is resident).
+    fn warm(&self) {}
 }
 
 // -----------------------------------------------------------------------------
@@ -52,40 +57,61 @@ pub async fn ensure_local_model(name: &str, on_progress: impl Fn(u64, u64)) -> R
 /// for the session, so app idle before the first dictation stays light.
 pub struct WhisperStt {
     model_name: String,
-    ctx: Mutex<Option<Arc<WhisperContext>>>,
+    // Behind an `Arc` so `warm` can hand the cell to a background thread.
+    ctx: Arc<Mutex<Option<Arc<WhisperContext>>>>,
 }
 
 impl WhisperStt {
     pub fn new(model_name: impl Into<String>) -> Self {
         Self {
             model_name: model_name.into(),
-            ctx: Mutex::new(None),
+            ctx: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Load (once) and return the cached whisper context.
     fn context(&self) -> Result<Arc<WhisperContext>> {
-        let mut guard = self
-            .ctx
-            .lock()
-            .map_err(|_| anyhow!("whisper ctx poisoned"))?;
-        if let Some(c) = guard.as_ref() {
-            return Ok(c.clone());
-        }
-        let path = model_path(&self.model_name)?;
-        if !path.exists() {
-            return Err(anyhow!(
-                "local Whisper model '{}' not found at {} — it downloads on startup; wait a moment and retry, or run ./scripts/setup.sh",
-                self.model_name,
-                path.display()
-            ));
-        }
-        let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-            .map_err(|e| anyhow!("load whisper model '{}': {e}", self.model_name))?;
-        let ctx = Arc::new(ctx);
-        *guard = Some(ctx.clone());
-        Ok(ctx)
+        load_context(&self.model_name, &self.ctx)
     }
+}
+
+/// Load the whisper context for `model_name` into `cell`, returning the cached
+/// one on later calls. The lock is held across the load so a concurrent
+/// `warm` + `transcribe` can't load the model twice.
+fn load_context(
+    model_name: &str,
+    cell: &Mutex<Option<Arc<WhisperContext>>>,
+) -> Result<Arc<WhisperContext>> {
+    let mut guard = cell.lock().map_err(|_| anyhow!("whisper ctx poisoned"))?;
+    if let Some(c) = guard.as_ref() {
+        return Ok(c.clone());
+    }
+    let path = model_path(model_name)?;
+    if !path.exists() {
+        return Err(anyhow!(
+            "local Whisper model '{}' not found at {} — it downloads on startup; wait a moment and retry, or run ./scripts/setup.sh",
+            model_name,
+            path.display()
+        ));
+    }
+    let mut cparams = WhisperContextParameters::default();
+    // Flash attention runs faster fused attention kernels on Metal. Its only
+    // incompatibility is DTW token timestamps, which we don't use.
+    cparams.flash_attn(true);
+    let ctx = WhisperContext::new_with_params(&path, cparams)
+        .map_err(|e| anyhow!("load whisper model '{}': {e}", model_name))?;
+    let ctx = Arc::new(ctx);
+    *guard = Some(ctx.clone());
+    Ok(ctx)
+}
+
+/// Threads for whisper's CPU-side work (Metal handles the heavy matmuls).
+/// whisper defaults to `min(4, ncpu)`; allow a few more but cap so we don't
+/// oversubscribe the efficiency cores.
+fn transcribe_threads() -> std::os::raw::c_int {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(8) as std::os::raw::c_int)
+        .unwrap_or(4)
 }
 
 impl Transcriber for WhisperStt {
@@ -104,6 +130,15 @@ impl Transcriber for WhisperStt {
                 // stdout chatter.
                 params.set_language(Some("en"));
                 params.set_translate(false);
+                // A dictation clip is one self-contained utterance: don't seed
+                // the decoder with prior-window text, and pin a single
+                // temperature so a hard clip can't trip whisper's
+                // temperature-fallback retries (which re-decode and spike
+                // latency). Give it the machine's cores while we're at it.
+                params.set_no_context(true);
+                params.set_temperature(0.0);
+                params.set_temperature_inc(0.0);
+                params.set_n_threads(transcribe_threads());
                 params.set_print_special(false);
                 params.set_print_progress(false);
                 params.set_print_realtime(false);
@@ -125,6 +160,23 @@ impl Transcriber for WhisperStt {
             .context("whisper task join")??;
             Ok(text.trim().to_string())
         })
+    }
+
+    fn warm(&self) {
+        // Already resident? Nothing to do (cheap lock, dropped before return).
+        if self.ctx.lock().map(|g| g.is_some()).unwrap_or(false) {
+            return;
+        }
+        // Load on a throwaway thread so callers (hotkey press, startup) never
+        // block on the ~1s model read. A concurrent transcribe serializes on
+        // the same lock inside `load_context`, so the model loads only once.
+        let cell = self.ctx.clone();
+        let name = self.model_name.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = load_context(&name, &cell) {
+                log::warn!("stt: warm-load failed: {e}");
+            }
+        });
     }
 }
 
