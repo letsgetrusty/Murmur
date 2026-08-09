@@ -13,6 +13,7 @@ export const EVENTS = {
   MODEL_DOWNLOAD: "model-download", // onboarding: model download progress
   UPDATE_STAGED: "update-staged", // settings: an update finished downloading
   UPDATE_NONE: "update-none", // settings: check found no update
+  CONFIG_CHANGED: "config-changed", // settings: speed/voice/mic changed elsewhere
 };
 
 // Tauri commands. Must match the #[tauri::command] fn names in src-tauri/src.

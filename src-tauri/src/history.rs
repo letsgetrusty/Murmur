@@ -1,7 +1,7 @@
 // Phase B: dictation history in an embedded SQLite database. Each committed
 // dictation is stored as a row; the settings-window History tab lists, searches,
 // copies, and deletes them. Local-only and single-user, matching the tool's
-// scope; gated by `config.history_enabled` and capped by `config.history_limit`.
+// scope; every dictation is recorded, capped by `config.history_limit`.
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

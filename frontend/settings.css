@@ -242,6 +242,45 @@ nav {
   min-width: 140px;
 }
 
+/* Modal (confirm / info dialog) ------------------------------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4xl);
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal-backdrop[hidden] {
+  display: none;
+}
+.modal {
+  width: 100%;
+  max-width: 360px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3xl);
+  box-shadow: var(--shadow-pill);
+}
+.modal-msg {
+  margin: 0 0 var(--space-2xl);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--text);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+}
+/* Destructive confirm: the OK button turns red. */
+.modal.danger #modal-ok {
+  background: var(--error);
+}
+
 /* History ----------------------------------------------------------------- */
 .hist-row {
   border: 1px solid var(--border);

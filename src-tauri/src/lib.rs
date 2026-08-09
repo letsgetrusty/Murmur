@@ -909,7 +909,8 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                     return;
                 }
                 // Otherwise, a plain "Check for Updates…": check + download, open
-                // Settings, and surface the result in its banner.
+                // Settings, and surface the result — an "up to date" modal, or
+                // the install banner when an update was staged.
                 show_main_window(&app);
                 match update::check_and_download(&app).await {
                     Some(u) => {
@@ -1019,6 +1020,9 @@ fn persist_config<R: Runtime>(app: &AppHandle<R>) {
     if let Err(e) = config::save(&snapshot) {
         log::warn!("config: save failed: {e}");
     }
+    // Nudge the settings window to re-sync speed/voice/mic, which the tray and
+    // hotkeys can change while it's open.
+    let _ = app.emit(ipc::event::CONFIG_CHANGED, ());
 }
 
 fn spawn_dictation_worker<R: Runtime>(
@@ -1128,13 +1132,8 @@ fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&st
         let state = app.state::<AppState>();
         (state.config.clone(), state.history.clone())
     };
-    let (enabled, limit) = config
-        .lock()
-        .map(|c| (c.history_enabled, c.history_limit))
-        .unwrap_or((true, 1000));
-    if !enabled {
-        return;
-    }
+    // History is always recorded now (capped by history_limit).
+    let limit = config.lock().map(|c| c.history_limit).unwrap_or(1000);
     let conn = match history.lock() {
         Ok(c) => c,
         Err(_) => return,

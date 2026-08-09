@@ -31,7 +31,7 @@ Applications.
 
 ## What it does
 
-- **Dictation** — hold **Fn** (or press the chord `Cmd+Shift+Space`), speak, and
+- **Dictation** — hold **Fn** (or hold the chord `Cmd+Shift+D`), speak, and
   release. Audio is transcribed on-device with local Whisper (`whisper-rs`,
   Metal-accelerated) and pasted at your cursor.
 - **Refined dictation** — hold **Fn+Ctrl** while dictating to run the transcript
@@ -42,7 +42,7 @@ Applications.
   to stop. With nothing selected it reads the **clipboard** instead — handy for
   mouse-capturing terminal apps where you can't drag-select. Uses the macOS system
   voice (`AVSpeechSynthesizer`) by default, or local neural **Kokoro** (opt-in).
-- **Playback speed** — `Alt+Shift+S` cycles read-aloud speed.
+- **Playback speed** — `Cmd+Ctrl+S` cycles read-aloud speed.
 - **Overlay pill** — a small status pill appears at the bottom of the screen
   holding the *active window* (not wherever the mouse happens to be) and shows
   recording / transcribing / done state.
@@ -56,10 +56,10 @@ Applications.
 
 | Action | Trigger |
 | --- | --- |
-| Dictate | Hold **Fn** &nbsp;·&nbsp; or `Cmd+Shift+Space` |
+| Dictate | Hold **Fn** &nbsp;·&nbsp; or hold `Cmd+Shift+D` |
 | Refined dictation | Hold **Fn+Ctrl** |
 | Read-aloud (toggle) | `Cmd+Shift+R` |
-| Cycle read-aloud speed | `Alt+Shift+S` |
+| Cycle read-aloud speed | `Cmd+Ctrl+S` |
 | Cancel in-flight dictation | `Esc` |
 
 The chord bindings are configurable in the settings window; the Fn gesture is a

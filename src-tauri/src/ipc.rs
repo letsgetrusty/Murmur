@@ -18,6 +18,9 @@ pub mod event {
     pub const UPDATE_STAGED: &str = "update-staged";
     /// Settings: an update check found nothing newer.
     pub const UPDATE_NONE: &str = "update-none";
+    /// Settings: speed/voice/mic changed from the tray or a hotkey — the window
+    /// re-syncs those controls.
+    pub const CONFIG_CHANGED: &str = "config-changed";
 }
 
 /// Model-download ids carried in the MODEL_DOWNLOAD payload's `id` field
@@ -106,6 +109,7 @@ mod tests {
             super::event::MODEL_DOWNLOAD,
             super::event::UPDATE_STAGED,
             super::event::UPDATE_NONE,
+            super::event::CONFIG_CHANGED,
         ]);
         assert_eq!(js_object("EVENTS"), rust);
     }

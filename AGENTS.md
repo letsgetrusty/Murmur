@@ -51,9 +51,12 @@ gotchas). When this file and the architecture doc disagree, ask.**
 4. **Fn hold-to-dictate is a `CGEventTap` (`fn_key.rs`) gated on Accessibility
    alone** — never call `IOHIDRequestAccess`: it records an Input Monitoring
    denial that overrides the Accessibility coupling and silently wedges the tap
-   off. `Cmd+Shift+Space` is the alternative dictation chord; read-aloud is the
-   `Cmd+Shift+R` chord. Avoid Option-based chords (e.g. `Alt+A`) — macOS swallows
-   them for special-character input.
+   off. Default chords: dictation `Cmd+Shift+D`, read-aloud `Cmd+Shift+R`, cycle
+   speed `Cmd+Ctrl+S` (all hold-to-talk except speed). Two chord traps, both
+   confirmed on-device: **Option-based** chords (e.g. `Alt+…`) are swallowed by
+   macOS special-character input, and **`Cmd+Space`-family** chords are eaten by
+   Spotlight/input-source switching — neither fires as a global shortcut, so
+   avoid both.
 5. **Use a stable signing identity** so Accessibility/Screen Recording grants
    survive rebuilds. Never produce a flow that re-prompts the user to grant
    Accessibility on every build.

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities granted to the overlay window.",
-  "windows": ["overlay"],
+  "description": "Capabilities granted to all app windows (overlay, settings, onboarding) — commands + Rust→JS events.",
+  "windows": ["overlay", "main", "onboarding"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

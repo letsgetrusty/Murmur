@@ -19,9 +19,73 @@ function setStatus(text, kind = "") {
   s.className = `status ${kind}`;
 }
 
-function markDirty() {
-  el("save").disabled = false;
-  setStatus("");
+// A small modal (confirm or info). Resolves true on OK/Enter, false on
+// Cancel/Esc/backdrop. Pass cancelLabel=null for a plain info dialog. Used
+// instead of window.confirm/alert, which Tauri's webview doesn't present.
+function showModal({ message, okLabel = "OK", cancelLabel = null, danger = false }) {
+  return new Promise((resolve) => {
+    const backdrop = el("modal");
+    const ok = el("modal-ok");
+    const cancel = el("modal-cancel");
+    el("modal-msg").textContent = message;
+    ok.textContent = okLabel;
+    cancel.textContent = cancelLabel ?? "Cancel";
+    cancel.hidden = cancelLabel === null;
+    backdrop.querySelector(".modal").classList.toggle("danger", danger);
+    backdrop.hidden = false;
+    const done = (result) => {
+      backdrop.hidden = true;
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      backdrop.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey, true);
+      resolve(result);
+    };
+    const onOk = () => done(true);
+    const onCancel = () => done(false);
+    const onBackdrop = (e) => {
+      if (e.target === backdrop) done(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        done(false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        done(true);
+      }
+    };
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+    backdrop.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey, true);
+    ok.focus();
+  });
+}
+
+// Auto-save the refinement prompt: debounced while typing, saved immediately on
+// blur. No Save button — settings apply as you change them.
+let refineSaveTimer = null;
+function queueRefineSave() {
+  clearTimeout(refineSaveTimer);
+  refineSaveTimer = setTimeout(saveRefinePrompt, 600);
+}
+async function saveRefinePrompt() {
+  clearTimeout(refineSaveTimer);
+  if (!invoke || !currentConfig) return;
+  const value = el("refine-prompt").value;
+  if (value === (currentConfig.refine_prompt ?? "")) return; // no change
+  const next = { ...currentConfig, refine_prompt: value };
+  setStatus("Saving…");
+  try {
+    await invoke(CMD.SAVE_CONFIG, { config: next });
+    currentConfig = next;
+    setStatus("Saved ✓", "ok");
+    setTimeout(() => setStatus(""), 1500);
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+  }
 }
 
 async function loadConfig() {
@@ -35,7 +99,6 @@ async function loadConfig() {
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
-    el("save").disabled = true;
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
@@ -58,25 +121,6 @@ async function saveEngines() {
     el("engine-relaunch").hidden = false;
   } catch (e) {
     setStatus(`Save failed: ${e}`, "error");
-  }
-}
-
-// Save the Refinement prompt (the only Save-based setting on this tab).
-async function save() {
-  if (!invoke || !currentConfig) return;
-  const next = {
-    ...currentConfig,
-    refine_prompt: el("refine-prompt").value,
-  };
-  el("save").disabled = true;
-  setStatus("Saving…");
-  try {
-    await invoke(CMD.SAVE_CONFIG, { config: next });
-    currentConfig = next;
-    setStatus("Saved ✓", "ok");
-  } catch (e) {
-    setStatus(`Save failed: ${e}`, "error");
-    el("save").disabled = false;
   }
 }
 
@@ -148,6 +192,23 @@ async function loadOptions() {
   mic.addEventListener("change", (e) => {
     const v = e.target.value;
     invoke(CMD.SET_MIC, { name: v === "" ? null : v });
+  });
+
+  // Speed/voice/mic can also change from the tray or a hotkey (e.g. Cmd+Ctrl+S
+  // cycles speed) while this window is open — re-sync those controls when they do.
+  window.__TAURI__?.event?.listen?.(EVENTS.CONFIG_CHANGED, async () => {
+    if (!invoke || !currentConfig) return;
+    try {
+      const cfg = await invoke(CMD.GET_CONFIG);
+      currentConfig.tts_speed = cfg.tts_speed;
+      currentConfig.tts_voice_id = cfg.tts_voice_id;
+      currentConfig.mic_name = cfg.mic_name;
+      el("speed").value = String(cfg.tts_speed);
+      el("voice").value = cfg.tts_voice_id;
+      el("mic").value = cfg.mic_name ?? "";
+    } catch (_) {
+      /* transient */
+    }
   });
 }
 
@@ -436,16 +497,6 @@ async function loadHistory() {
 }
 
 function initHistory() {
-  const enabled = el("history-enabled");
-  enabled.checked = currentConfig?.history_enabled ?? true;
-  enabled.addEventListener("change", async (e) => {
-    const next = { ...currentConfig, history_enabled: e.target.checked };
-    try {
-      await invoke(CMD.SAVE_CONFIG, { config: next });
-      currentConfig = next;
-    } catch (_) {}
-  });
-
   let t = null;
   el("history-search").addEventListener("input", (e) => {
     historyQuery = e.target.value;
@@ -454,7 +505,13 @@ function initHistory() {
   });
 
   el("history-clear").addEventListener("click", async () => {
-    if (!window.confirm("Delete all dictation history?")) return;
+    const ok = await showModal({
+      message: "Delete all dictation history? This can't be undone.",
+      okLabel: "Delete all",
+      cancelLabel: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await invoke(CMD.CLEAR_HISTORY);
       loadHistory();
@@ -529,11 +586,7 @@ function showUpdateStaged(version) {
 }
 
 function showUpToDate() {
-  const banner = el("update-banner");
-  banner.classList.add("neutral");
-  el("update-text").innerHTML = "You're on the latest version.";
-  el("update-install").hidden = true;
-  banner.hidden = false;
+  showModal({ message: "You're on the latest version of Murmur." });
 }
 
 async function installUpdate() {
@@ -570,14 +623,9 @@ async function init() {
     el(id).addEventListener("change", saveEngines);
   }
   el("engine-relaunch-btn").addEventListener("click", () => invoke?.(CMD.RELAUNCH_APP));
-  el("refine-prompt").addEventListener("input", markDirty);
-  el("save").addEventListener("click", save);
-  window.addEventListener("keydown", (e) => {
-    if (e.metaKey && e.key === "s" && !recording && !el("save").disabled) {
-      e.preventDefault();
-      save();
-    }
-  });
+  // Refinement prompt auto-saves (debounced while typing, flushed on blur).
+  el("refine-prompt").addEventListener("input", queueRefineSave);
+  el("refine-prompt").addEventListener("blur", saveRefinePrompt);
 
   await loadConfig();
   await loadOptions();

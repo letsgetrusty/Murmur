@@ -232,7 +232,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
             // Reclaim the leaked state so we don't drop it on the floor.
             let _ = Box::from_raw(state as *mut TapState<R>);
             log::warn!(
-                "Fn-key tap unavailable. Grant Input Monitoring in System Settings → Privacy & Security → Input Monitoring (add `murmur`), then restart. Cmd+Shift+Space still works."
+                "Fn-key tap unavailable. Grant Input Monitoring in System Settings → Privacy & Security → Input Monitoring (add `murmur`), then restart. Cmd+Shift+D still works."
             );
             return Ok(());
         }

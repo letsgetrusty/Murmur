@@ -35,10 +35,7 @@
         <section id="tab-settings" class="tab">
           <header class="tab-head">
             <h1>Settings</h1>
-            <div class="actions">
-              <span id="status" class="status"></span>
-              <button id="save" class="primary" disabled>Save</button>
-            </div>
+            <span id="status" class="status"></span>
           </header>
 
           <div id="update-banner" class="update-banner" hidden>
@@ -103,8 +100,12 @@
           <div class="card">
             <h2>Keyboard shortcuts</h2>
             <div class="row">
-              <span class="row-label">Dictate</span>
-              <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+Space"></button>
+              <span class="row-label">Dictate — hold to talk</span>
+              <span class="fn-badge" title="Always on; can't be changed">Fn</span>
+            </div>
+            <div class="row">
+              <span class="row-label">Dictate — alternate chord (hold)</span>
+              <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+D"></button>
             </div>
             <div class="row">
               <span class="row-label">Read selection aloud</span>
@@ -112,7 +113,7 @@
             </div>
             <div class="row">
               <span class="row-label">Cycle read-aloud speed</span>
-              <button class="recorder" data-action="tts_speed" data-default="Alt+Shift+S"></button>
+              <button class="recorder" data-action="tts_speed" data-default="Cmd+Ctrl+S"></button>
             </div>
             <div class="row">
               <span class="row-label">Dictate &amp; refine</span>
@@ -128,9 +129,11 @@
               </span>
             </div>
             <p id="hotkey-status" class="hint">
-              Click a shortcut, then press the new key combination (needs at
-              least one modifier). Holding the <b>Fn</b> key to dictate is always
-              on; hold Fn + the modifier above to dictate <i>and refine</i>.
+              <b>Fn</b> dictation is always on and can't be rebound (macOS only
+              exposes Fn as a modifier). The chords are <b>hold-to-talk</b> — hold
+              to dictate, release to insert. Click a chord to rebind it (needs at
+              least one modifier); hold Fn + the modifier above to dictate
+              <i>and refine</i>.
             </p>
 
             <label class="field">
@@ -189,9 +192,6 @@
           <header class="tab-head">
             <h1>History</h1>
             <div class="actions">
-              <label class="toggle" title="Record dictations to a local database">
-                <input type="checkbox" id="history-enabled" /> Record
-              </label>
               <input
                 id="history-search"
                 class="search"
@@ -210,6 +210,16 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="modal" class="modal-backdrop" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-msg">
+        <p id="modal-msg" class="modal-msg"></p>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="small-btn">Cancel</button>
+          <button id="modal-ok" class="primary">OK</button>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="./settings.js"></script>

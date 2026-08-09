@@ -28,9 +28,6 @@ pub struct Config {
     /// System prompt for the refine pass.
     #[serde(default = "default_refine_prompt")]
     pub refine_prompt: String,
-    /// Record dictation history to the local SQLite store.
-    #[serde(default = "default_history_enabled")]
-    pub history_enabled: bool,
     /// Cap on retained history rows; oldest are pruned past this.
     #[serde(default = "default_history_limit")]
     pub history_limit: u32,
@@ -69,11 +66,16 @@ fn default_refine_modifier() -> String {
     DEFAULT_REFINE_MODIFIER.to_string()
 }
 
-pub const DEFAULT_HOTKEY_DICTATE: &str = "CmdOrCtrl+Shift+Space";
-// Option-based chords (e.g. Alt+A) are swallowed by macOS's special-character
-// input, so read-aloud uses a Cmd+Shift chord instead.
+// Alternate dictation chord (Fn hold-to-dictate is the primary trigger and is
+// always on). Avoid Cmd+Space-family combos — macOS reserves them for
+// Spotlight / input-source switching, so they're unreliable as global shortcuts.
+pub const DEFAULT_HOTKEY_DICTATE: &str = "CmdOrCtrl+Shift+D";
+// Option-based chords (e.g. Alt/Option+…) are swallowed by macOS's
+// special-character input and never fire as global shortcuts, so these use
+// Cmd-based chords instead. (Cmd+Ctrl for speed to avoid clobbering the very
+// common Cmd+Shift+S "Save As" everywhere while the app runs.)
 pub const DEFAULT_HOTKEY_TTS: &str = "CmdOrCtrl+Shift+R";
-pub const DEFAULT_HOTKEY_TTS_SPEED: &str = "Alt+Shift+S";
+pub const DEFAULT_HOTKEY_TTS_SPEED: &str = "Cmd+Ctrl+S";
 
 fn default_hotkey_dictate() -> String {
     DEFAULT_HOTKEY_DICTATE.to_string()
@@ -102,9 +104,6 @@ fn default_llm_model() -> String {
 fn default_refine_prompt() -> String {
     DEFAULT_REFINE_PROMPT.to_string()
 }
-fn default_history_enabled() -> bool {
-    true
-}
 fn default_history_limit() -> u32 {
     1000
 }
@@ -116,7 +115,6 @@ impl Default for Config {
             tts_voice_id: DEFAULT_VOICE_ID.to_string(),
             mic_name: None,
             refine_prompt: default_refine_prompt(),
-            history_enabled: default_history_enabled(),
             history_limit: default_history_limit(),
             hotkey_dictate: default_hotkey_dictate(),
             hotkey_tts: default_hotkey_tts(),
@@ -185,7 +183,6 @@ mod tests {
         // Only tts_speed and tts_voice_id lack a serde default, so they're the
         // one required pair; everything else must fall back to its default.
         let c: Config = serde_json::from_str(r#"{"tts_speed":2.0,"tts_voice_id":"v"}"#).unwrap();
-        assert!(c.history_enabled);
         assert_eq!(c.history_limit, 1000);
         assert_eq!(c.hotkey_tts, DEFAULT_HOTKEY_TTS);
         assert_eq!(c.hotkey_dictate, DEFAULT_HOTKEY_DICTATE);
