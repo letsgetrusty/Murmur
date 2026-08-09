@@ -224,20 +224,32 @@ exists). Update it in **all three**:
 
 ### Internal distribution without an Apple account
 
-To hand builds to an internal team before you have a Developer ID:
+Cut and publish a full self-signed release in one command:
+
+```sh
+./scripts/publish-release.sh 0.1.1
+```
+
+This bumps the version across `package.json` / `tauri.conf.json` / `Cargo.toml`,
+commits + pushes, builds a self-signed `.dmg` + updater artifacts, then creates
+the `v0.1.1` GitHub release and uploads the DMG (as **`Murmur.dmg`**, the stable
+name the landing page's download button points at), the updater `.app.tar.gz` +
+`.sig`, and `latest.json` (so existing installs auto-update). Prereqs: `gh`
+authenticated + the `murmur dev` cert from `./scripts/setup.sh`.
+
+Under the hood it runs the build step, which you can also invoke on its own:
 
 ```sh
 ./scripts/release.sh --self-signed
 ```
 
-Signs the `.dmg` with the stable self-signed **`murmur dev`** identity (created by
-`./scripts/setup.sh`). Teammates get a one-time Gatekeeper "unidentified
-developer" prompt on first open (right-click → **Open**, or System Settings →
-Privacy & Security → **Open Anyway**), but because the signature is stable their
-Accessibility/mic grants **persist across updates**. It still builds the updater
-artifacts, so auto-update works once the release assets are reachable (the repo is
-public). Notarize with a Developer ID before a wide public launch to drop the
-Gatekeeper prompt.
+Both sign with the stable self-signed **`murmur dev`** identity. Teammates get a
+one-time Gatekeeper "unidentified developer" prompt on first open (right-click →
+**Open**, or System Settings → Privacy & Security → **Open Anyway**), but because
+the signature is stable their Accessibility/mic grants **persist across updates**.
+The tag push triggers the Release workflow, but its publish step is gated on Apple
+signing, so it won't clobber the self-signed upload. Notarize with a Developer ID
+before a wide public launch to drop the Gatekeeper prompt.
 
 ### Pipeline test without a certificate
 

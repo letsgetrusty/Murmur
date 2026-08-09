@@ -1,13 +1,13 @@
 name: Release
 
-# Publish a release when a version tag is pushed. To cut a release: bump the
-# version in package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml,
-# commit, then:
-#     git tag v0.2.0 && git push origin v0.2.0
+# Publish a NOTARIZED release when a version tag is pushed — but ONLY once the
+# Apple secrets are configured (the publish step is gated on APPLE_CONFIGURED).
 #
-# The build is ad-hoc (unsigned) until the Apple secrets below are added — it
-# installs but Gatekeeper warns. Add the Apple secrets later and this same
-# workflow notarizes; nothing else changes. See docs/releasing.md.
+# Until then, cut releases locally with `./scripts/publish-release.sh X.Y.Z`
+# (self-signed, stable identity). This workflow deliberately does NOT publish an
+# unsigned build on tag push, so it can't clobber a self-signed release that the
+# script uploads for the same tag. Add the Apple secrets and this workflow takes
+# over automatically — notarized, no edits needed. See docs/releasing.md.
 on:
   push:
     tags:
@@ -79,6 +79,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build, sign, and publish
+        # Only publish from CI once Apple signing is configured — otherwise the
+        # local self-signed release (scripts/publish-release.sh) owns the tag.
+        if: env.APPLE_CONFIGURED == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           # Auto-provided by Actions; tauri-action needs it to create the release
