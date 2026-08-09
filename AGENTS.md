@@ -117,13 +117,25 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   `constants.js` names match the Rust events/commands — keep them in sync).
 - Frontend tests (from repo root): `npm test` (Vitest — pure helpers + shared
   constants; `npm run test:watch` to iterate).
-- Release (signed + notarized DMG): `./scripts/release.sh` — needs a Developer
-  ID cert + notarization credentials in env; see `docs/releasing.md`. Bump the
-  version in `package.json`, `tauri.conf.json`, and `Cargo.toml` first.
-  `./scripts/release.sh --unsigned` tests the bundling without a cert. (Bundle
-  config: `tauri.conf.json` targets `["app","dmg"]`, hardened-runtime
-  `entitlements.plist` — minimal, just `audio-input`, since the binary is fully
-  statically linked.)
+- Release: **cut every release with `./scripts/publish-release.sh`** — the one
+  command for it. It auto-computes the next version from the highest release tag
+  (`--minor` / `--major` / an explicit `X.Y.Z` to override; `--dry-run` to
+  preview), then bumps all three manifests **and** `package-lock.json`, commits,
+  pushes `main`, builds the self-signed DMG + updater artifacts, tags, and
+  creates the GitHub release with `latest.json` for auto-update — atomically.
+  - **Do NOT hand-bump the version or create/push a `vX.Y.Z` tag yourself.** The
+    script owns both and refuses a tag that already exists, so a manual tag just
+    blocks it. **Pushing a tag does NOT publish on its own:** the CI
+    `release.yml` build/publish step is gated on Apple signing secrets that
+    aren't set yet, so on tag push it deliberately no-ops — the local script is
+    what produces a release.
+  - `./scripts/release.sh` is only the *builder* underneath (`--self-signed` for
+    the stable internal identity, `--unsigned` to test bundling, no flag for a
+    Developer ID + notarized build — needs certs/creds in env; see
+    `docs/releasing.md`). Call it directly only to test a build, not to release.
+  - Bundle config: `tauri.conf.json` targets `["app","dmg"]`, hardened-runtime
+    `entitlements.plist` — minimal, just `audio-input`, since the binary is fully
+    statically linked.
 - Lint/format: a pre-commit hook (`.githooks/pre-commit`) runs `cargo fmt --check`
   + `cargo clippy -D warnings` on Rust changes. Keep the crate clean; bypass a WIP
   commit with `git commit --no-verify`.
