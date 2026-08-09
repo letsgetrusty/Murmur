@@ -16,7 +16,14 @@
 # The tag push triggers the Release workflow, but its publish step is gated on
 # Apple signing, so it no-ops here and can't clobber this upload.
 #
-# Usage:  ./scripts/publish-release.sh 0.1.1
+# The version is worked out automatically from the highest released tag, so you
+# never hand-type (and can't fat-finger) a number:
+#   ./scripts/publish-release.sh            # patch bump  (0.1.3 → 0.1.4)
+#   ./scripts/publish-release.sh --minor    # minor bump  (0.1.3 → 0.2.0)
+#   ./scripts/publish-release.sh --major    # major bump  (0.1.3 → 1.0.0)
+#   ./scripts/publish-release.sh --dry-run  # print the next version, change nothing
+#   ./scripts/publish-release.sh 1.2.3      # pin an explicit version (escape hatch)
+# The first release (no tags yet) ships the current manifest version.
 #
 # Prereqs: gh (authenticated), the "murmur dev" cert (./scripts/setup.sh), and a
 # clean working tree on main.
@@ -31,21 +38,64 @@ ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-# --- Args + preconditions -----------------------------------------------------
-VERSION="${1:-}"
-[ -n "$VERSION" ] || die "usage: ./scripts/publish-release.sh X.Y.Z"
-echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || die "version must be X.Y.Z (got '$VERSION')"
-TAG="v$VERSION"
+# --- Parse args ---------------------------------------------------------------
+# No hand-typed number by default: bump keyword (patch|minor|major) or an
+# explicit X.Y.Z escape hatch, plus an optional --dry-run.
+BUMP="patch"; EXPLICIT=""; DRYRUN=0
+for a in "$@"; do
+  case "$a" in
+    --major|major) BUMP="major" ;;
+    --minor|minor) BUMP="minor" ;;
+    --patch|patch) BUMP="patch" ;;
+    --dry-run|-n)  DRYRUN=1 ;;
+    -h|--help)
+      grep -E '^#( |$)' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    v[0-9]*.[0-9]*.[0-9]* | [0-9]*.[0-9]*.[0-9]*) EXPLICIT="${a#v}" ;;
+    *) die "unknown arg '$a' — use [--major|--minor|--patch] [--dry-run] [X.Y.Z]" ;;
+  esac
+done
 
 [ "$(uname)" = "Darwin" ] || die "macOS only."
 command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not found — https://cli.github.com"
 gh auth status >/dev/null 2>&1 || die "gh not authenticated — run: gh auth login"
-security find-identity -v -p codesigning 2>/dev/null | grep -qF "murmur dev" \
-  || die "self-signed 'murmur dev' cert not found — run ./scripts/setup.sh first."
 
+# --- Work out the next version automatically ----------------------------------
+# Base it on the highest released tag so it always increases monotonically (the
+# updater requires that). First release (no tags yet) ships the current manifest
+# version. --minor/--major change the step; an explicit X.Y.Z overrides.
+git fetch --tags --quiet origin 2>/dev/null || true
+LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -V | tail -1)"
+if [ -n "$EXPLICIT" ]; then
+  VERSION="$EXPLICIT"
+elif [ -z "$LATEST" ]; then
+  VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+  say "No prior release tags — shipping the current manifest version."
+else
+  MAJOR="${LATEST%%.*}"; rest="${LATEST#*.}"; MINOR="${rest%%.*}"; PATCH="${rest##*.}"
+  case "$BUMP" in
+    major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+    minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+    patch) PATCH=$((PATCH + 1)) ;;
+  esac
+  VERSION="$MAJOR.$MINOR.$PATCH"
+fi
+echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || die "computed version invalid: '$VERSION'"
+TAG="v$VERSION"
+say "Next release: $TAG${LATEST:+  (${EXPLICIT:+explicit}${EXPLICIT:-$BUMP bump from v$LATEST})}"
+
+# --- Guard: the tag / release must not already exist --------------------------
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 && die "tag $TAG already exists locally."
 git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1 && die "tag $TAG already exists on origin."
 gh release view "$TAG" >/dev/null 2>&1 && die "a GitHub release $TAG already exists."
+
+if [ "$DRYRUN" -eq 1 ]; then
+  ok "[dry run] would build a self-signed release and publish $TAG — no changes made."
+  exit 0
+fi
+
+# --- Remaining preconditions (mutating steps follow) --------------------------
+security find-identity -v -p codesigning 2>/dev/null | grep -qF "murmur dev" \
+  || die "self-signed 'murmur dev' cert not found — run ./scripts/setup.sh first."
 
 BRANCH="$(git branch --show-current)"
 [ "$BRANCH" = "main" ] || warn "not on main (on '$BRANCH') — the release tag will point at this branch."

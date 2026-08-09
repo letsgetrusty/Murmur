@@ -213,26 +213,37 @@ The script validates your env, then runs `tauri build`, which:
 Output lands in `src-tauri/target/release/bundle/dmg/`. The script finishes by
 running `spctl` and `stapler validate` on the result.
 
-### Bump the version first
+### The version is worked out for you
 
-Every release needs a higher version (also required once the auto-updater
-exists). Update it in **all three**:
+Every release needs a higher version (the auto-updater only offers builds that
+compare newer). You don't hand-type it — `publish-release.sh` derives the next
+version from the highest released tag and bumps all three manifests
+(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`) in lockstep
+so they can't drift:
 
-- `package.json` → `version`
-- `src-tauri/tauri.conf.json` → `version`
-- `src-tauri/Cargo.toml` → `version`
+```sh
+./scripts/publish-release.sh            # patch bump  (0.1.3 → 0.1.4)
+./scripts/publish-release.sh --minor    # minor bump  (0.1.3 → 0.2.0)
+./scripts/publish-release.sh --major    # major bump  (0.1.3 → 1.0.0)
+./scripts/publish-release.sh --dry-run  # print the next version, change nothing
+./scripts/publish-release.sh 1.2.3      # pin an explicit version (escape hatch)
+```
+
+The first release (no tags yet) ships whatever version is already in the
+manifests. Because the bump is always relative to the last *released* tag, the
+version only ever moves forward — no accidental re-use or skipped numbers.
 
 ### Internal distribution without an Apple account
 
-Cut and publish a full self-signed release in one command:
+Cut and publish a full self-signed release in one command (e.g. a patch bump):
 
 ```sh
-./scripts/publish-release.sh 0.1.1
+./scripts/publish-release.sh
 ```
 
 This bumps the version across `package.json` / `tauri.conf.json` / `Cargo.toml`,
 commits + pushes, builds a self-signed `.dmg` + updater artifacts, then creates
-the `v0.1.1` GitHub release and uploads the DMG (as **`Murmur.dmg`**, the stable
+the `vX.Y.Z` GitHub release and uploads the DMG (as **`Murmur.dmg`**, the stable
 name the landing page's download button points at), the updater `.app.tar.gz` +
 `.sig`, and `latest.json` (so existing installs auto-update). Prereqs: `gh`
 authenticated + the `murmur dev` cert from `./scripts/setup.sh`.
