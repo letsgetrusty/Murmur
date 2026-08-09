@@ -709,6 +709,11 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
     });
 }
 
+/// Percent complete for one model's download, or `None` when the size is unknown.
+fn dl_pct(p: DlProgress) -> Option<u32> {
+    (p.total > 0).then(|| ((p.downloaded as f64 / p.total as f64) * 100.0) as u32)
+}
+
 /// Whether the configured speech-to-text model is downloaded and ready.
 /// Dictation can't run until this is true; it gates the hold-to-talk trigger and
 /// drives the overlay's "downloading model" message.
@@ -823,6 +828,36 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
         show_overlay(app);
         emit_state(app, OverlayState::Done { chars: 0 });
         idle_after(app.clone(), Duration::from_millis(400));
+        return;
+    }
+    // Neural read-aloud requested but its voice model isn't downloaded yet: show a
+    // modal (and keep the download going) rather than silently doing nothing.
+    let provider = state
+        .config
+        .lock()
+        .map(|c| c.tts_provider.clone())
+        .unwrap_or_default();
+    if provider == "kokoro" && !tts::kokoro_assets_present() {
+        let pct = dl_pct(
+            app.state::<AppState>()
+                .downloads
+                .lock()
+                .ok()
+                .map(|d| d.kokoro)
+                .unwrap_or_default(),
+        );
+        spawn_download(app, ipc::download::KOKORO);
+        show_overlay(app);
+        emit_state(
+            app,
+            OverlayState::Error {
+                message: format!(
+                    "read-aloud voice still downloading{}",
+                    pct.map(|p| format!(" ({p}%)")).unwrap_or_default()
+                ),
+            },
+        );
+        idle_after(app.clone(), Duration::from_millis(3000));
         return;
     }
     // Prefer the live selection; fall back to the clipboard when there's none,
@@ -1453,17 +1488,30 @@ async fn run_dictation<R: Runtime>(
         Ok(c) => (c.refine_prompt.clone(), c.llm_model.clone()),
         Err(_) => (String::new(), String::new()),
     };
-    // If refine is requested but its model hasn't downloaded yet, (re)start the
-    // download in the background and paste the raw transcript this time rather
-    // than stall — the next refine picks it up once it's ready.
-    let refine = refine && {
-        let ready = local_llm::assets_present(&llm_model);
-        if !ready {
-            log::info!("dictation: refine model not ready — downloading, pasting raw for now");
-            spawn_download(app, ipc::download::LLM);
-        }
-        ready
-    };
+    // Refinement requested but its model hasn't downloaded yet: surface it on the
+    // overlay (and keep the download going) instead of silently pasting the
+    // unrefined text. The words are saved to History so they aren't lost.
+    if refine && !local_llm::assets_present(&llm_model) {
+        let pct = dl_pct(
+            app.state::<AppState>()
+                .downloads
+                .lock()
+                .ok()
+                .map(|d| d.llm)
+                .unwrap_or_default(),
+        );
+        spawn_download(app, ipc::download::LLM);
+        record_history(app, &raw, None);
+        return (
+            OverlayState::Error {
+                message: format!(
+                    "refine model still downloading{} — saved to History",
+                    pct.map(|p| format!(" ({p}%)")).unwrap_or_default()
+                ),
+            },
+            3500,
+        );
+    }
     let final_text = if refine {
         emit_state(app, OverlayState::Refining);
         match llm::transform(chat, &prompt, &text).await {

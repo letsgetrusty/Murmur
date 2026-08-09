@@ -141,10 +141,12 @@ body {
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
 }
 
-/* Error — solid amber/red, label tinted. */
+/* Error — solid amber/red, label tinted. Roomier than the default pill so
+   longer messages (e.g. "model still downloading (45%)…") aren't clipped. */
 .pill[data-state="error"] {
   background: var(--overlay-error-bg);
   color: var(--overlay-error-text);
+  max-width: 380px;
 }
 .pill[data-state="error"] .dot {
   background: var(--state-error);
