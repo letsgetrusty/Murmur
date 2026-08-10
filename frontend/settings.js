@@ -369,6 +369,33 @@ function initHotkeys() {
       }
     });
   }
+
+  // Reset every binding to its default. The chords re-register live; the trigger
+  // and refine modifier apply live via the Fn tap. The backend returns the fresh
+  // config so we can repaint all the controls at once.
+  const reset = el("reset-hotkeys");
+  if (reset) {
+    reset.addEventListener("click", async () => {
+      const ok = await showModal({
+        message: "Reset all key bindings to their defaults?",
+        okLabel: "Reset",
+        cancelLabel: "Cancel",
+      });
+      if (!ok) return;
+      if (recording) stopRecording(true);
+      try {
+        currentConfig = await invoke(CMD.RESET_HOTKEYS);
+        renderHotkeys();
+        if (dt) dt.value = currentConfig.dictation_trigger ?? "Fn";
+        if (rm) rm.value = currentConfig.refine_modifier ?? "Ctrl";
+        syncTriggerBadge();
+        setStatus("Key bindings reset to defaults ✓", "ok");
+        setTimeout(() => setStatus(""), 1500);
+      } catch (err) {
+        setStatus(`Reset failed: ${err}`, "error");
+      }
+    });
+  }
 }
 
 // --- Usage --------------------------------------------------------------------

@@ -132,6 +132,57 @@ pub fn set_hotkey(
     crate::config::save(&snapshot).map_err(|e| e.to_string())
 }
 
+/// Reset every key binding — the alternate chords, the hold-to-talk trigger, and
+/// the refine modifier — to their defaults. Re-registers the global chords live
+/// (so they work without a restart) and persists. Returns the updated config so
+/// the settings UI can re-render its controls.
+#[tauri::command]
+pub fn reset_hotkeys(
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<crate::config::Config, String> {
+    use crate::config::{
+        DEFAULT_DICTATION_TRIGGER, DEFAULT_HOTKEY_DICTATE, DEFAULT_HOTKEY_TTS,
+        DEFAULT_HOTKEY_TTS_SPEED, DEFAULT_REFINE_MODIFIER,
+    };
+    use crate::hotkeys::HotkeyAction;
+
+    // Current chords, so each can be unregistered before rebinding to its default.
+    let (old_dictate, old_tts, old_speed) = {
+        let cfg = state.config.lock().map_err(|e| e.to_string())?;
+        (
+            cfg.hotkey_dictate.clone(),
+            cfg.hotkey_tts.clone(),
+            cfg.hotkey_tts_speed.clone(),
+        )
+    };
+
+    // Re-register each chord at its default. `rebind` restores the old binding if
+    // the new one fails, so a chord never ends up unbound.
+    for (action, old, default) in [
+        (HotkeyAction::Dictate, &old_dictate, DEFAULT_HOTKEY_DICTATE),
+        (HotkeyAction::TtsToggle, &old_tts, DEFAULT_HOTKEY_TTS),
+        (HotkeyAction::TtsSpeed, &old_speed, DEFAULT_HOTKEY_TTS_SPEED),
+    ] {
+        crate::hotkeys::rebind(&app, action, old, default).map_err(|e| e.to_string())?;
+    }
+
+    // Persist all keybinding fields at their defaults. The trigger + refine
+    // modifier are read live by the Fn tap, so they need no re-registration.
+    let snapshot = {
+        let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
+        cfg.hotkey_dictate = DEFAULT_HOTKEY_DICTATE.to_string();
+        cfg.hotkey_tts = DEFAULT_HOTKEY_TTS.to_string();
+        cfg.hotkey_tts_speed = DEFAULT_HOTKEY_TTS_SPEED.to_string();
+        cfg.dictation_trigger = DEFAULT_DICTATION_TRIGGER.to_string();
+        cfg.refine_modifier = DEFAULT_REFINE_MODIFIER.to_string();
+        cfg.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    log::info!("config: key bindings reset to defaults");
+    Ok(snapshot)
+}
+
 /// Cumulative local usage totals (refinements, dictations, read-alouds).
 #[tauri::command]
 pub fn get_usage(state: State<AppState>) -> crate::usage::UsageStats {

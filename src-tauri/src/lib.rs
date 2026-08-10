@@ -212,6 +212,7 @@ pub fn run() {
             commands::preview_voice,
             commands::set_mic,
             commands::set_hotkey,
+            commands::reset_hotkeys,
             commands::set_refine_modifier,
             commands::set_dictation_trigger,
             commands::download_neural_voice,

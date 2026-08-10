@@ -26,6 +26,7 @@ export const CMD = {
   PREVIEW_VOICE: "preview_voice",
   SET_MIC: "set_mic",
   SET_HOTKEY: "set_hotkey",
+  RESET_HOTKEYS: "reset_hotkeys",
   SET_REFINE_MODIFIER: "set_refine_modifier",
   SET_DICTATION_TRIGGER: "set_dictation_trigger",
   DOWNLOAD_NEURAL_VOICE: "download_neural_voice",
