@@ -47,7 +47,7 @@
   --state-refining: #e6dccf;
   --state-done: #f2eee7;
   --state-error: var(--error);
-  --overlay-bg: rgba(15, 13, 11, 0.86);
+  --overlay-bg: rgba(15, 13, 11, 0.82);
   --overlay-error-bg: rgba(46, 22, 20, 0.9);
   --overlay-error-text: #ffc0b8;
 
@@ -60,8 +60,13 @@
   /* Motion ---------------------------------------------------------------- */
   --transition-fast: 0.12s;
 
-  /* Elevation ------------------------------------------------------------- */
-  --shadow-pill: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* Elevation — dark UIs read as premium via layered shadow + a 1px top
+     inner-highlight (light catching the edge) more than via borders. --hairline
+     is that highlight; --shadow-card lifts panels; the pill floats higher. */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 26px -14px rgba(0, 0, 0, 0.5);
+  --shadow-pill: 0 16px 44px -12px rgba(0, 0, 0, 0.62), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --rim-light: rgba(255, 255, 255, 0.08);
 
   /* Typography scale ------------------------------------------------------ */
   /* One whole-px scale consolidating the sizes previously scattered (incl.

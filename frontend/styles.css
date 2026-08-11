@@ -29,10 +29,13 @@ body {
   padding: var(--space-md) 18px;
   border-radius: var(--radius-pill);
   background: var(--overlay-bg);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
   color: var(--text);
-  box-shadow: var(--shadow-pill);
+  /* Floating glass: a hairline rim-light + top inner-highlight over the deep
+     ambient shadow makes the pill read as a lit object, not a flat chip. */
+  border: 1px solid var(--rim-light);
+  box-shadow: var(--shadow-pill), var(--hairline);
   font-size: var(--fs-sm);
   letter-spacing: 0.2px;
   max-width: 280px;
