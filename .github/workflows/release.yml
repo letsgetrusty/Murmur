@@ -133,16 +133,24 @@ jobs:
           # latest.json (attached to the release) that the app's endpoint reads.
           args: --target aarch64-apple-darwin
 
-      # tauri-action uploads only the versioned DMG (Murmur_<v>_aarch64.dmg). The
-      # landing page links to a fixed …/releases/latest/download/Murmur.dmg, so
-      # attach a stable-named copy too. A byte copy of the notarized + stapled DMG
-      # stays notarized (the ticket is embedded in the file).
-      - name: Upload stable-named Murmur.dmg (landing-page download link)
+      # tauri-action notarizes + staples the .app but NOT the .dmg, and it uploads
+      # only the versioned DMG. Notarize + staple the DMG too (so opening the
+      # downloaded disk image is Gatekeeper-clean, not just launching the app),
+      # then re-upload it (--clobber replaces tauri-action's un-notarized copy)
+      # plus a stable-named Murmur.dmg for the landing page's fixed
+      # …/releases/latest/download/Murmur.dmg link.
+      - name: Notarize the DMG + upload (versioned + stable Murmur.dmg)
         if: env.APPLE_CONFIGURED == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           dmg="$(find . -path '*/release/bundle/dmg/*_aarch64.dmg' | head -1)"
-          [ -n "$dmg" ] || { echo "::error::no aarch64 .dmg found to copy as Murmur.dmg"; exit 1; }
+          [ -n "$dmg" ] || { echo "::error::no aarch64 .dmg found"; exit 1; }
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$dmg"
           cp "$dmg" "$(dirname "$dmg")/Murmur.dmg"
-          gh release upload "${GITHUB_REF_NAME}" "$(dirname "$dmg")/Murmur.dmg" --clobber
+          gh release upload "${GITHUB_REF_NAME}" "$dmg" "$(dirname "$dmg")/Murmur.dmg" --clobber
