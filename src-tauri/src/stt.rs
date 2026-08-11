@@ -114,6 +114,65 @@ fn transcribe_threads() -> std::os::raw::c_int {
         .unwrap_or(4)
 }
 
+/// Drop whisper.cpp's non-speech placeholders — "[BLANK_AUDIO]", "[ Silence ]",
+/// "(music)", "[ Inaudible ]", etc. — that it emits for silent/non-speech audio.
+/// Only bracketed/parenthesized spans containing a non-speech keyword are
+/// removed, so ordinary dictation is untouched; if silence was all that was
+/// "heard", the result is empty and the caller pastes nothing.
+fn strip_nonspeech(text: &str) -> String {
+    const KEYWORDS: &[&str] = &[
+        "blank_audio",
+        "blank audio",
+        "silence",
+        "silent",
+        "no speech",
+        "music",
+        "applause",
+        "inaudible",
+        "noise",
+        "laughter",
+        "laughs",
+        "pause",
+        "background",
+        "sound",
+        "static",
+        "beep",
+        "click",
+        "typing",
+        "wind",
+        "coughing",
+        "breathing",
+        "sighs",
+        "ringing",
+    ];
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let close = match chars[i] {
+            '[' => Some(']'),
+            '(' => Some(')'),
+            _ => None,
+        };
+        if let Some(close) = close {
+            if let Some(j) = (i + 1..chars.len()).find(|&k| chars[k] == close) {
+                let inner: String = chars[i + 1..j]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                if KEYWORDS.iter().any(|k| inner.contains(k)) {
+                    i = j + 1; // drop the whole "[…]" / "(…)" span
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    // Collapse the whitespace left where spans were removed, and trim.
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 impl Transcriber for WhisperStt {
     fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
         Box::pin(async move {
@@ -168,7 +227,7 @@ impl Transcriber for WhisperStt {
                 infer_secs * 1000.0,
                 audio_secs / infer_secs.max(1e-3),
             );
-            Ok(text.trim().to_string())
+            Ok(strip_nonspeech(&text))
         })
     }
 
@@ -274,6 +333,26 @@ mod tests {
     #[test]
     fn rejects_non_wav() {
         assert!(wav_to_mono_f32(b"not a wav at all").is_err());
+    }
+
+    #[test]
+    fn strips_whisper_nonspeech_placeholders() {
+        // Silence-only transcripts collapse to empty → nothing gets pasted.
+        assert_eq!(strip_nonspeech("[BLANK_AUDIO]"), "");
+        assert_eq!(strip_nonspeech("  [ Silence ]  "), "");
+        assert_eq!(strip_nonspeech("(music)"), "");
+        assert_eq!(strip_nonspeech("[ Inaudible ]"), "");
+        // Mixed: keep the speech, drop the annotation.
+        assert_eq!(
+            strip_nonspeech("Take out the trash [BLANK_AUDIO]"),
+            "Take out the trash"
+        );
+        // Ordinary dictation is untouched, including harmless parentheses.
+        assert_eq!(strip_nonspeech("Hello there, world"), "Hello there, world");
+        assert_eq!(
+            strip_nonspeech("the total (net) is five"),
+            "the total (net) is five"
+        );
     }
 
     /// End-to-end local transcription against a real WAV fixture + model.
