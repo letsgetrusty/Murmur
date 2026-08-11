@@ -1,0 +1,33 @@
+# Murmur dev-term pronunciation lexicon — `word<TAB>ipa`, `#` starts a comment.
+# Loaded via KOKORO_G2P_LEXICON (see tts::install_g2p_lexicon); these override
+# Kokoro's built-in G2P, which mangles code jargon. Keys match case-insensitively
+# on whole tokens, so keep them single-token + lowercase (camelCase is split
+# upstream by normalize_for_tts).
+#
+# IPA MUST follow misaki's convention (what the Kokoro model was trained on),
+# NOT just "valid symbols": affricates are `dʒ`/`tʃ` (two chars, not `ʤ`/`ʧ`),
+# primary stress `ˈ` goes immediately before the stressed VOWEL, and long vowels
+# take `ː` (iː uː ɑː ɔː). Easiest way to author a new line: run the
+# `phonemize_helper` test on a real English word/phrase that sounds like the
+# term and copy the output (degraded G2P letter-spells non-words, so use real
+# words):  PHONEMIZE="cube control" cargo test --lib phonemize_helper -- \
+# --ignored --nocapture. The dev_terms_lexicon_uses_valid_phonemes test rejects
+# out-of-vocab symbols.
+nginx	ˈɛndʒɪn ˈɛks
+redis	ɹˈɛdɪs
+kafka	kˈɑːfkə
+kubernetes	ˌkuːbɚnˈɛtiːz
+kubectl	kjˈuːb kəntɹˈoʊl
+postgres	pˈoʊstɡɹɛs
+ubuntu	uˈbuːntuː
+linux	lˈɪnʌks
+json	dʒˈeɪsən
+oauth	oʊˈɔːθ
+gui	ɡˈuːi
+git	ɡˈɪt
+cache	kˈæʃ
+regex	ɹˈɛɡɛks
+sudo	sˈuːduː
+cron	kɹˈɑːn
+async	ˈeɪsɪŋk
+enum	ˈiːnʌm

@@ -235,6 +235,11 @@ pub fn run() {
             commands::install_staged_update,
         ])
         .setup(move |app| {
+            // Install the dev-term pronunciation lexicon before any Kokoro synth
+            // (preview pre-gen / warm below), since kokoro-en reads the override
+            // env var lazily on first phoneme lookup.
+            tts::install_g2p_lexicon();
+
             // Shared live config: the refiner reads it on each refine and the
             // settings window edits it via IPC, so changes apply without a restart.
             let config_state = Arc::new(Mutex::new(cfg.clone()));

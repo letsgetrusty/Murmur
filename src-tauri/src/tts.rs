@@ -403,6 +403,43 @@ impl KokoroSpeaker {
     }
 }
 
+/// Bundled dev-term pronunciation lexicon (`word<TAB>ipa`), version-controlled
+/// in the repo. Kokoro's G2P mangles code jargon; these override it word-for-word.
+const DEV_TERMS_TAB: &str = include_str!("dev_terms.tab");
+
+/// Write the bundled dev-term lexicon to `<app-support>/murmur` and point
+/// kokoro-en's `KOKORO_G2P_LEXICON` at it, so those pronunciations take priority
+/// over the degraded built-in G2P. Call once at startup, **before the first
+/// synth** — the crate reads the env var lazily on first lookup, and Kokoro's
+/// preview pre-generation / warm can trigger that. Best-effort: logs and returns
+/// on failure rather than blocking startup.
+pub fn install_g2p_lexicon() {
+    let Some(dir) = crate::stt::models_dir()
+        .ok()
+        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+    else {
+        return;
+    };
+    let path = dir.join("dev-terms.tab");
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, DEV_TERMS_TAB))
+    {
+        log::warn!(
+            "tts: could not install g2p lexicon at {}: {e}",
+            path.display()
+        );
+        return;
+    }
+    // Safe on edition 2021; set at startup before any synth reads it.
+    std::env::set_var("KOKORO_G2P_LEXICON", &path);
+    log::info!("tts: g2p lexicon → {}", path.display());
+    // Force the crate's lexicon to load now (it reads the env lazily on first
+    // lookup) so a later synth on another thread can't init it before we're set.
+    match kokoro_en::g2p("nginx", false) {
+        Ok(ph) => log::debug!("tts: g2p lexicon self-check nginx = {ph:?}"),
+        Err(e) => log::warn!("tts: g2p self-check failed: {e}"),
+    }
+}
+
 /// Normalize text before synthesis so the neural voice pronounces code-style
 /// words correctly. Kokoro's bundled G2P (cmudict/Misaki — no espeak, which is
 /// GPL; see AGENTS.md) mispronounces run-together identifiers, so we split them
@@ -1058,6 +1095,55 @@ mod tests {
         assert_eq!(
             chunks.join(" ").split_whitespace().count(),
             text.split_whitespace().count()
+        );
+    }
+
+    /// Authoring helper for dev_terms.tab: phonemize a real English word/phrase
+    /// with misaki (the model's own G2P) and print `word<TAB>ipa` to copy in.
+    /// The degraded G2P letter-spells non-words, so use real words that *sound*
+    /// like the term (e.g. "cube control" for kubectl).
+    ///   PHONEMIZE="engine ex, cash, cube control" \
+    ///     cargo test --lib tts::tests::phonemize_helper -- --ignored --nocapture
+    #[test]
+    #[ignore = "authoring helper; set PHONEMIZE=<comma-separated words>"]
+    fn phonemize_helper() {
+        let text = std::env::var("PHONEMIZE").unwrap_or_else(|_| "engine".into());
+        for w in text.split(',') {
+            let w = w.trim();
+            eprintln!(
+                "{w}\t{}",
+                kokoro_en::g2p(w, false).unwrap_or_default().trim()
+            );
+        }
+    }
+
+    #[test]
+    fn dev_terms_lexicon_uses_valid_phonemes() {
+        let mut count = 0;
+        for line in DEV_TERMS_TAB.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (word, ipa) = line
+                .split_once('\t')
+                .unwrap_or_else(|| panic!("lexicon line missing a TAB: {line:?}"));
+            assert!(!word.trim().is_empty(), "empty word in {line:?}");
+            assert!(!ipa.trim().is_empty(), "empty IPA for {word:?}");
+            // The IPA must be within our model's phoneme vocab or synth logs
+            // "unknown phone" and drops it. We ship Kokoro v1.0 (VOCAB_V10);
+            // misaki itself emits v10-only symbols (e.g. ɚ), so validating
+            // against v10 is what matches the model we actually load.
+            let unknown = kokoro_en::unknown_phonemes(ipa.trim(), false);
+            assert!(
+                unknown.is_empty(),
+                "{word:?} has out-of-vocab phonemes {unknown:?}"
+            );
+            count += 1;
+        }
+        assert!(
+            count >= 10,
+            "expected a seeded lexicon, found {count} entries"
         );
     }
 
