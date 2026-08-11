@@ -61,10 +61,16 @@ function init() {
     return;
   }
   tauri.event.listen(EVENTS.STATE, (e) => applyState(e.payload));
+  // The recording dot pulses with your voice. Raw peak amplitude is usually low
+  // (~0.05–0.3), so apply a perceptual curve (sqrt ≈ loudness) + gain so ordinary
+  // speech clearly moves it, with a fast attack / slow release so the dot jumps
+  // to sound and eases back instead of flickering.
+  let level = 0;
   tauri.event.listen(EVENTS.AUDIO_LEVEL, (e) => {
-    // payload is a 0..1 peak amplitude from the capture thread.
-    const v = typeof e.payload === "number" ? e.payload : 0;
-    document.documentElement.style.setProperty("--audio-level", String(v));
+    const raw = typeof e.payload === "number" ? e.payload : 0;
+    const target = Math.min(1, Math.sqrt(raw) * 1.8);
+    level = target > level ? target : level * 0.7 + target * 0.3;
+    document.documentElement.style.setProperty("--audio-level", String(level));
   });
 }
 

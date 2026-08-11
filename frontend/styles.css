@@ -89,15 +89,17 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Recording — bright white dot that grows with the live audio level. The
-   --audio-level custom property is updated by main.js from the
-   "audio:level" Tauri event (~15 Hz). Falls back to the pulse animation
-   when no level is reported. */
+/* Recording — orange (accent) dot that grows *and* glows brighter with the live
+   audio level, so you can see it tracking your voice. The --audio-level custom
+   property is updated by main.js from the "audio:level" Tauri event (~15 Hz),
+   already curved + smoothed. The .dot::before ring keeps a gentle idle pulse so
+   it still reads as "recording" during silence. */
 .pill[data-state="recording"] .dot {
   background: var(--state-recording);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.6);
-  transform: scale(calc(1 + var(--audio-level, 0) * 1.4));
-  transition: transform 60ms ease-out;
+  box-shadow: 0 0 calc(6px + var(--audio-level, 0) * 14px)
+    rgba(var(--accent-rgb), calc(0.4 + var(--audio-level, 0) * 0.5));
+  transform: scale(calc(1 + var(--audio-level, 0) * 0.9));
+  transition: transform 90ms ease-out, box-shadow 90ms ease-out;
 }
 .pill[data-state="recording"] .dot::before {
   content: "";

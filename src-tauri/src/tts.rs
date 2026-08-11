@@ -403,6 +403,44 @@ impl KokoroSpeaker {
     }
 }
 
+/// Normalize text before synthesis so the neural voice pronounces code-style
+/// words correctly. Kokoro's bundled G2P (cmudict/Misaki — no espeak, which is
+/// GPL; see AGENTS.md) mispronounces run-together identifiers, so we split them
+/// into spoken words: `camelCase`/`PascalCase` → "camel Case", `snake_case` and
+/// `kebab-case` → spaces. Acronym runs stay together ("HTTPServer" → "HTTP
+/// Server", "NASA" stays "NASA").
+fn normalize_for_tts(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + text.len() / 8);
+    for i in 0..chars.len() {
+        let c = chars[i];
+        // `_`/`-` joining two word chars → space (leave standalone dashes and
+        // things like "-5" alone).
+        if (c == '_' || c == '-')
+            && i > 0
+            && chars[i - 1].is_alphanumeric()
+            && chars.get(i + 1).is_some_and(|n| n.is_alphanumeric())
+        {
+            out.push(' ');
+            continue;
+        }
+        if i > 0 {
+            let prev = chars[i - 1];
+            let next = chars.get(i + 1).copied();
+            // lower/digit → Upper: "camelCase", "mp3Player".
+            let lower_to_upper = (prev.is_lowercase() || prev.is_ascii_digit()) && c.is_uppercase();
+            // end of an ACRONYM run before a new word: "HTTPServer" → "HTTP Server".
+            let acronym_to_word =
+                prev.is_uppercase() && c.is_uppercase() && next.is_some_and(|n| n.is_lowercase());
+            if lower_to_upper || acronym_to_word {
+                out.push(' ');
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Split read-aloud text into chunks, breaking at natural pauses (sentence ends,
 /// else commas, else word boundaries — never mid-word).
 ///
@@ -696,7 +734,7 @@ impl Speaker for KokoroSpeaker {
                 guard.as_ref().expect("just loaded").clone()
             };
 
-            let chunks = split_for_tts(&text);
+            let chunks = split_for_tts(&normalize_for_tts(&text));
             log::info!(
                 "tts/kokoro: reading {} chars in {} chunk(s) [voice {}]",
                 text.len(),
@@ -1021,6 +1059,20 @@ mod tests {
             chunks.join(" ").split_whitespace().count(),
             text.split_whitespace().count()
         );
+    }
+
+    #[test]
+    fn normalize_splits_code_style_words() {
+        assert_eq!(normalize_for_tts("camelCase"), "camel Case");
+        assert_eq!(normalize_for_tts("readAloud now"), "read Aloud now");
+        assert_eq!(normalize_for_tts("HTTPServer"), "HTTP Server");
+        assert_eq!(normalize_for_tts("read_aloud text"), "read aloud text");
+        assert_eq!(normalize_for_tts("well-known"), "well known");
+        assert_eq!(normalize_for_tts("mp3Player"), "mp3 Player");
+        // Left alone: all-caps acronyms, plain words, standalone dashes/numbers.
+        assert_eq!(normalize_for_tts("NASA and the USA"), "NASA and the USA");
+        assert_eq!(normalize_for_tts("just normal text."), "just normal text.");
+        assert_eq!(normalize_for_tts("score: 3 - 5"), "score: 3 - 5");
     }
 
     #[test]
