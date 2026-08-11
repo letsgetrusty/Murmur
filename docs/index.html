@@ -86,49 +86,6 @@
       .req { margin: 18px 0 0; font-family: var(--mono); font-size: 12.5px; color: var(--faint); letter-spacing: 0.02em; }
       .req b { color: var(--dim); font-weight: 600; }
 
-      /* ——— Demo video (placeholder) ——— */
-      .demo { width: 100%; margin: 48px auto 0; }
-      .demo-frame {
-        position: relative;
-        aspect-ratio: 16 / 9;
-        border-radius: 16px;
-        border: 1px solid var(--border);
-        background:
-          radial-gradient(120% 120% at 50% 0%, rgba(217, 83, 31, 0.1), transparent 60%),
-          var(--panel-2);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
-        overflow: hidden;
-        transition: border-color 0.15s ease;
-      }
-      .demo-frame:hover { border-color: var(--rust); }
-      .play {
-        width: 66px;
-        height: 66px;
-        border-radius: 50%;
-        background: var(--rust);
-        color: var(--on-rust);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 22px;
-        padding-left: 4px; /* optically center the ▶ */
-        box-shadow: 0 12px 30px -8px rgba(217, 83, 31, 0.7);
-        transition: transform 0.15s ease, background 0.15s ease;
-      }
-      .demo-frame:hover .play { transform: scale(1.06); background: var(--rust-bright); }
-      .demo-label {
-        font-family: var(--mono);
-        font-size: 12px;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        color: var(--dim);
-      }
-      .demo-note { margin: 12px 0 0; font-size: 12px; color: var(--faint); }
-
       /* ——— Bottom credit ——— */
       .credit { text-align: center; padding: 22px 24px 28px; font-size: 13.5px; color: var(--faint); }
       .credit a { color: var(--dim); text-decoration: none; font-weight: 600; }
@@ -181,17 +138,6 @@
           Download for macOS
         </a>
         <p class="req"><b>Free &amp; open source</b> · macOS 11+ · Apple&nbsp;Silicon</p>
-
-        <!-- Demo video placeholder. When the walkthrough is recorded, replace
-             .demo-frame with a <video controls poster="…">…</video> (or an
-             inline player). -->
-        <div class="demo">
-          <div class="demo-frame" role="img" aria-label="Product demo video — coming soon">
-            <span class="play" aria-hidden="true">▶</span>
-            <span class="demo-label">See it in action</span>
-          </div>
-          <p class="demo-note">Demo video coming soon.</p>
-        </div>
       </div>
     </main>
 
