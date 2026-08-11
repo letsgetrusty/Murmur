@@ -19,7 +19,7 @@ mod tts;
 mod update;
 mod usage;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -99,6 +99,12 @@ pub struct AppState {
     /// True while the "waiting for the speech model" overlay watcher is running,
     /// so a second press doesn't spawn a duplicate.
     pub model_wait_active: AtomicBool,
+    /// Monotonic counter identifying the in-flight dictation. Bumped when the
+    /// user presses Esc during the transcribe/refine phase; the async pipeline
+    /// captures it at the start and, on each hop (after transcribe, before
+    /// refine, before paste), bails if it no longer matches — so an Esc drops
+    /// the result instead of pasting it.
+    pub dictation_gen: AtomicU64,
 }
 
 /// Latest download progress for one model, mirrored from the download tasks.
@@ -337,6 +343,7 @@ pub fn run() {
                 downloads: Arc::new(Mutex::new(Downloads::default())),
                 recording_armed: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
+                dictation_gen: AtomicU64::new(0),
             });
 
             // Clean up orphaned `.part` temps from interrupted downloads of models
@@ -1341,6 +1348,9 @@ fn spawn_dictation_worker<R: Runtime>(
                         }
                         Err(e) => {
                             log::warn!("dictation: failed to start recording: {e}");
+                            // Recording never started; free the Esc hijack
+                            // on_press registered.
+                            hotkeys::unregister_escape(&app);
                             emit_state(
                                 &app,
                                 OverlayState::Error {
@@ -1355,12 +1365,18 @@ fn spawn_dictation_worker<R: Runtime>(
                     if rec.take().is_some() {
                         log::info!("dictation: cancelled");
                     }
+                    // Free the Esc hijack — a Cancel is the end of the dictation,
+                    // whether it fired during recording or mid-transcribe.
+                    hotkeys::unregister_escape(&app);
                     emit_state(&app, OverlayState::Idle);
                     continue;
                 }
                 DictationCmd::Stop { mode } => {
                     let Some(r) = rec.take() else {
                         log::debug!("dictation: Stop without active recording");
+                        // Esc was registered on press but no recording is in
+                        // flight (e.g. mic start failed) — release it.
+                        hotkeys::unregister_escape(&app);
                         continue;
                     };
                     match r.stop() {
@@ -1375,6 +1391,7 @@ fn spawn_dictation_worker<R: Runtime>(
                         }
                         Err(e) => {
                             log::warn!("dictation: stop failed: {e}");
+                            hotkeys::unregister_escape(&app);
                             emit_state(
                                 &app,
                                 OverlayState::Error {
@@ -1436,11 +1453,14 @@ fn handle_recording<R: Runtime>(
     recording: audio::Recording,
     mode: DictationMode,
 ) {
+    // These early exits end the dictation, so free the Esc hijack on_press
+    // registered (it stays live through transcribe/refine otherwise).
     if recording.duration_ms < 200 {
         log::info!(
             "dictation: discarded short clip ({} ms)",
             recording.duration_ms
         );
+        hotkeys::unregister_escape(&app);
         emit_state(&app, OverlayState::Done { chars: 0 });
         idle_after(app, Duration::from_millis(250));
         return;
@@ -1452,6 +1472,7 @@ fn handle_recording<R: Runtime>(
             "dictation: clip is silent (mean|amp|={:.6}). Grant Microphone access in System Settings → Privacy & Security → Microphone, then try again.",
             recording.mean_abs
         );
+        hotkeys::unregister_escape(&app);
         emit_state(
             &app,
             OverlayState::Error {
@@ -1462,9 +1483,25 @@ fn handle_recording<R: Runtime>(
         return;
     }
 
+    // Esc stays hijacked (from on_press) through transcribe + refine so the user
+    // can still cancel after releasing the trigger. `gen` is this pipeline's
+    // identity; an Esc bumps `dictation_gen`, and each hop below bails — and
+    // frees Esc — when it no longer matches.
+    let gen = app
+        .state::<AppState>()
+        .dictation_gen
+        .load(Ordering::Acquire);
     tauri::async_runtime::spawn(async move {
         let secs = recording.duration_ms as f64 / 1000.0;
         let transcribe_result = transcriber.transcribe(&recording.wav).await;
+        // Esc pressed while Whisper was running: abandon the transcript (the
+        // native call already finished — we just drop its output), don't paste.
+        if dictation_cancelled(&app, gen) {
+            log::info!("dictation: cancelled during transcription");
+            hotkeys::unregister_escape(&app);
+            emit_state(&app, OverlayState::Idle);
+            return;
+        }
         // Count the audio toward usage stats once it transcribes cleanly.
         if transcribe_result.is_ok() {
             record_usage(&app, |u| u.record_stt(secs));
@@ -1480,7 +1517,14 @@ fn handle_recording<R: Runtime>(
                     text.chars().count(),
                     text
                 );
-                run_dictation(&app, chat.as_ref(), mode == DictationMode::Refine, text).await
+                run_dictation(
+                    &app,
+                    chat.as_ref(),
+                    mode == DictationMode::Refine,
+                    text,
+                    gen,
+                )
+                .await
             }
             Err(e) => {
                 log::warn!("dictation: transcribe failed: {e}");
@@ -1492,9 +1536,20 @@ fn handle_recording<R: Runtime>(
                 )
             }
         };
+        hotkeys::unregister_escape(&app);
         emit_state(&app, state);
         idle_after(app, Duration::from_millis(dwell_ms));
     });
+}
+
+/// True once the user has pressed Esc to cancel the dictation identified by
+/// `gen` (its `dictation_gen` snapshot at spawn). Checked at each pipeline hop so
+/// a cancel abandons the result instead of pasting it.
+fn dictation_cancelled<R: Runtime>(app: &AppHandle<R>, gen: u64) -> bool {
+    app.state::<AppState>()
+        .dictation_gen
+        .load(Ordering::Acquire)
+        != gen
 }
 
 /// Plain / refined dictation: optionally clean the transcript with the LLM, log
@@ -1506,6 +1561,7 @@ async fn run_dictation<R: Runtime>(
     chat: &dyn llm::LlmChat,
     refine: bool,
     text: String,
+    gen: u64,
 ) -> (OverlayState, u64) {
     let raw = text.clone(); // keep the original transcript for history
     let mut was_refined = false;
@@ -1538,6 +1594,10 @@ async fn run_dictation<R: Runtime>(
             3500,
         );
     }
+    // Esc during the "Transcribing…" hand-off, before we start refining.
+    if dictation_cancelled(app, gen) {
+        return (OverlayState::Idle, 0);
+    }
     let final_text = if refine {
         emit_state(app, OverlayState::Refining);
         match llm::transform(chat, &prompt, &text).await {
@@ -1561,6 +1621,11 @@ async fn run_dictation<R: Runtime>(
     } else {
         text
     };
+    // Last chance to bail before we commit: Esc during refine (or right at the
+    // end) drops the result — nothing pasted, nothing saved to History.
+    if dictation_cancelled(app, gen) {
+        return (OverlayState::Idle, 0);
+    }
     record_history(
         app,
         &raw,

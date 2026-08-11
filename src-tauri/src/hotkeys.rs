@@ -165,11 +165,12 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 /// Done/Error and schedules the idle render once transcribe + inject return.
 /// `mode` selects plain / refined / command handling of the transcript.
 pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
-    // Always release the Esc hijack (harmless if it was never registered, e.g.
-    // the model-download gate). Only commit a transcription if this press
-    // actually started a recording — skipping it when the press hit the gate or
-    // after an Esc-cancel, so we don't strand the overlay on "Transcribing…".
-    unregister_escape(app);
+    // Leave the Esc hijack registered — it stays live through the
+    // transcribe/refine phase so the user can still cancel after releasing the
+    // trigger; the worker / `handle_recording` free it when the dictation ends.
+    // Only commit a transcription if this press actually started a recording —
+    // skipping it when the press hit the model-download gate or after an
+    // Esc-cancel, so we don't strand the overlay on "Transcribing…".
     if !app
         .state::<AppState>()
         .recording_armed
@@ -186,15 +187,27 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
 
 const ESC: &str = "Escape";
 
-/// Briefly hijack the Escape key while a dictation is in flight so the user can
-/// cancel it; freed on release (or when the app goes idle).
+/// Hijack the Escape key for the whole dictation — recording *and* the
+/// transcribe/refine phase after the trigger is released — so the user can cancel
+/// at any point. Registered once in [`on_press`] and torn down only at the
+/// terminal points (worker Cancel/Stop arms, `handle_recording`'s exits) via
+/// [`unregister_escape`]. It deliberately does NOT re-register across the
+/// recording→transcribe boundary: `on_shortcut` rejects an already-registered
+/// shortcut, so a register/unregister handoff there raced and left Esc dead
+/// during transcription.
 ///
-/// `on_press`/`on_release` can run *inside* a global-shortcut callback (the chord
-/// path), where the plugin holds its dispatch lock — touching the registry there
-/// deadlocks the whole app. So both (un)register hop through a background thread
-/// whose `run_on_main_thread` defers the work to a clean event-loop tick with the
-/// lock free (same reason as [`register_tts_escape`]). From the Fn tap thread the
-/// hop is simply correct too (registry ops belong on the main thread). A plain
+/// The one handler covers both phases: it disarms (so the trigger release doesn't
+/// re-commit), bumps `dictation_gen` (so an in-flight transcribe/refine abandons
+/// its result before pasting), and sends `Cancel` (so the worker drops the
+/// recorder if we're still recording). Whichever applies to the current phase
+/// takes effect; the rest are harmless no-ops.
+///
+/// `on_press` can run *inside* a global-shortcut callback (the chord path), where
+/// the plugin holds its dispatch lock — touching the registry there deadlocks the
+/// whole app. So (un)register hop through a background thread whose
+/// `run_on_main_thread` defers the work to a clean event-loop tick with the lock
+/// free (same reason as [`register_tts_escape`]). From the Fn tap thread the hop
+/// is simply correct too (registry ops belong on the main thread). A plain
 /// `run_on_main_thread` here would NOT be enough: called from the main thread it
 /// runs synchronously and would still re-enter under the held lock.
 fn register_escape<R: Runtime>(app: &AppHandle<R>) {
@@ -210,15 +223,22 @@ fn register_escape<R: Runtime>(app: &AppHandle<R>) {
                 |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| {
                     if event.state() == ShortcutState::Pressed {
                         log::info!("hotkey: cancel (Esc)");
-                        // Disarm so the trigger release doesn't re-emit
-                        // Transcribing over the Idle the Cancel produces.
-                        app.state::<AppState>()
+                        let state = app.state::<AppState>();
+                        // Recording phase: disarm so the trigger release doesn't
+                        // re-emit Transcribing over the Idle the Cancel produces.
+                        state
                             .recording_armed
                             .store(false, std::sync::atomic::Ordering::Release);
+                        // Transcribe/refine phase: invalidate the in-flight
+                        // pipeline so it drops its result instead of pasting.
+                        state
+                            .dictation_gen
+                            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                        emit_state(app, OverlayState::Idle);
                         // Don't unregister here — this runs inside the
-                        // global-shortcut callback and would deadlock; on_release
-                        // frees Esc when the user lets go.
-                        if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Cancel) {
+                        // global-shortcut callback and would deadlock; the worker
+                        // / pipeline frees Esc when the dictation ends.
+                        if let Err(e) = state.tx.send(DictationCmd::Cancel) {
                             log::warn!("hotkey: cancel send failed: {e}");
                         }
                     }
@@ -231,7 +251,7 @@ fn register_escape<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
+pub fn unregister_escape<R: Runtime>(app: &AppHandle<R>) {
     let handle = app.clone();
     std::thread::spawn(move || {
         let h = handle.clone();
