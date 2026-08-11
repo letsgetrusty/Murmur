@@ -96,8 +96,9 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-bold);
   font-size: var(--fs-lg);
+  letter-spacing: -0.02em; /* tightened logotype, not default body tracking */
   padding: var(--space-2xs) var(--space-sm);
 }
 .brand-mark {
@@ -141,6 +142,7 @@ nav {
 .tab-head h1 {
   font-size: var(--fs-2xl);
   font-weight: var(--fw-bold);
+  letter-spacing: -0.02em; /* SF Pro display sizing reads tighter + more crafted */
   margin: 0;
 }
 
@@ -304,6 +306,14 @@ nav {
   padding: var(--space-lg) var(--space-xl);
   margin-bottom: var(--space-sm);
   background: var(--bg-elev);
+  box-shadow: var(--shadow-card), var(--hairline);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.hist-row:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-soft-border);
+  box-shadow: var(--shadow-card-hover), var(--hairline);
 }
 .hist-head {
   display: flex;
@@ -343,4 +353,13 @@ nav {
 .hist-row .small-btn {
   padding: 5px var(--space-md);
   font-size: var(--fs-2xs);
+  /* Declutter: the Copy/Delete actions stay hidden until you hover the row (or
+     tab into it), so the transcript is what you read at rest. */
+  opacity: 0;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), transform var(--transition-fast);
+}
+.hist-row:hover .small-btn,
+.hist-row:focus-within .small-btn {
+  opacity: 1;
 }

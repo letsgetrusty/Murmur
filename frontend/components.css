@@ -47,6 +47,7 @@
 .card h2 {
   font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
   margin: 0 0 var(--space-xs);
   display: flex;
   align-items: center;
@@ -66,10 +67,14 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   cursor: pointer;
-  transition: background var(--transition-fast), opacity var(--transition-fast);
+  transition: background var(--transition-fast), opacity var(--transition-fast),
+    transform var(--transition-fast);
 }
 .primary:hover:not(:disabled) {
   background: var(--accent-press);
+}
+.primary:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .primary:disabled {
   opacity: 0.45;
@@ -90,10 +95,14 @@
   font-weight: var(--fw-semibold);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color var(--transition-fast), color var(--transition-fast);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast);
 }
 .small-btn:hover:not(:disabled) {
   border-color: var(--accent);
+}
+.small-btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .small-btn:disabled {
   opacity: 0.4;
@@ -319,6 +328,7 @@ select.invalid {
 .stat-value {
   font-size: var(--fs-3xl);
   font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   line-height: var(--lh-tight);
