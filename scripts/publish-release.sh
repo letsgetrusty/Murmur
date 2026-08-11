@@ -171,13 +171,28 @@ if [ "$APPLE_CI" -eq 1 ]; then
   git tag -a "$TAG" -m "release $TAG"
   git push -q origin "$TAG"
   ok "Pushed $TAG — the Release workflow is building the notarized DMG."
-  # Best-effort: watch the run to completion so you know it landed.
+  # Watch the run to completion, best-effort. This is a COURTESY report only: the
+  # tag is pushed and CI owns the build regardless, so we poll resiliently (a
+  # dropped connection must not look like a release failure — `gh run watch` isn't,
+  # so we don't use it) and never `die`. Apple notarization can be slow (30+ min).
   sleep 5
   run_id="$(gh run list --workflow=release.yml -L 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
   if [ -n "${run_id:-}" ]; then
-    gh run watch "$run_id" --exit-status \
-      && ok "Published $TAG (signed + notarized by CI)." \
-      || die "CI release build failed — see https://github.com/letsgetrusty/murmur/actions"
+    say "Watching CI run $run_id (build + notarize)…  Ctrl-C is safe — CI keeps going."
+    status=""; tries=0
+    while [ "$tries" -lt 300 ]; do  # ~100 min cap; transient errors just retry
+      status="$(gh run view "$run_id" --json status --jq '.status' 2>/dev/null || true)"
+      [ "$status" = "completed" ] && break
+      tries=$((tries + 1)); sleep 20
+    done
+    if [ "$status" = "completed" ]; then
+      conclusion="$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>/dev/null || echo unknown)"
+      [ "$conclusion" = "success" ] \
+        && ok "Published $TAG (signed + notarized by CI)." \
+        || warn "CI run finished '$conclusion' — the release may not have published. Inspect: gh run view $run_id --log-failed"
+    else
+      warn "Still building — the tag is pushed and CI will finish on its own. Watch it in Actions."
+    fi
   fi
   printf '   Release:  https://github.com/letsgetrusty/murmur/releases/tag/%s\n' "$TAG"
   printf '   Download: https://github.com/letsgetrusty/murmur/releases/latest/download/Murmur.dmg\n'
