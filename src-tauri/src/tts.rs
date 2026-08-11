@@ -478,26 +478,24 @@ fn normalize_for_tts(text: &str) -> String {
     out
 }
 
-/// Split read-aloud text into chunks, breaking at natural pauses (sentence ends,
-/// else commas, else word boundaries — never mid-word).
+/// Split read-aloud text into chunks, breaking **only at natural pauses** so a
+/// chunk boundary never lands mid-phrase. Kokoro synthesizes each chunk as an
+/// independent utterance (its own prosody + edge silence), so a break mid-clause
+/// sounds like an unnatural pause. Rules:
+/// - Break at sentence ends (`. ! ? ; :` or newline) past `MIN`, so each chunk is
+///   a whole sentence. Commas and other in-sentence pauses are left *inside* the
+///   chunk, where Kokoro voices them naturally.
+/// - Only a sentence longer than `CAP` is broken further, at the last **comma**
+///   before the cap (a natural pause), falling back to the last word boundary if
+///   there's no comma. This is rare; most sentences stay whole.
 ///
-/// The chunk *sizes* ramp up: a tiny first chunk gets the first words out fast,
-/// a couple of medium chunks build the player's lead, then whole sentences for
-/// the body (best prosody). This is what makes read-aloud start quickly instead
-/// of waiting for a whole opening sentence to synthesize. It's safe because
-/// Kokoro synth measured ~4.5× real time on the ANE — synthesis stays well ahead
-/// of playback, so small early chunks don't stall (roughly ~13 chars ≈ 1s of
-/// audio, so `FIRST_CAP` ≈ 1.8s). Playback still waits for `PREBUFFER_SECS` of
-/// audio before starting; the ramp only shrinks how much of the opening that is.
+/// (Time-to-first-word still stays low: synth runs well above real time, so the
+/// player's small `PREBUFFER_SECS` clears after the first sentence.)
 fn split_for_tts(text: &str) -> Vec<String> {
     let text = text.trim();
     const MIN: usize = 16; // keep tiny fragments merged into the next clause
-    const FIRST_CAP: usize = 24; // first chunk ≈ 1.8s of audio → fast first word
-    const LEAD_CAP: usize = 64; // next chunks while building the playback lead
-    const LEAD_CHARS: usize = 96; // ramp up to the full CAP past this many chars
-    const CAP: usize = 220; // body: only a long sentence is broken, at a comma
+    const CAP: usize = 220; // only a long sentence is broken further, at a comma
     let mut chunks = Vec::new();
-    let mut emitted = 0usize; // chars pushed so far (drives the size ramp)
     let mut cur = String::new();
     let mut last_comma = 0usize; // byte index just past the most recent comma
     let mut last_space = 0usize; // byte index just past the most recent space
@@ -508,21 +506,13 @@ fn split_for_tts(text: &str) -> Vec<String> {
             ' ' => last_space = cur.len(),
             _ => {}
         }
-        // Ramp: tiny first chunk, then medium, then full-size for the body.
-        let cap = if emitted == 0 {
-            FIRST_CAP
-        } else if emitted < LEAD_CHARS {
-            LEAD_CAP
-        } else {
-            CAP
-        };
         let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
         if boundary && cur.trim_end().len() >= MIN {
-            emitted += push_chunk(&mut chunks, &cur);
+            push_chunk(&mut chunks, &cur);
             cur.clear();
             last_comma = 0;
             last_space = 0;
-        } else if cur.len() >= cap {
+        } else if cur.len() >= CAP {
             // Too long with no sentence end: break at the last comma (natural
             // pause), else the last word boundary — never mid-word.
             let at = if last_comma > MIN {
@@ -532,10 +522,10 @@ fn split_for_tts(text: &str) -> Vec<String> {
             };
             if at > MIN && at < cur.len() {
                 let carry = cur.split_off(at);
-                emitted += push_chunk(&mut chunks, &cur);
+                push_chunk(&mut chunks, &cur);
                 cur = carry;
             } else {
-                emitted += push_chunk(&mut chunks, &cur);
+                push_chunk(&mut chunks, &cur);
                 cur.clear();
             }
             last_comma = 0;
@@ -549,16 +539,12 @@ fn split_for_tts(text: &str) -> Vec<String> {
     chunks
 }
 
-/// Push `s` (trimmed) onto `chunks` unless it's empty; returns the number of
-/// chars pushed (0 if empty) so callers can track how much has been emitted.
-fn push_chunk(chunks: &mut Vec<String>, s: &str) -> usize {
+/// Push `s` (trimmed) onto `chunks` unless it's empty.
+fn push_chunk(chunks: &mut Vec<String>, s: &str) {
     let t = s.trim();
-    if t.is_empty() {
-        return 0;
+    if !t.is_empty() {
+        chunks.push(t.to_string());
     }
-    let n = t.chars().count();
-    chunks.push(t.to_string());
-    n
 }
 
 /// Synthesize one chunk to a 16-bit WAV buffer; `None` on synth error.
@@ -892,11 +878,11 @@ impl Speaker for KokoroSpeaker {
             // bottleneck) and append it; playback of earlier chunks overlaps.
             //
             // Hold playback until this many seconds of audio are buffered, then
-            // start. Kept small: synth measured ~4.5× real time on the ANE, so the
-            // lead *grows* once playing (synth outpaces playback) — we only need
-            // enough that the next chunk is ready before the first finishes. The
-            // ramp in split_for_tts makes the first chunk ≈ 1.8s, which clears
-            // this on its own, so the first word plays right after it synthesizes.
+            // start. Kept small: synth measured ~2–4.5× real time on the ANE (well
+            // above 1×), so the lead only *grows* once playing and low prebuffer
+            // won't stall — it just sets how soon the first word plays. Chunks are
+            // whole sentences (split_for_tts), so playback begins right after the
+            // first sentence synthesizes.
             const PREBUFFER_SECS: f32 = 0.6;
             let mut playing = false;
             let mut buffered = 0f32;
@@ -1173,20 +1159,24 @@ mod tests {
     }
 
     #[test]
-    fn bounds_the_first_chunk_for_fast_start() {
-        // A long opening yields a small first chunk (so the first word plays
-        // fast), then ramps up — without dropping any words.
+    fn chunks_break_only_at_sentence_ends() {
+        // Every chunk of a normal (sub-CAP) multi-sentence read must end at a
+        // sentence boundary, so Kokoro never resets prosody mid-phrase (which
+        // sounds like an unnatural pause). Words are preserved.
         let text = "The quick brown fox jumps over the lazy dog again and again \
                     while the sleepy cat watches from the warm windowsill. Then it \
-                    finally drifts off to sleep.";
+                    finally drifts off to sleep. A third sentence follows here.";
         let chunks = split_for_tts(text);
-        assert!(chunks.len() >= 3, "expected a ramped split, got {chunks:?}");
         assert!(
-            chunks[0].chars().count() <= 28,
-            "first chunk should be a tiny lead, got {} chars: {:?}",
-            chunks[0].chars().count(),
-            chunks[0]
+            chunks.len() >= 2,
+            "expected multiple chunks, got {chunks:?}"
         );
+        for c in &chunks {
+            assert!(
+                matches!(c.chars().last(), Some('.' | '!' | '?' | ';' | ':')),
+                "chunk should end at a sentence boundary, not mid-phrase: {c:?}"
+            );
+        }
         assert_eq!(
             chunks.join(" ").split_whitespace().count(),
             text.split_whitespace().count()
