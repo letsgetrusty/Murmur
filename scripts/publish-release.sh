@@ -194,8 +194,8 @@ if [ "$APPLE_CI" -eq 1 ]; then
       warn "Still building — the tag is pushed and CI will finish on its own. Watch it in Actions."
     fi
   fi
-  printf '   Release:  https://github.com/letsgetrusty/murmur/releases/tag/%s\n' "$TAG"
-  printf '   Download: https://github.com/letsgetrusty/murmur/releases/latest/download/Murmur.dmg\n'
+  printf '   Release:  https://github.com/letsgetrusty/Murmur/releases/tag/%s\n' "$TAG"
+  printf '   Download: https://github.com/letsgetrusty/Murmur/releases/latest/download/Murmur.dmg\n'
   exit 0
 fi
 
@@ -229,5 +229,5 @@ gh release create "$TAG" \
 echo
 ok "Published $TAG"
 printf '   Release:  %s\n' "$(gh release view "$TAG" --json url --jq .url)"
-printf '   Download: https://github.com/letsgetrusty/murmur/releases/latest/download/Murmur.dmg\n'
+printf '   Download: https://github.com/letsgetrusty/Murmur/releases/latest/download/Murmur.dmg\n'
 say "Test the .dmg on another Mac / fresh user to confirm the Gatekeeper + permission flow."

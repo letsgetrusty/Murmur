@@ -153,7 +153,7 @@ is legacy).
   request before merging** for a PR-based flow.)
 - **CLI:**
   ```sh
-  gh api -X POST repos/letsgetrusty/murmur/rulesets \
+  gh api -X POST repos/letsgetrusty/Murmur/rulesets \
     --input - <<'JSON'
   {
     "name": "main",
@@ -339,7 +339,7 @@ reads it from `~/.murmur/updater.key` (override with `TAURI_SIGNING_PRIVATE_KEY`
 
 The updater endpoint is **GitHub Releases**:
 `tauri.conf.json` → `plugins.updater.endpoints` →
-`https://github.com/letsgetrusty/murmur/releases/latest/download/latest.json`.
+`https://github.com/letsgetrusty/Murmur/releases/latest/download/latest.json`.
 
 - **Via CI (normal path):** tauri-action generates `latest.json` + the signed
   `.app.tar.gz` and attaches them to the release automatically. Nothing to do.

@@ -157,7 +157,7 @@ ok "Build complete."
 # manual fallback: it points at the vN.N.N GitHub release's assets, so upload
 # both the .app.tar.gz and this latest.json to that release.
 if [ -n "$TARGZ" ] && [ -n "$SIG" ]; then
-  ENDPOINT_HOST="https://github.com/letsgetrusty/murmur/releases/download/v$VERSION"
+  ENDPOINT_HOST="https://github.com/letsgetrusty/Murmur/releases/download/v$VERSION"
   MANIFEST="src-tauri/target/release/bundle/latest.json"
   TARGZ_NAME="$(basename "$TARGZ")"
   SIGNATURE="$(cat "$SIG")"

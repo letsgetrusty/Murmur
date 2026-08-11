@@ -610,7 +610,7 @@ function initHistory() {
 
 // --- Support ------------------------------------------------------------------
 
-const REPO_URL = "https://github.com/letsgetrusty/murmur";
+const REPO_URL = "https://github.com/letsgetrusty/Murmur";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
 async function loadSupport() {
