@@ -507,6 +507,9 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         .inner_size(900.0, 640.0)
         .min_inner_size(640.0, 460.0)
         .center()
+        // Paint the window + webview our dark UI background (tokens.css --bg
+        // #141210) from creation, so it doesn't flash white before the CSS loads.
+        .background_color(tauri::window::Color(20, 18, 16, 255))
         .build()
     {
         Ok(win) => {
@@ -531,6 +534,8 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
         .inner_size(640.0, 620.0)
         .resizable(false)
         .center()
+        // Dark background from creation so there's no white flash before CSS.
+        .background_color(tauri::window::Color(20, 18, 16, 255))
         .build()
     {
         Ok(win) => {
