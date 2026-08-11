@@ -120,15 +120,21 @@ shipped work: `docs/voice-tool-architecture.md` §7.
 - Release: **cut every release with `./scripts/publish-release.sh`** — the one
   command for it. It auto-computes the next version from the highest release tag
   (`--minor` / `--major` / an explicit `X.Y.Z` to override; `--dry-run` to
-  preview), then bumps all three manifests **and** `package-lock.json`, commits,
-  pushes `main`, builds the self-signed DMG + updater artifacts, tags, and
-  creates the GitHub release with `latest.json` for auto-update — atomically.
+  preview + show which mode), bumps all three manifests **and**
+  `package-lock.json`, commits, and pushes `main`. It then **auto-detects how to
+  build**:
+  - **Apple signing configured** (the `APPLE_CERTIFICATE` GitHub secret exists —
+    it now is): the script just pushes the `vX.Y.Z` tag and the CI `release.yml`
+    workflow builds the **signed + notarized** DMG + updater artifacts and creates
+    the GitHub release. Building locally would race CI, so it doesn't.
+  - **Fails closed:** if it can't confirm Apple signing, it **aborts** rather than
+    silently self-signing. A self-signed release only happens when you *explicitly*
+    pass `--self-signed` (kept as an escape hatch for a lapsed account / a fork) —
+    so a `gh` hiccup or a stray run can never ship an un-notarized build.
   - **Do NOT hand-bump the version or create/push a `vX.Y.Z` tag yourself.** The
     script owns both and refuses a tag that already exists, so a manual tag just
-    blocks it. **Pushing a tag does NOT publish on its own:** the CI
-    `release.yml` build/publish step is gated on Apple signing secrets that
-    aren't set yet, so on tag push it deliberately no-ops — the local script is
-    what produces a release.
+    blocks it. A bare tag push *does* now publish (via CI), but only the script
+    keeps the version/tag/manifests in lockstep.
   - `./scripts/release.sh` is only the *builder* underneath (`--self-signed` for
     the stable internal identity, `--unsigned` to test bundling, no flag for a
     Developer ID + notarized build — needs certs/creds in env; see
