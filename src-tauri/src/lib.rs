@@ -874,6 +874,7 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     // Prefer the live selection; fall back to the clipboard when there's none,
     // so text you can't mouse-select (a mouse-capturing terminal TUI, etc.) can
     // still be read after copying it with the app's own command.
+    let sel_t0 = std::time::Instant::now();
     let text = match selection::capture_selection() {
         Ok(Some(text)) => Some(text),
         Ok(None) => selection::clipboard_text(),
@@ -890,6 +891,10 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             return;
         }
     };
+    log::info!(
+        "tts: selection capture {:.0}ms",
+        sel_t0.elapsed().as_secs_f32() * 1000.0
+    );
     match text {
         Some(text) => {
             let chars = text.chars().count();

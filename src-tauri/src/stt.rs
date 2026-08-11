@@ -119,45 +119,55 @@ impl Transcriber for WhisperStt {
         Box::pin(async move {
             let ctx = self.context()?;
             let samples = wav_to_mono_f32(wav)?;
+            let audio_secs = samples.len() as f32 / 16_000.0;
             // whisper.cpp is a blocking CPU/GPU job — keep it off the async
             // runtime's worker threads.
-            let text = tokio::task::spawn_blocking(move || -> Result<String> {
-                let mut state = ctx
-                    .create_state()
-                    .map_err(|e| anyhow!("whisper state: {e}"))?;
-                let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-                // Pin to English (matches the cloud path) and silence whisper's
-                // stdout chatter.
-                params.set_language(Some("en"));
-                params.set_translate(false);
-                // A dictation clip is one self-contained utterance: don't seed
-                // the decoder with prior-window text, and pin a single
-                // temperature so a hard clip can't trip whisper's
-                // temperature-fallback retries (which re-decode and spike
-                // latency). Give it the machine's cores while we're at it.
-                params.set_no_context(true);
-                params.set_temperature(0.0);
-                params.set_temperature_inc(0.0);
-                params.set_n_threads(transcribe_threads());
-                params.set_print_special(false);
-                params.set_print_progress(false);
-                params.set_print_realtime(false);
-                params.set_print_timestamps(false);
-                state
-                    .full(params, &samples)
-                    .map_err(|e| anyhow!("whisper inference: {e}"))?;
-                let mut out = String::new();
-                for segment in state.as_iter() {
-                    out.push_str(
-                        &segment
-                            .to_str_lossy()
-                            .map_err(|e| anyhow!("segment: {e}"))?,
-                    );
-                }
-                Ok(out)
-            })
-            .await
-            .context("whisper task join")??;
+            let (text, infer_secs) =
+                tokio::task::spawn_blocking(move || -> Result<(String, f32)> {
+                    let mut state = ctx
+                        .create_state()
+                        .map_err(|e| anyhow!("whisper state: {e}"))?;
+                    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+                    // Pin to English (matches the cloud path) and silence whisper's
+                    // stdout chatter.
+                    params.set_language(Some("en"));
+                    params.set_translate(false);
+                    // A dictation clip is one self-contained utterance: don't seed
+                    // the decoder with prior-window text, and pin a single
+                    // temperature so a hard clip can't trip whisper's
+                    // temperature-fallback retries (which re-decode and spike
+                    // latency). Give it the machine's cores while we're at it.
+                    params.set_no_context(true);
+                    params.set_temperature(0.0);
+                    params.set_temperature_inc(0.0);
+                    params.set_n_threads(transcribe_threads());
+                    params.set_print_special(false);
+                    params.set_print_progress(false);
+                    params.set_print_realtime(false);
+                    params.set_print_timestamps(false);
+                    let t0 = std::time::Instant::now();
+                    state
+                        .full(params, &samples)
+                        .map_err(|e| anyhow!("whisper inference: {e}"))?;
+                    let infer_secs = t0.elapsed().as_secs_f32();
+                    let mut out = String::new();
+                    for segment in state.as_iter() {
+                        out.push_str(
+                            &segment
+                                .to_str_lossy()
+                                .map_err(|e| anyhow!("segment: {e}"))?,
+                        );
+                    }
+                    Ok((out, infer_secs))
+                })
+                .await
+                .context("whisper task join")??;
+            log::info!(
+                "stt: transcribed {:.1}s of audio in {:.0}ms ({:.1}x realtime)",
+                audio_secs,
+                infer_secs * 1000.0,
+                audio_secs / infer_secs.max(1e-3),
+            );
             Ok(text.trim().to_string())
         })
     }
