@@ -8,9 +8,8 @@ accounts, no API keys.
 
 ### **[Download Murmur for macOS »](https://github.com/letsgetrusty/Murmur/releases/latest)**
 
-Open the `.dmg`, drag **Murmur** to Applications, and launch it. Signed and
-notarized by Apple, so there are no Gatekeeper warnings. Updates install with one
-click. **Requires macOS 11+ on Apple Silicon (M1 or later).**
+Open the `.dmg`, drag **Murmur** to Applications, and launch it. Updates install
+with one click. **Requires macOS 11+ on Apple Silicon (M1 or later).**
 
 ## What it does
 
