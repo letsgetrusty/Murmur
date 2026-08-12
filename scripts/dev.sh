@@ -64,9 +64,14 @@ say "Building frontend (npm run build)…"
 npm run build >"$TARGET_DIR/vite-build.log" 2>&1 || die "frontend build failed — see $TARGET_DIR/vite-build.log"
 
 # 2. Build the debug binary --------------------------------------------------
-# --no-default-features matches what `tauri dev` passes.
+# Enable tauri's `custom-protocol` feature so the webview serves the embedded
+# ../dist over the production asset protocol. Tauri's build script computes
+# `dev = !custom-protocol`; without the feature `dev` is true and the webview
+# loads `build.devUrl` (http://localhost:1420) — a Vite dev server this script
+# never starts — so every window renders blank. `tauri build` enables this
+# automatically; a bare `cargo build` must pass it explicitly.
 say "Building (cargo build, incremental)…"
-cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo build --manifest-path src-tauri/Cargo.toml --features tauri/custom-protocol
 
 # 3. Assemble the .app -------------------------------------------------------
 # Direct binary as the executable (no launcher-script indirection — that broke
