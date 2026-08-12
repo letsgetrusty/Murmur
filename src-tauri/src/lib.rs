@@ -88,6 +88,10 @@ pub struct AppState {
     /// The tray item that flips from "Check for Updates…" to
     /// "Restart to update (vX)" when an update is staged.
     pub update_item: tauri::menu::MenuItem<Wry>,
+    /// The "Read selection (⌘⇧R)" tray item. Held so its shortcut hint can be
+    /// relabeled when the read-aloud chord is rebound in Settings — the tray
+    /// menu is built once at startup, so this is the only live handle to it.
+    pub read_item: tauri::menu::MenuItem<Wry>,
     /// Latest per-model download progress, mirrored from `emit_download_progress`
     /// so the overlay can show a live bar when the user tries to dictate before
     /// the speech model has finished downloading.
@@ -324,7 +328,7 @@ pub fn run() {
             // saved config so the user sees their previous selection as soon
             // as they open the menu. `mic_names` was enumerated above before
             // Tauri took the main thread.
-            let (menu, speed_items, voice_items, mic_items, update_item) =
+            let (menu, speed_items, voice_items, mic_items, update_item, read_item) =
                 build_tray_menu(app.handle(), &cfg, &mic_names)?;
             app.manage(AppState {
                 tx,
@@ -340,6 +344,7 @@ pub fn run() {
                 history: history_state.clone(),
                 pending_update: Arc::new(Mutex::new(None)),
                 update_item,
+                read_item,
                 downloads: Arc::new(Mutex::new(Downloads::default())),
                 recording_armed: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
@@ -595,6 +600,18 @@ pub async fn install_pending<R: Runtime>(app: &AppHandle<R>) -> Result<(), Strin
         Some(u) => update::install_staged(app, u).await,
         None => Err("no staged update".to_string()),
     }
+}
+
+/// Relabel the "Read selection (…)" tray item so its shortcut hint matches the
+/// current read-aloud chord. Called after the chord is rebound in Settings — the
+/// tray menu is built once at startup, so without this it would stay stale. Menu
+/// mutation must happen on the main thread on macOS, so it's deferred there.
+pub(crate) fn refresh_read_label<R: Runtime>(app: &AppHandle<R>, hotkey_tts: &str) {
+    let label = format!("Read selection ({})", format_accelerator(hotkey_tts));
+    let app_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = app_main.state::<AppState>().read_item.set_text(&label);
+    });
 }
 
 /// Surface a staged update: relabel the tray item to "Restart to update (vX)"
@@ -1013,7 +1030,7 @@ fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
 /// std::thread so we don't block any tokio worker.
 /// Poll the speaker after a `speak()` and emit `Idle` when playback ends —
 /// either because the audio finished naturally or because the user pressed
-/// Option+A again to stop. Without this the overlay would stay stuck on
+/// the read-aloud shortcut again to stop. Without this the overlay would stay stuck on
 /// "Transcribing…" forever.
 fn spawn_tts_idle_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {
@@ -1071,7 +1088,25 @@ type TrayMenu = (
     Vec<CheckMenuItem<Wry>>,
     Vec<CheckMenuItem<Wry>>,
     MenuItem<Wry>,
+    MenuItem<Wry>,
 );
+
+/// Render a `tauri-plugin-global-shortcut` accelerator (e.g.
+/// "CmdOrCtrl+Shift+R") as a compact macOS symbol hint ("⌘⇧R") for menu
+/// labels. Unknown tokens pass through uppercased so an odd chord still shows
+/// *something* truthful rather than a hardcoded guess.
+pub(crate) fn format_accelerator(accel: &str) -> String {
+    accel
+        .split('+')
+        .map(|tok| match tok.trim().to_ascii_lowercase().as_str() {
+            "cmdorctrl" | "cmd" | "command" | "super" | "meta" => "⌘".to_string(),
+            "ctrl" | "control" => "⌃".to_string(),
+            "alt" | "option" => "⌥".to_string(),
+            "shift" => "⇧".to_string(),
+            other => other.to_ascii_uppercase(),
+        })
+        .collect()
+}
 
 fn build_tray_menu(
     app: &AppHandle<Wry>,
@@ -1087,7 +1122,13 @@ fn build_tray_menu(
         true,
         None::<&str>,
     )?;
-    let read = MenuItem::with_id(app, "tts_read", "Read selection (⌥A)", true, None::<&str>)?;
+    let read = MenuItem::with_id(
+        app,
+        "tts_read",
+        format!("Read selection ({})", format_accelerator(&cfg.hotkey_tts)),
+        true,
+        None::<&str>,
+    )?;
     let stop_read = MenuItem::with_id(app, "tts_stop", "Stop reading", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Murmur", true, None::<&str>)?;
 
@@ -1173,7 +1214,14 @@ fn build_tray_menu(
             &quit,
         ],
     )?;
-    Ok((menu, speed_items, voice_items, mic_items, check_update))
+    Ok((
+        menu,
+        speed_items,
+        voice_items,
+        mic_items,
+        check_update,
+        read,
+    ))
 }
 
 fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
@@ -1658,4 +1706,19 @@ async fn paste_on_main_thread<R: Runtime>(app: &AppHandle<R>, text: String) -> a
     .map_err(|e| anyhow::anyhow!("dispatch to main thread failed: {e}"))?;
     rx.await
         .map_err(|e| anyhow::anyhow!("paste task cancelled: {e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_accelerator;
+
+    #[test]
+    fn accelerator_renders_mac_symbols() {
+        // The read-aloud default — the chord the tray was mislabeling as ⌥A.
+        assert_eq!(format_accelerator("CmdOrCtrl+Shift+R"), "⌘⇧R");
+        assert_eq!(format_accelerator("Cmd+Ctrl+S"), "⌘⌃S");
+        // An Option chord still renders truthfully (⌥) rather than a guess.
+        assert_eq!(format_accelerator("Alt+A"), "⌥A");
+        assert_eq!(format_accelerator("Option+A"), "⌥A");
+    }
 }

@@ -129,6 +129,10 @@ pub fn set_hotkey(
         }
         cfg.clone()
     };
+    // Keep the tray's "Read selection (…)" hint in sync with the new chord.
+    if action == "tts_toggle" {
+        crate::refresh_read_label(&app, &shortcut);
+    }
     crate::config::save(&snapshot).map_err(|e| e.to_string())
 }
 
@@ -179,6 +183,8 @@ pub fn reset_hotkeys(
         cfg.clone()
     };
     crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    // The read-aloud chord just reset to its default — resync the tray hint.
+    crate::refresh_read_label(&app, &snapshot.hotkey_tts);
     log::info!("config: key bindings reset to defaults");
     Ok(snapshot)
 }

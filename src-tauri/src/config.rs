@@ -32,7 +32,7 @@ pub struct Config {
     #[serde(default = "default_history_limit")]
     pub history_limit: u32,
     /// Global-shortcut chords (the tauri-plugin-global-shortcut format, e.g.
-    /// "Alt+A"). The hold-to-talk trigger is a hardware tap (`dictation_trigger`
+    /// "CmdOrCtrl+Shift+R"). The hold-to-talk trigger is a hardware tap (`dictation_trigger`
     /// below), separate from these chords.
     #[serde(default = "default_hotkey_dictate")]
     pub hotkey_dictate: String,
