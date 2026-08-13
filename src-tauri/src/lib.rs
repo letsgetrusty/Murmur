@@ -570,6 +570,23 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Terminate the process immediately via `_exit`, skipping `atexit` handlers and
+/// C/C++ static destructors. We do this instead of a normal clean exit because
+/// whisper's ggml Metal backend registers a global `ggml_metal_device` whose
+/// destructor (`ggml_metal_device_free` → `ggml_metal_rsets_free`) hits
+/// `ggml_abort()` during `__cxa_finalize` at process exit — crashing every quit
+/// and relaunch with SIGABRT. Nothing we own needs orderly teardown (config is
+/// saved on change, logs flush per write), so skipping finalization is safe and
+/// the kernel reclaims everything.
+fn hard_exit(code: std::ffi::c_int) -> ! {
+    extern "C" {
+        fn _exit(code: std::ffi::c_int) -> !;
+    }
+    // SAFETY: `_exit` is the POSIX immediate-termination wrapper; it never
+    // returns and touches no user-space state.
+    unsafe { _exit(code) }
+}
+
 /// Relaunch Murmur as its own responsible process. We deliberately do NOT
 /// use `app.restart()`: on macOS Tauri relaunches by spawning the binary as a
 /// *child* process, and macOS then attributes the TCC responsible process to the
@@ -592,8 +609,10 @@ pub fn relaunch<R: Runtime>(app: &AppHandle<R>) {
                 bundle.display()
             );
             let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
-            app.exit(0);
-            return;
+            // `_exit` (not `app.exit`) so ggml's Metal static destructor doesn't
+            // abort during finalization — see `hard_exit`. The helper above is
+            // already waiting for this pid to die, then reopens the bundle.
+            hard_exit(0);
         }
     }
     // Not inside an .app bundle (unusual) — fall back to Tauri's restart.
@@ -1277,7 +1296,7 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                 }
             });
         }
-        "quit" => app.exit(0),
+        "quit" => hard_exit(0),
         "tts_read" => tts_toggle(app),
         "tts_stop" => {
             app.state::<AppState>().speaker.stop();
