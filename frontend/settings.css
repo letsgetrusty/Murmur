@@ -293,7 +293,11 @@ nav {
 
 .tab {
   display: none;
-  max-width: 620px;
+  /* Grow with the window up to a comfortable reading width, then center so wide
+     displays get balanced margins instead of all the slack piling up on the
+     right (which read as "the UI doesn't resize"). */
+  max-width: 820px;
+  margin-inline: auto;
   padding-bottom: var(--space-4xl);
 }
 .tab.active {

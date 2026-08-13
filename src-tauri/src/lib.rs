@@ -560,6 +560,11 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         .title("Murmur")
         .inner_size(900.0, 640.0)
         .min_inner_size(640.0, 460.0)
+        // Cap the width so the content column (max 820px, see settings.css .tab)
+        // always fills the pane — past this the window would just grow empty
+        // margins. 1060 = 180 sidebar + 64 padding + ~816 content. Height is left
+        // effectively unbounded.
+        .max_inner_size(1060.0, 10000.0)
         .center()
         // Paint the window + webview our dark UI background (tokens.css --bg
         // #141210) from creation, so it doesn't flash white before the CSS loads.
