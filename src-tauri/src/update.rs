@@ -14,7 +14,34 @@ use tauri_plugin_updater::UpdaterExt;
 /// Pre-fetching means "Restart to update" applies instantly.
 pub struct StagedUpdate {
     pub version: String,
+    /// Release notes (the `notes` field of `latest.json`), markdown. `None` when
+    /// the release didn't ship any — the banner then shows just the version.
+    pub notes: Option<String>,
     bytes: Vec<u8>,
+}
+
+impl StagedUpdate {
+    /// The subset of a staged update the settings banner needs: the new version,
+    /// the version it replaces, and the release notes. Serialized to the webview
+    /// (camelCase) both as the `update-staged` event payload and the reply to the
+    /// `pending_update_version` command.
+    pub fn info(&self) -> UpdateInfo {
+        UpdateInfo {
+            version: self.version.clone(),
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
+            notes: self.notes.clone(),
+        }
+    }
+}
+
+/// What the "update ready" banner renders: the incoming version, the one it
+/// replaces (so the UI can link the `vOLD...vNEW` diff), and the release notes.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    pub current_version: String,
+    pub notes: Option<String>,
 }
 
 /// Check the endpoint and, if a newer release exists, download + verify it in
@@ -31,6 +58,7 @@ pub async fn check_and_download<R: Runtime>(app: &AppHandle<R>) -> Option<Staged
         }
     };
     let version = update.version.clone();
+    let notes = update.body.clone();
     log::info!("update: v{version} available — downloading in the background");
     match update.download(|_, _| {}, || {}).await {
         Ok(bytes) => {
@@ -38,7 +66,11 @@ pub async fn check_and_download<R: Runtime>(app: &AppHandle<R>) -> Option<Staged
                 "update: v{version} downloaded + verified ({} bytes) — staged",
                 bytes.len()
             );
-            Some(StagedUpdate { version, bytes })
+            Some(StagedUpdate {
+                version,
+                notes,
+                bytes,
+            })
         }
         Err(e) => {
             log::warn!("update: background download failed: {e}");

@@ -10,11 +10,63 @@
   </head>
   <body>
     <div class="app">
-      <!-- Persistent update bar: spans the whole window, above every tab. -->
+      <!-- Persistent update bar: spans the whole window, above every tab.
+           Collapsed = message + Install; the chevron reveals "what changed"
+           (release notes + provenance). Populated by initUpdate() in settings.js. -->
       <div id="update-banner" class="update-banner" hidden>
-        <span class="update-icon" aria-hidden="true">↑</span>
-        <span class="update-text" id="update-text"></span>
-        <button id="update-install" class="primary small">Install &amp; Restart</button>
+        <div class="update-row">
+          <span class="update-icon" aria-hidden="true">↑</span>
+          <span class="update-text" id="update-text"></span>
+          <button id="update-install" class="primary small">Install &amp; Restart</button>
+          <button
+            id="update-expand"
+            class="update-expand"
+            type="button"
+            aria-expanded="false"
+            aria-controls="update-details"
+            aria-label="Show what changed"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+        </div>
+
+        <div id="update-details" class="update-details" hidden>
+          <div class="update-notes-head">
+            <h3 id="update-notes-title">What's new</h3>
+            <span class="update-range" id="update-range"></span>
+          </div>
+
+          <!-- Categorized release notes are injected here by renderUpdateNotes(). -->
+          <div id="update-notes" class="update-notes"></div>
+
+          <!-- Provenance is constant for anything the updater installs from the
+               public endpoint: minisign-verified before staging, Apple-notarized
+               by CI. The diff link's href is set per-release in JS. -->
+          <div class="update-cat update-verified">
+            <div class="update-cat-k">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              Verified
+            </div>
+            <div class="update-provenance">
+              <span class="prov-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                Signature verified <span class="prov-dim">(minisign)</span>
+              </span>
+              <span class="prov-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                Notarized by Apple
+              </span>
+              <a id="update-diff" class="update-difflink" href="#" target="_blank" rel="noopener">
+                View the exact diff
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9" /></svg>
+              </a>
+            </div>
+          </div>
+        </div>
       </div>
 
       <aside class="sidebar">

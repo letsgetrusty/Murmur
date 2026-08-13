@@ -7,22 +7,22 @@
 }
 
 /* Auto-update banner — a persistent bar spanning the top of the whole window
-   (both grid columns), so it's visible on every tab, not just Settings. */
+   (both grid columns), so it's visible on every tab, not just Settings. The
+   collapsed row is just the message + Install; the chevron reveals "what
+   changed" (categorized release notes + provenance). */
 .update-banner {
   grid-area: banner;
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--space-lg);
   background: var(--accent-soft-bg);
   border-bottom: 1px solid var(--accent-soft-border);
 }
 .update-banner[hidden] {
   display: none;
 }
-.update-banner.neutral {
-  background: var(--bg-elev);
-  border-color: var(--border);
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
 }
 .update-icon {
   display: inline-flex;
@@ -37,15 +37,182 @@
   font-weight: var(--fw-bold);
   font-size: var(--fs-sm);
 }
-.update-banner.neutral .update-icon {
-  background: var(--text-dim);
-}
 .update-text {
   flex: 1;
   font-size: var(--fs-sm);
 }
 .update-text b {
   font-weight: var(--fw-semibold);
+}
+
+/* Chevron toggle — a subtle ghost icon button that rotates 180° when open. */
+.update-expand {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.update-expand:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: #3a332c;
+}
+.update-expand svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.2s ease;
+}
+.update-expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+/* Expanded "what changed" panel. */
+.update-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-lg) var(--space-xl);
+  border-top: 1px solid var(--accent-soft-border);
+}
+.update-details[hidden] {
+  display: none;
+}
+.update-notes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+.update-notes-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+.update-range {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--state-idle);
+}
+.update-range b {
+  color: var(--text-dim);
+  font-weight: var(--fw-semibold);
+}
+.update-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+.update-empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.update-cat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.update-cat-k {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: var(--fw-bold);
+  color: var(--state-idle);
+}
+.update-cat-k svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+.update-verified .update-cat-k {
+  color: var(--accent);
+}
+ul.update-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+ul.update-items li {
+  position: relative;
+  padding-left: 16px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+ul.update-items li::before {
+  content: "•";
+  position: absolute;
+  left: 3px;
+  color: var(--state-idle);
+}
+ul.update-items li b {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+.update-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 11px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-nav);
+}
+.prov-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.prov-item svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--text);
+}
+.prov-dim {
+  color: var(--state-idle);
+}
+.update-difflink {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 6px 11px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--accent);
+  text-decoration: none;
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius-control);
+}
+.update-difflink:hover {
+  background: rgba(var(--accent-rgb), 0.2);
+}
+.update-difflink svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
 }
 
 html,

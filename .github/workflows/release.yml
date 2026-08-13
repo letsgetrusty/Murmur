@@ -29,6 +29,8 @@ jobs:
       APPLE_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, so the changelog step can diff tags
 
       - name: Tag must match the app version
         run: |
@@ -91,6 +93,49 @@ jobs:
         if: env.APPLE_CONFIGURED == 'true'
         run: npm ci
 
+      # Build the release notes from conventional-commit subjects since the
+      # previous tag → categorized "### New / ### Fixed / ### Improved" markdown.
+      # This becomes BOTH the GitHub release body AND latest.json's `notes`, which
+      # the in-app update banner ("What's new") renders. Falls back to a plain
+      # blurb if nothing user-facing landed. See settings.js → parseUpdateNotes.
+      - name: Generate release notes
+        if: env.APPLE_CONFIGURED == 'true'
+        id: notes
+        run: |
+          current="${GITHUB_REF_NAME}"
+          prev=$(git tag --sort=-v:refname | grep -vFx "$current" | head -1 || true)
+          if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
+          echo "Changelog range: ${prev:-<start>}..$current"
+          new=""; fixed=""; improved=""
+          while IFS= read -r subj; do
+            [ -z "$subj" ] && continue
+            if echo "$subj" | grep -qE '^[a-z]+(\([^)]*\))?!?:'; then
+              type=$(echo "$subj" | sed -E 's/^([a-z]+).*/\1/')
+              text=$(echo "$subj" | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//')
+            else
+              type="other"; text="$subj"
+            fi
+            case "$type" in
+              feat) new="${new}- ${text}"$'\n' ;;
+              fix) fixed="${fixed}- ${text}"$'\n' ;;
+              perf|refactor) improved="${improved}- ${text}"$'\n' ;;
+              *) : ;; # docs/chore/ci/test/build/style/release/other → not user-facing
+            esac
+          done < <(git log --no-merges --pretty=%s "$range")
+          body=""
+          [ -n "$new" ] && body="${body}### New"$'\n'"${new}"$'\n'
+          [ -n "$fixed" ] && body="${body}### Fixed"$'\n'"${fixed}"$'\n'
+          [ -n "$improved" ] && body="${body}### Improved"$'\n'"${improved}"$'\n'
+          if [ -z "$body" ]; then
+            body="Download the .dmg below to install. Existing installs update automatically."
+          fi
+          {
+            echo "body<<EOF_NOTES"
+            printf '%s' "$body"
+            echo
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
       # ── Apple Developer ID + notarization — OPTIONAL (add later) ──────────
       # Runs only once the Apple secrets exist; then tauri-action signs with the
       # Developer ID under the hardened runtime + entitlements.plist, notarizes,
@@ -126,7 +171,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Murmur ${{ github.ref_name }}"
-          releaseBody: "Download the .dmg below to install. Existing installs update automatically."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           # Explicit host arch → outputs the darwin-aarch64 updater artifact +

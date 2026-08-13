@@ -507,11 +507,11 @@ pub fn run() {
                             .unwrap_or(true);
                         if !staged {
                             if let Some(update) = update::check_and_download(&app).await {
-                                let version = update.version.clone();
+                                let info = update.info();
                                 if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
                                     *g = Some(update);
                                 }
-                                mark_update_staged(&app, &version);
+                                mark_update_staged(&app, info);
                             }
                         }
                         tokio::time::sleep(CHECK_INTERVAL).await;
@@ -703,13 +703,14 @@ pub(crate) fn refresh_read_label<R: Runtime>(app: &AppHandle<R>, hotkey_tts: &st
 /// Surface a staged update: relabel the tray item to "Restart to update (vX)"
 /// and notify the settings window (which shows an install banner). Menu mutation
 /// must happen on the main thread on macOS, so the relabel is deferred there.
-fn mark_update_staged<R: Runtime>(app: &AppHandle<R>, version: &str) {
+fn mark_update_staged<R: Runtime>(app: &AppHandle<R>, info: update::UpdateInfo) {
+    let version = info.version.clone();
     let label = format!("Restart to update (v{version})");
     let app_main = app.clone();
     let _ = app.run_on_main_thread(move || {
         let _ = app_main.state::<AppState>().update_item.set_text(&label);
     });
-    let _ = app.emit(ipc::event::UPDATE_STAGED, version.to_string());
+    let _ = app.emit(ipc::event::UPDATE_STAGED, info);
     log::info!("update: staged v{version} — 'Restart to update' offered");
 }
 
@@ -1391,11 +1392,11 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                 show_main_window(&app);
                 match update::check_and_download(&app).await {
                     Some(u) => {
-                        let version = u.version.clone();
+                        let info = u.info();
                         if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
                             *g = Some(u);
                         }
-                        mark_update_staged(&app, &version);
+                        mark_update_staged(&app, info);
                     }
                     None => {
                         let _ = app.emit(ipc::event::UPDATE_NONE, ());

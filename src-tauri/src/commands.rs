@@ -368,15 +368,17 @@ pub fn set_overlay_position(
 
 // --- Auto-update -------------------------------------------------------------
 
-/// The version of a staged (already-downloaded) update, if one is ready. Drives
-/// the settings "Restart to update" banner when the window opens.
+/// The staged (already-downloaded) update's info — version, the version it
+/// replaces, and release notes — if one is ready. Drives the settings "Restart
+/// to update" banner when the window opens after the update was already staged
+/// (the live path uses the `update-staged` event, which carries the same shape).
 #[tauri::command]
-pub fn pending_update_version(state: State<AppState>) -> Option<String> {
+pub fn pending_update_version(state: State<AppState>) -> Option<crate::update::UpdateInfo> {
     state
         .pending_update
         .lock()
         .ok()
-        .and_then(|g| g.as_ref().map(|u| u.version.clone()))
+        .and_then(|g| g.as_ref().map(|u| u.info()))
 }
 
 /// Apply the staged (already-downloaded + verified) update and relaunch.

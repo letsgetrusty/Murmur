@@ -682,17 +682,112 @@ function initZoom() {
 
 // --- Auto-update --------------------------------------------------------------
 
+// Escape HTML, then re-apply the only markup we render from release notes:
+// **bold**. Notes come from our own signed release, but escaping first keeps a
+// stray `<` in a commit subject from breaking the layout.
+function notesInline(text) {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<b>${a || b}</b>`);
+}
+
+// Strip one changelog bullet down to its human-readable subject: drop the
+// GitHub auto-notes "by @user in <url>" tail, collapse `[text](url)` links to
+// their text, and shed a leading conventional-commit type (`feat:`, `fix(x):`).
+function cleanNoteItem(line) {
+  return line
+    .replace(/\s+by\s+@[\w-]+\s+in\s+\S+$/i, "")
+    .replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1")
+    .replace(/^(?:feat|fix|perf|refactor|docs|chore|build|ci|test|style)(?:\([^)]*\))?!?:\s*/i, "")
+    .trim();
+}
+
+// Parse markdown release notes into ordered { label, items } sections. Headings
+// (`## New`) open a section; `-`/`*` lines are its bullets. Prose with no
+// structure (e.g. a one-line release blurb) falls under a single unlabeled
+// section so it still renders. The GitHub "Full Changelog" line is dropped — we
+// surface the diff via our own "View the exact diff" link.
+function parseUpdateNotes(md) {
+  const sections = [];
+  let current = null;
+  const ensure = (label) => {
+    if (!current || current.label !== label) {
+      current = { label, items: [] };
+      sections.push(current);
+    }
+    return current;
+  };
+  for (const raw of (md || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line === "---" || /^\*\*full changelog\*\*/i.test(line)) continue;
+    const heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      current = { label: heading[1].replace(/[:*]+$/, "").trim(), items: [] };
+      sections.push(current);
+      continue;
+    }
+    const bullet = line.match(/^[-*]\s+(.*)$/);
+    const item = cleanNoteItem(bullet ? bullet[1] : line);
+    if (item) ensure(current?.label ?? "").items.push(item);
+  }
+  return sections.filter((s) => s.items.length);
+}
+
+function renderUpdateNotes(md) {
+  const host = el("update-notes");
+  host.textContent = "";
+  const sections = parseUpdateNotes(md);
+  if (!sections.length) {
+    const p = document.createElement("p");
+    p.className = "update-empty";
+    p.textContent = "No release notes were provided — see the exact diff below.";
+    host.appendChild(p);
+    return;
+  }
+  for (const section of sections) {
+    const cat = document.createElement("div");
+    cat.className = "update-cat";
+    if (section.label) {
+      const k = document.createElement("div");
+      k.className = "update-cat-k";
+      k.textContent = section.label;
+      cat.appendChild(k);
+    }
+    const ul = document.createElement("ul");
+    ul.className = "update-items";
+    for (const item of section.items) {
+      const li = document.createElement("li");
+      li.innerHTML = notesInline(item);
+      ul.appendChild(li);
+    }
+    cat.appendChild(ul);
+    host.appendChild(cat);
+  }
+}
+
 // A newer version has been downloaded + verified in the background and is
-// staged — the user just needs to restart to apply it.
-function showUpdateStaged(version) {
-  const banner = el("update-banner");
-  banner.classList.remove("neutral");
-  el("update-text").innerHTML = `<b>Murmur ${version}</b> is downloaded and ready to install.`;
+// staged — the user just needs to restart to apply it. `info` carries the new
+// version, the one it replaces, and the release notes.
+function showUpdateStaged(info) {
+  const { version, currentVersion, notes } = info || {};
+  if (!version) return;
+  el("update-text").innerHTML = `<b>Murmur ${version}</b> is ready to install`;
   const btn = el("update-install");
   btn.hidden = false;
   btn.disabled = false;
-  btn.textContent = "Restart to update";
-  banner.hidden = false;
+  btn.textContent = "Install & Restart";
+
+  el("update-notes-title").textContent = `What's new in ${version}`;
+  el("update-range").innerHTML = currentVersion
+    ? `<b>v${currentVersion}</b> → <b>v${version}</b>`
+    : "";
+  renderUpdateNotes(notes);
+  if (currentVersion) {
+    el("update-diff").dataset.url = `${REPO_URL}/compare/v${currentVersion}...v${version}`;
+  }
+  el("update-banner").hidden = false;
 }
 
 function showUpToDate() {
@@ -713,14 +808,30 @@ async function installUpdate() {
   }
 }
 
+function toggleUpdateDetails() {
+  const btn = el("update-expand");
+  const details = el("update-details");
+  const open = details.hidden;
+  details.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  btn.setAttribute("aria-label", open ? "Hide what changed" : "Show what changed");
+}
+
 function initUpdate() {
   el("update-install").addEventListener("click", installUpdate);
+  el("update-expand").addEventListener("click", toggleUpdateDetails);
+  // Open the diff in the default browser, not inside the WKWebview.
+  el("update-diff").addEventListener("click", (e) => {
+    e.preventDefault();
+    const url = e.currentTarget.dataset.url;
+    if (url) invoke?.(CMD.OPEN_URL, { url }).catch(() => {});
+  });
   const listen = window.__TAURI__?.event?.listen;
   listen?.(EVENTS.UPDATE_STAGED, (e) => showUpdateStaged(e.payload));
   listen?.(EVENTS.UPDATE_NONE, () => showUpToDate());
   // If an update was already staged before this window opened, show it.
-  invoke?.(CMD.PENDING_UPDATE_VERSION).then((v) => {
-    if (v) showUpdateStaged(v);
+  invoke?.(CMD.PENDING_UPDATE_VERSION).then((info) => {
+    if (info) showUpdateStaged(info);
   });
 }
 

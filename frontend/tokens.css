@@ -12,6 +12,7 @@
 
   /* Typeface -------------------------------------------------------------- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
   /* Surfaces & text — warm-biased near-black + gray (nudged toward the rust
      accent so the neutrals read as chosen, not default gray). ------------- */
