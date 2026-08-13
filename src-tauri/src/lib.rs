@@ -14,6 +14,7 @@ mod llm;
 mod local_llm;
 mod permissions;
 mod selection;
+mod sound;
 mod stt;
 mod tts;
 mod update;
@@ -109,6 +110,9 @@ pub struct AppState {
     /// refine, before paste), bails if it no longer matches — so an Esc drops
     /// the result instead of pasting it.
     pub dictation_gen: AtomicU64,
+    /// Registered start/stop dictation cue sounds (see `sound.rs`). `Copy`, so no
+    /// locking; playback is gated on the `dictation_sound` config flag.
+    pub cues: sound::Cues,
 }
 
 /// Latest download progress for one model, mirrored from the download tasks.
@@ -371,6 +375,7 @@ pub fn run() {
                 recording_armed: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
                 dictation_gen: AtomicU64::new(0),
+                cues: sound::Cues::load(),
             });
 
             // Clean up orphaned `.part` temps from interrupted downloads of models
@@ -1440,6 +1445,25 @@ fn persist_config<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit(ipc::event::CONFIG_CHANGED, ());
 }
 
+/// Play the dictation start/stop cue, unless the `dictation_sound` config flag
+/// is off. Cheap and fire-and-forget (see `sound.rs`).
+fn play_dictation_cue<R: Runtime>(app: &AppHandle<R>, start: bool) {
+    let state = app.state::<AppState>();
+    let enabled = state
+        .config
+        .lock()
+        .map(|c| c.dictation_sound)
+        .unwrap_or(true);
+    if !enabled {
+        return;
+    }
+    if start {
+        state.cues.play_start();
+    } else {
+        state.cues.play_stop();
+    }
+}
+
 fn spawn_dictation_worker<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -1469,6 +1493,7 @@ fn spawn_dictation_worker<R: Runtime>(
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
+                            play_dictation_cue(&app, true);
                             rec = Some(r);
                         }
                         Err(e) => {
@@ -1504,6 +1529,7 @@ fn spawn_dictation_worker<R: Runtime>(
                         hotkeys::unregister_escape(&app);
                         continue;
                     };
+                    play_dictation_cue(&app, false);
                     let stop_t0 = std::time::Instant::now();
                     match r.stop() {
                         Ok(recording) => {

@@ -66,6 +66,13 @@ pub struct Config {
     /// the onboarding window is shown on launch.
     #[serde(default)]
     pub onboarding_done: bool,
+    /// Play a subtle start/stop sound when dictation begins/ends. On by default.
+    #[serde(default = "default_dictation_sound")]
+    pub dictation_sound: bool,
+}
+
+fn default_dictation_sound() -> bool {
+    true
 }
 
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
@@ -138,6 +145,7 @@ impl Default for Config {
             tts_provider: default_tts_provider(),
             llm_model: default_llm_model(),
             onboarding_done: false,
+            dictation_sound: default_dictation_sound(),
         }
     }
 }
