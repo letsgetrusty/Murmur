@@ -86,6 +86,15 @@ fn load_context(
     if let Some(c) = guard.as_ref() {
         return Ok(c.clone());
     }
+    let ctx = open_context(model_name)?;
+    *guard = Some(ctx.clone());
+    Ok(ctx)
+}
+
+/// Open a fresh whisper context — reads the ~150 MB weights and inits the Metal
+/// backend. No caching; callers own the cell. Split out so `warm` can hold the
+/// cell lock across load + warm-inference + publish (see `warm`).
+fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
     let path = model_path(model_name)?;
     if !path.exists() {
         return Err(anyhow!(
@@ -100,9 +109,33 @@ fn load_context(
     cparams.flash_attn(true);
     let ctx = WhisperContext::new_with_params(&path, cparams)
         .map_err(|e| anyhow!("load whisper model '{}': {e}", model_name))?;
-    let ctx = Arc::new(ctx);
-    *guard = Some(ctx.clone());
-    Ok(ctx)
+    Ok(Arc::new(ctx))
+}
+
+/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
+/// graph compile + state allocation up front, so the first real dictation hits a
+/// fully-warm engine rather than paying that one-time cost. Uses the same
+/// no-fallback params as `transcribe` so it stays fast and deterministic.
+fn warm_infer(ctx: &WhisperContext) -> Result<()> {
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| anyhow!("whisper warm state: {e}"))?;
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    params.set_language(Some("en"));
+    params.set_translate(false);
+    params.set_no_context(true);
+    params.set_temperature(0.0);
+    params.set_temperature_inc(0.0);
+    params.set_n_threads(transcribe_threads());
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    let silence = vec![0f32; 16_000 / 2];
+    state
+        .full(params, &silence)
+        .map_err(|e| anyhow!("whisper warm inference: {e}"))?;
+    Ok(())
 }
 
 /// Threads for whisper's CPU-side work (Metal handles the heavy matmuls).
@@ -236,15 +269,35 @@ impl Transcriber for WhisperStt {
         if self.ctx.lock().map(|g| g.is_some()).unwrap_or(false) {
             return;
         }
-        // Load on a throwaway thread so callers (hotkey press, startup) never
-        // block on the ~1s model read. A concurrent transcribe serializes on
-        // the same lock inside `load_context`, so the model loads only once.
+        // Warm on a throwaway thread so callers (hotkey press, startup) never
+        // block on the ~1s model read.
         let cell = self.ctx.clone();
         let name = self.model_name.clone();
         std::thread::spawn(move || {
-            if let Err(e) = load_context(&name, &cell) {
-                log::warn!("stt: warm-load failed: {e}");
+            // Hold the cell lock across load → warm-inference → publish. A
+            // concurrent transcribe fetches the ctx through the same lock, so it
+            // can't touch the Metal backend until we've published a fully-warm
+            // context — no concurrent inference on one context, and the first
+            // real dictation skips both the weight load and the graph compile.
+            let mut guard = match cell.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            if guard.is_some() {
+                return; // loaded (and warmed) by whoever got here first
             }
+            let ctx = match open_context(&name) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("stt: warm-load failed: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = warm_infer(&ctx) {
+                log::warn!("stt: warm inference failed: {e}");
+            }
+            *guard = Some(ctx);
+            log::info!("stt: model warmed (weights + graph)");
         });
     }
 }

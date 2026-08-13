@@ -263,6 +263,9 @@ pub fn run() {
             // (preview pre-gen / warm below), since kokoro-en reads the override
             // env var lazily on first phoneme lookup.
             tts::install_g2p_lexicon();
+            // Pin the CoreML compute path (before the session is built) so synth
+            // speed stays consistent instead of swinging when the ANE drops us.
+            tts::pin_coreml_compute_units();
 
             // Shared live config: the refiner reads it on each refine and the
             // settings window edits it via IPC, so changes apply without a restart.
@@ -780,9 +783,23 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
         } else {
             Ok(())
         };
-        if let Err(e) = res {
-            log::warn!("download: {id} failed: {e}");
-            emit_download_error(&app, id);
+        match res {
+            Err(e) => {
+                log::warn!("download: {id} failed: {e}");
+                emit_download_error(&app, id);
+            }
+            Ok(()) => {
+                // Freshly downloaded → warm it now (load + graph compile) so the
+                // first dictation / read-aloud after a first-run or model switch
+                // isn't the one paying the cold-start cost.
+                if let Some(state) = app.try_state::<AppState>() {
+                    if id == ipc::download::WHISPER {
+                        state.transcriber.warm();
+                    } else if id == ipc::download::KOKORO {
+                        state.speaker.warm();
+                    }
+                }
+            }
         }
         // Release the slot so a later retry can run.
         if let Some(state) = app.try_state::<AppState>() {

@@ -349,6 +349,10 @@ pub struct KokoroSpeaker {
     /// Player for the current voice preview, held so a new preview (or stop())
     /// replaces + releases the previous one. Separate from `player` (read-aloud).
     preview_player: Arc<Mutex<Option<KokoroQueue>>>,
+    /// Set once the model's graph is compiled (first synth done), so repeat
+    /// `warm()` calls — e.g. startup warm *and* the download-complete warm — skip
+    /// the redundant throwaway synth.
+    warmed: Arc<AtomicBool>,
 }
 
 impl KokoroSpeaker {
@@ -364,6 +368,7 @@ impl KokoroSpeaker {
             progress: Arc::new(AtomicU64::new(0)),
             generation: Arc::new(AtomicU64::new(0)),
             preview_player: Arc::new(Mutex::new(None)),
+            warmed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -438,6 +443,24 @@ pub fn install_g2p_lexicon() {
         Ok(ph) => log::debug!("tts: g2p lexicon self-check nginx = {ph:?}"),
         Err(e) => log::warn!("tts: g2p self-check failed: {e}"),
     }
+}
+
+/// Pin Kokoro's CoreML compute path. The crate defaults to `ALL` (ANE + GPU +
+/// CPU), which lets CoreML silently fall off the power-managed Apple Neural
+/// Engine mid-session — synth then drops from ~4.5× realtime to ~1.7×, the TTS
+/// latency swings we measured. Pinning the Metal GPU trades a little peak
+/// throughput for a *consistent* path: the GPU isn't power-gated / shared the way
+/// the ANE is, so no silent fallback. Set once at startup, **before the first
+/// synth** (the crate reads it when it builds the session). Respects an explicit
+/// user override so it can be A/B'd from the environment.
+pub fn pin_coreml_compute_units() {
+    if std::env::var_os("KOKORO_COREML_COMPUTE_UNITS").is_some() {
+        log::info!("tts: KOKORO_COREML_COMPUTE_UNITS set by env — leaving as-is");
+        return;
+    }
+    // Safe on edition 2021; set at startup before any synth reads it.
+    std::env::set_var("KOKORO_COREML_COMPUTE_UNITS", "cpu_and_gpu");
+    log::info!("tts: pinned CoreML compute units → cpu_and_gpu (consistent GPU path)");
 }
 
 /// Normalize text before synthesis so the neural voice pronounces code-style
@@ -701,19 +724,31 @@ impl Speaker for KokoroSpeaker {
         // Load the ONNX session and run one throwaway synth in the background:
         // this pays the ~1s model load *and* the first-run CoreML/ANE graph
         // compile up front, so the first real read-aloud starts promptly rather
-        // than after that one-time cost. Idempotent — the model cell
-        // short-circuits once loaded and the tiny synth is cheap.
+        // than after that one-time cost. Idempotent: `warmed` guards against the
+        // redundant synth when warm is called more than once (startup warm plus
+        // the download-complete warm).
+        if self.warmed.load(Ordering::Acquire) {
+            return;
+        }
         let model_path = self.model_path.clone();
         let voices_path = self.voices_path.clone();
         let tts_cell = self.tts.clone();
         let voice = self.voice.lock().expect("voice mutex").clone();
+        let warmed = self.warmed.clone();
         tauri::async_runtime::spawn(async move {
+            // Recheck under the async task in case two warms raced the sync guard.
+            if warmed.swap(true, Ordering::AcqRel) {
+                return;
+            }
             let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
+                warmed.store(false, Ordering::Release); // load failed — allow a retry
                 return;
             };
             // A short synth forces the graph compile; the audio is discarded.
             if tts.synth("Ready.", &voice).await.is_ok() {
                 log::info!("tts/kokoro: model warmed");
+            } else {
+                warmed.store(false, Ordering::Release); // synth failed — allow a retry
             }
         });
     }
