@@ -202,6 +202,11 @@ pub fn run() {
     }
     builder.init();
 
+    // Guard every clean-exit path against the ggml Metal teardown abort (see
+    // `install_exit_guard`). Registered early; if that loses the LIFO race with
+    // ggml's lazily-registered destructor, it moves to after model warm.
+    install_exit_guard();
+
     // Enumerate cpal input devices for the tray mic picker BEFORE Tauri/NSApp
     // takes over the main thread. Calling into CoreAudio HAL from inside the
     // NSApplicationDidFinishLaunching notification handler segfaults the release
@@ -574,21 +579,43 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Terminate the process immediately via `_exit`, skipping `atexit` handlers and
-/// C/C++ static destructors. We do this instead of a normal clean exit because
-/// whisper's ggml Metal backend registers a global `ggml_metal_device` whose
-/// destructor (`ggml_metal_device_free` → `ggml_metal_rsets_free`) hits
-/// `ggml_abort()` during `__cxa_finalize` at process exit — crashing every quit
-/// and relaunch with SIGABRT. Nothing we own needs orderly teardown (config is
-/// saved on change, logs flush per write), so skipping finalization is safe and
-/// the kernel reclaims everything.
+extern "C" {
+    /// POSIX immediate-termination wrapper: never returns, runs no `atexit`
+    /// handlers or C/C++ static destructors, touches no user-space state.
+    fn _exit(code: std::ffi::c_int) -> !;
+    /// Register a C `atexit` handler (runs during `exit()` in LIFO order).
+    fn atexit(cb: extern "C" fn()) -> std::ffi::c_int;
+}
+
+/// Terminate immediately via `_exit`, skipping static destructors. We do this
+/// instead of a clean exit because whisper's ggml Metal backend registers a
+/// global `ggml_metal_device` whose destructor (`ggml_metal_device_free` →
+/// `ggml_metal_rsets_free`) hits `ggml_abort()` during `__cxa_finalize` at exit,
+/// crashing with SIGABRT. Nothing we own needs orderly teardown (config saves on
+/// change, logs flush per write), so skipping finalization is safe.
 fn hard_exit(code: std::ffi::c_int) -> ! {
-    extern "C" {
-        fn _exit(code: std::ffi::c_int) -> !;
-    }
-    // SAFETY: `_exit` is the POSIX immediate-termination wrapper; it never
-    // returns and touches no user-space state.
+    // SAFETY: see the `_exit` extern docs.
     unsafe { _exit(code) }
+}
+
+/// `atexit` guard: catches clean-exit paths our explicit `hard_exit` sites don't
+/// — Cmd+Q, the AppleEvent quit (`osascript`/`dev.sh`), and system logout, which
+/// reach AppKit's `exit()` directly. `atexit` runs handlers LIFO, so as long as
+/// this is registered *after* ggml's Metal backend inits (see `install_exit_guard`),
+/// it fires before ggml's aborting destructor and `_exit`s clean.
+extern "C" fn exit_guard() {
+    // SAFETY: see the `_exit` extern docs.
+    unsafe { _exit(0) }
+}
+
+/// Register [`exit_guard`]. Idempotent; call once the STT Metal backend is live.
+fn install_exit_guard() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: `atexit` takes a plain `extern "C" fn()`; registration is safe.
+        unsafe { atexit(exit_guard) };
+    });
 }
 
 /// Relaunch Murmur as its own responsible process. We deliberately do NOT
