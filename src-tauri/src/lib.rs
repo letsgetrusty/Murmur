@@ -206,11 +206,6 @@ pub fn run() {
     }
     builder.init();
 
-    // Guard every clean-exit path against the ggml Metal teardown abort (see
-    // `install_exit_guard`). Registered early; if that loses the LIFO race with
-    // ggml's lazily-registered destructor, it moves to after model warm.
-    install_exit_guard();
-
     // Enumerate cpal input devices for the tray mic picker BEFORE Tauri/NSApp
     // takes over the main thread. Calling into CoreAudio HAL from inside the
     // NSApplicationDidFinishLaunching notification handler segfaults the release
@@ -613,8 +608,11 @@ extern "C" fn exit_guard() {
     unsafe { _exit(0) }
 }
 
-/// Register [`exit_guard`]. Idempotent; call once the STT Metal backend is live.
-fn install_exit_guard() {
+/// Register [`exit_guard`]. Idempotent. Must be called *after* whisper's ggml
+/// Metal backend is created (see `stt::open_context`) so it lands later than
+/// ggml's destructor in `atexit`'s LIFO order and therefore runs first. An
+/// earlier (e.g. startup) registration loses that race intermittently.
+pub(crate) fn install_exit_guard() {
     use std::sync::Once;
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {

@@ -109,6 +109,10 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
     cparams.flash_attn(true);
     let ctx = WhisperContext::new_with_params(&path, cparams)
         .map_err(|e| anyhow!("load whisper model '{}': {e}", model_name))?;
+    // The ggml Metal backend is now initialized; register the process-exit guard
+    // here (not at startup) so it lands after ggml's static destructor in atexit's
+    // LIFO order and reliably fires first, skipping ggml's aborting teardown.
+    crate::install_exit_guard();
     Ok(Arc::new(ctx))
 }
 
