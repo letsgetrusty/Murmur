@@ -1477,8 +1477,14 @@ fn spawn_dictation_worker<R: Runtime>(
                         hotkeys::unregister_escape(&app);
                         continue;
                     };
+                    let stop_t0 = std::time::Instant::now();
                     match r.stop() {
                         Ok(recording) => {
+                            log::info!(
+                                "stt: recorder stopped in {:.0}ms ({}ms audio captured)",
+                                stop_t0.elapsed().as_secs_f32() * 1000.0,
+                                recording.duration_ms,
+                            );
                             handle_recording(
                                 app.clone(),
                                 transcriber.clone(),
@@ -1589,6 +1595,11 @@ fn handle_recording<R: Runtime>(
         .state::<AppState>()
         .dictation_gen
         .load(Ordering::Acquire);
+    // End-to-end: from here (recording handed off) through transcribe + refine +
+    // paste, so the felt latency can be compared against the pure inference time
+    // the transcriber logs. A big gap between the two points at contention or
+    // queueing around inference rather than slow inference itself.
+    let pipeline_t0 = std::time::Instant::now();
     tauri::async_runtime::spawn(async move {
         let secs = recording.duration_ms as f64 / 1000.0;
         let transcribe_result = transcriber.transcribe(&recording.wav).await;
@@ -1635,6 +1646,10 @@ fn handle_recording<R: Runtime>(
             }
         };
         hotkeys::unregister_escape(&app);
+        log::info!(
+            "stt: dictation end-to-end {:.0}ms (transcribe→refine→paste)",
+            pipeline_t0.elapsed().as_secs_f32() * 1000.0,
+        );
         emit_state(&app, state);
         idle_after(app, Duration::from_millis(dwell_ms));
     });

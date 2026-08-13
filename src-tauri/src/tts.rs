@@ -791,6 +791,9 @@ impl Speaker for KokoroSpeaker {
                 }
                 guard.as_ref().expect("just loaded").clone()
             };
+            // Time to get the session: ~0 when warm; seconds means it reloaded or
+            // waited on the shared session lock (another synth/preview in flight).
+            let model_ms = speak_t0.elapsed().as_secs_f32() * 1000.0;
 
             let chunks = split_for_tts(&normalize_for_tts(&text));
             log::info!(
@@ -921,6 +924,10 @@ impl Speaker for KokoroSpeaker {
             const PREBUFFER_SECS: f32 = 0.6;
             let mut playing = false;
             let mut buffered = 0f32;
+            // Cumulative synth time for the lead chunks before playback starts —
+            // the compute half of time-to-first-word (vs. `model_ms`, the wait to
+            // get the session). Reported in the "first audio" line below.
+            let mut synth_ms = 0f32;
             let chunk_count = chunks.len();
             for (i, chunk) in chunks.iter().enumerate() {
                 // Bail if we were stopped or a newer read superseded us (a
@@ -928,10 +935,14 @@ impl Speaker for KokoroSpeaker {
                 if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
                 }
+                let t_synth = std::time::Instant::now();
                 let wav = match synth_chunk_wav(&tts, chunk, voice.as_str()).await {
                     Some(w) => w,
                     None => break,
                 };
+                if !playing {
+                    synth_ms += t_synth.elapsed().as_secs_f32() * 1000.0;
+                }
                 if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
                 }
@@ -964,13 +975,23 @@ impl Speaker for KokoroSpeaker {
                                                 msg_send![h.player.as_ptr(), setRate: speed];
                                             playing = true;
                                             log::info!(
-                                                "tts/kokoro: first audio {:.0}ms after speak ({:.1}s buffered)",
+                                                "tts/kokoro: first audio {:.0}ms after speak (model {:.0}ms, synth {:.0}ms @ {:.1}x realtime, {:.1}s buffered)",
                                                 speak_t0.elapsed().as_secs_f32() * 1000.0,
+                                                model_ms,
+                                                synth_ms,
+                                                buffered / (synth_ms / 1000.0).max(1e-3),
                                                 buffered,
                                             );
                                         }
                                     } else if rate == 0.0 {
                                         // Queue drained mid-read (synth fell behind) → resume.
+                                        // Logged: a mid-read stall is a "seconds" pause
+                                        // the user hears in the middle of a read.
+                                        log::info!(
+                                            "tts/kokoro: playback stalled at chunk {}/{} (synth fell behind) — resuming",
+                                            i + 1,
+                                            chunk_count,
+                                        );
                                         let _: () = msg_send![h.player.as_ptr(), setRate: speed];
                                     }
                                 }
@@ -1001,8 +1022,11 @@ impl Speaker for KokoroSpeaker {
                                 let _: () = msg_send![h.player.as_ptr(), setRate: speed];
                             }
                             log::info!(
-                                "tts/kokoro: first audio {:.0}ms after speak (whole read buffered)",
+                                "tts/kokoro: first audio {:.0}ms after speak (model {:.0}ms, synth {:.0}ms @ {:.1}x realtime, whole read buffered)",
                                 speak_t0.elapsed().as_secs_f32() * 1000.0,
+                                model_ms,
+                                synth_ms,
+                                buffered / (synth_ms / 1000.0).max(1e-3),
                             );
                             true
                         }

@@ -209,16 +209,32 @@ fn strip_nonspeech(text: &str) -> String {
 impl Transcriber for WhisperStt {
     fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
         Box::pin(async move {
+            // Instrumentation: split the pre-inference setup so an intermittent
+            // slow transcribe can be pinned to a layer — ctx acquire (model-lock
+            // contention / reload), WAV decode, time queued for a blocking thread
+            // (pool saturation), and whisper state alloc — vs. the inference
+            // itself. See the summary log below.
+            let t_enter = std::time::Instant::now();
             let ctx = self.context()?;
+            let ctx_ms = t_enter.elapsed().as_secs_f32() * 1000.0;
+            let t_decode = std::time::Instant::now();
             let samples = wav_to_mono_f32(wav)?;
+            let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
             let audio_secs = samples.len() as f32 / 16_000.0;
             // whisper.cpp is a blocking CPU/GPU job — keep it off the async
             // runtime's worker threads.
-            let (text, infer_secs) =
-                tokio::task::spawn_blocking(move || -> Result<(String, f32)> {
+            let t_spawn = std::time::Instant::now();
+            let (text, infer_secs, queue_ms, state_ms) =
+                tokio::task::spawn_blocking(move || -> Result<(String, f32, f32, f32)> {
+                    // Time spent waiting for a free thread in the blocking pool
+                    // before this closure ran; seconds here means the pool was
+                    // saturated (a concurrent transcribe/refine) and we queued.
+                    let queue_ms = t_spawn.elapsed().as_secs_f32() * 1000.0;
+                    let t_state = std::time::Instant::now();
                     let mut state = ctx
                         .create_state()
                         .map_err(|e| anyhow!("whisper state: {e}"))?;
+                    let state_ms = t_state.elapsed().as_secs_f32() * 1000.0;
                     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
                     // Pin to English (matches the cloud path) and silence whisper's
                     // stdout chatter.
@@ -250,15 +266,19 @@ impl Transcriber for WhisperStt {
                                 .map_err(|e| anyhow!("segment: {e}"))?,
                         );
                     }
-                    Ok((out, infer_secs))
+                    Ok((out, infer_secs, queue_ms, state_ms))
                 })
                 .await
                 .context("whisper task join")??;
             log::info!(
-                "stt: transcribed {:.1}s of audio in {:.0}ms ({:.1}x realtime)",
+                "stt: transcribed {:.1}s of audio in {:.0}ms ({:.1}x realtime) [setup: ctx {:.0}ms, decode {:.0}ms, blocking-queue {:.0}ms, state {:.0}ms]",
                 audio_secs,
                 infer_secs * 1000.0,
                 audio_secs / infer_secs.max(1e-3),
+                ctx_ms,
+                decode_ms,
+                queue_ms,
+                state_ms,
             );
             Ok(strip_nonspeech(&text))
         })
