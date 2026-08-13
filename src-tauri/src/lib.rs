@@ -254,6 +254,7 @@ pub fn run() {
             commands::open_microphone_settings,
             commands::request_microphone,
             commands::finish_onboarding,
+            commands::close_onboarding,
             commands::pending_update_version,
             commands::install_staged_update,
         ])

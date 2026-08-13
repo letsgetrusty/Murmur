@@ -335,6 +335,19 @@ pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Close the onboarding window. The onboarding JS calls this at Finish when no
+/// relaunch is needed — done backend-side (by window label) so it doesn't depend
+/// on the webview's global window API, which proved unreliable. `close()` only
+/// schedules the teardown, so this command still returns before the webview goes
+/// away.
+#[tauri::command]
+pub fn close_onboarding(app: AppHandle) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("onboarding") {
+        let _ = w.close();
+    }
+}
+
 // --- Auto-update -------------------------------------------------------------
 
 /// The version of a staged (already-downloaded) update, if one is ready. Drives

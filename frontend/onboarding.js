@@ -6,14 +6,19 @@ import { EVENTS, CMD, DOWNLOAD } from "./constants.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
-const currentWindow = window.__TAURI__?.window?.getCurrentWindow?.();
 
 const STEPS = 4;
 let step = 0;
 
-// True once we observe Accessibility flip to granted while the app is running —
-// that grant only takes effect for the Fn tap after a relaunch.
+// True once we observe Accessibility currently granted (sticky).
 let accessibilityGranted = false;
+
+// Whether Accessibility was ALREADY granted on the first status poll. The Fn tap
+// installs at startup gated on Accessibility, so a grant made *during* onboarding
+// only activates the tap after a relaunch — but if it was already granted at
+// launch, the tap is already live and no relaunch is needed. `null` until the
+// first poll observes it.
+let accessibilityGrantedAtStart = null;
 
 // True while a microphone-permission request is awaiting the user's answer. The
 // request now blocks until they respond, so the 1.5s status poll must not reset
@@ -65,7 +70,18 @@ function setBadge(rowId, text, kind) {
   badge.className = `perm-badge${kind ? " " + kind : ""}`;
 }
 
+// A relaunch is needed only when Accessibility was granted during this session
+// (off at start, on now) — that's what arms the startup-installed Fn tap.
+function needsRelaunch() {
+  return accessibilityGranted && accessibilityGrantedAtStart === false;
+}
+
 function renderPermissions(status) {
+  // Capture the initial Accessibility state on the first poll, so we can tell a
+  // fresh grant (needs a relaunch to arm the Fn tap) from one already in effect.
+  if (accessibilityGrantedAtStart === null) {
+    accessibilityGrantedAtStart = status.accessibility;
+  }
   // Accessibility
   if (status.accessibility) {
     accessibilityGranted = true;
@@ -75,8 +91,9 @@ function renderPermissions(status) {
     setBadge("perm-ax", "Not granted", "warn");
     $("#perm-ax [data-open-ax]").disabled = false;
   }
-  // Relaunch note appears once we know a grant happened this session.
-  $("#ax-relaunch-note").hidden = !accessibilityGranted;
+  // Relaunch note (and the Finish-time relaunch) apply only to a grant made
+  // *this session* — if Accessibility was already on at launch, nothing to do.
+  $("#ax-relaunch-note").hidden = !needsRelaunch();
 
   // Microphone: 0 notDetermined, 1 restricted, 2 denied, 3 authorized
   // While a request is in flight the click handler owns the button (showing
@@ -245,11 +262,13 @@ async function finish() {
     btn.disabled = false;
     return;
   }
-  // A grant made while running only reaches the Fn tap after a relaunch.
-  if (accessibilityGranted) {
+  // Only relaunch when Accessibility was granted *this session* — that's the one
+  // case the startup-installed Fn tap needs a restart to pick up. Otherwise just
+  // close the onboarding window (no jarring, pointless relaunch).
+  if (needsRelaunch()) {
     await invoke(CMD.RELAUNCH_APP);
-  } else if (currentWindow) {
-    await currentWindow.close();
+  } else {
+    await invoke(CMD.CLOSE_ONBOARDING);
   }
 }
 
