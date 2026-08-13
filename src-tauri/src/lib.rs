@@ -259,6 +259,7 @@ pub fn run() {
             commands::request_microphone,
             commands::finish_onboarding,
             commands::close_onboarding,
+            commands::set_overlay_position,
             commands::pending_update_version,
             commands::install_staged_update,
         ])
@@ -437,7 +438,7 @@ pub fn run() {
             tray.set_menu(Some(menu))?;
             tray.on_menu_event(handle_tray_event);
 
-            // Pre-position the overlay at the bottom-center of the primary
+            // Pre-position the overlay at the configured anchor of the primary
             // monitor; keep hidden until the hotkey fires.
             if let Some(win) = app.get_webview_window("overlay") {
                 let _ = win.set_always_on_top(true);
@@ -445,7 +446,7 @@ pub fn run() {
                 // Show on every Space/desktop, so the pill follows the user
                 // instead of staying on the Space where it was created.
                 let _ = win.set_visible_on_all_workspaces(true);
-                position_overlay_bottom(&win);
+                position_overlay(&win, &cfg.overlay_position);
             }
 
             // The main (settings/history) window is created lazily on first
@@ -1040,11 +1041,25 @@ pub fn show_overlay<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("overlay") {
         // Re-place the pill on the screen the user is currently on before
         // showing — otherwise it stays pinned to wherever it started.
-        position_overlay_bottom(&win);
+        let anchor = app
+            .state::<AppState>()
+            .config
+            .lock()
+            .map(|c| c.overlay_position.clone())
+            .unwrap_or_else(|_| config::DEFAULT_OVERLAY_POSITION.to_string());
+        position_overlay(&win, &anchor);
         let _ = win.set_always_on_top(true);
         let _ = win.set_ignore_cursor_events(true);
         let _ = win.show();
     }
+}
+
+/// Briefly flash the overlay at the configured anchor, so changing the position
+/// in Settings shows *where* the pill will land. Reuses the "✓ done" pill.
+pub(crate) fn preview_overlay_position<R: Runtime>(app: &AppHandle<R>) {
+    show_overlay(app);
+    emit_state(app, OverlayState::Done { chars: 0 });
+    idle_after(app.clone(), Duration::from_millis(1400));
 }
 
 /// Find the monitor whose bounds contain `pt`, a global top-left point in
@@ -1068,7 +1083,7 @@ fn monitor_containing_point<R: Runtime>(
     })
 }
 
-fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
+fn position_overlay<R: Runtime>(win: &tauri::WebviewWindow<R>, anchor: &str) {
     // Target the screen the user is actually working on: the one holding the
     // active window they're dictating into. Ask Accessibility for the focused
     // window's center (global top-left points) and match it to a monitor. If
@@ -1091,17 +1106,42 @@ fn position_overlay_bottom<R: Runtime>(win: &tauri::WebviewWindow<R>) {
             return;
         }
     };
-    let mon_pos = monitor.position();
-    let mon_size = monitor.size();
-    let win_size = win
-        .outer_size()
-        .unwrap_or(tauri::PhysicalSize::new(320, 80));
-    let x = mon_pos.x + (mon_size.width as i32 - win_size.width as i32) / 2;
-    // Sit ~20px above the screen edge so the pill is unmistakably at the
-    // bottom. If the user has the Dock at the bottom and it overlaps, they
-    // can move the Dock or hide it.
-    let y = mon_pos.y + mon_size.height as i32 - win_size.height as i32 - 20;
-    if let Err(e) = win.set_position(tauri::PhysicalPosition::new(x, y)) {
+    // Do ALL geometry in logical points. Physical pixels are per-monitor-scale
+    // and don't compose into one space across mixed-DPI monitors, so a physical
+    // position computed for a non-primary monitor is misinterpreted by
+    // `set_position` (it dumped the pill onto the wrong screen). Logical points
+    // ARE one consistent global space — the same one the AX focus point and
+    // monitor-matching use — so convert monitor bounds to points, place in points,
+    // and set a LogicalPosition.
+    let s = monitor.scale_factor();
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let (ml, mt) = (mp.x as f64 / s, mp.y as f64 / s);
+    let (mw, mh) = (ms.width as f64 / s, ms.height as f64 / s);
+
+    // The overlay window's logical size (matches tauri.conf.json). The window
+    // carries generous transparent margin around the centered pill so its
+    // drop-shadow has room without hanging off-screen.
+    const OVERLAY_W: f64 = 380.0;
+    const OVERLAY_H: f64 = 160.0;
+    // `anchor` is "<vertical>-<horizontal>" (e.g. "bottom-center"); unknown values
+    // fall back to bottom-center. Keep the window FULLY inside the monitor — one
+    // that hangs off the edge gets relocated by macOS (badly, on multi-monitor).
+    let (vert, horiz) = anchor.split_once('-').unwrap_or(("bottom", "center"));
+    let edge = 12.0; // gap from the screen edge on the docked side(s)
+    let edge_top = 36.0; // clears the menu bar / notch on top anchors
+    let x = match horiz {
+        "left" => ml + edge,
+        "right" => ml + mw - OVERLAY_W - edge,
+        _ => ml + (mw - OVERLAY_W) / 2.0,
+    };
+    let y = match vert {
+        "top" => mt + edge_top,
+        _ => mt + mh - OVERLAY_H - edge,
+    };
+    let x = x.clamp(ml, ml + (mw - OVERLAY_W).max(0.0));
+    let y = y.clamp(mt, mt + (mh - OVERLAY_H).max(0.0));
+    if let Err(e) = win.set_position(tauri::LogicalPosition::new(x, y)) {
         log::warn!("overlay: set_position failed: {e}");
     }
 }

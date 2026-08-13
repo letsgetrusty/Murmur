@@ -69,10 +69,20 @@ pub struct Config {
     /// Play a subtle start/stop sound when dictation begins/ends. On by default.
     #[serde(default = "default_dictation_sound")]
     pub dictation_sound: bool,
+    /// Screen anchor for the status overlay pill. One of "bottom-center"
+    /// (default), "bottom-left", "bottom-right", "top-center", "top-left",
+    /// "top-right" — lets the user move it off a docked app row / the Dock.
+    #[serde(default = "default_overlay_position")]
+    pub overlay_position: String,
 }
 
 fn default_dictation_sound() -> bool {
     true
+}
+
+pub const DEFAULT_OVERLAY_POSITION: &str = "bottom-center";
+fn default_overlay_position() -> String {
+    DEFAULT_OVERLAY_POSITION.to_string()
 }
 
 pub const DEFAULT_REFINE_MODIFIER: &str = "Ctrl";
@@ -146,6 +156,7 @@ impl Default for Config {
             llm_model: default_llm_model(),
             onboarding_done: false,
             dictation_sound: default_dictation_sound(),
+            overlay_position: default_overlay_position(),
         }
     }
 }

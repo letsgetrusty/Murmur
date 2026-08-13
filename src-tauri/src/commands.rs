@@ -348,6 +348,24 @@ pub fn close_onboarding(app: AppHandle) {
     }
 }
 
+/// Set the status-overlay anchor ("bottom-center", "top-left", …), persist it,
+/// and flash the overlay so the user sees where it lands.
+#[tauri::command]
+pub fn set_overlay_position(
+    app: AppHandle,
+    state: State<AppState>,
+    position: String,
+) -> Result<(), String> {
+    let snapshot = {
+        let mut c = state.config.lock().map_err(|e| e.to_string())?;
+        c.overlay_position = position;
+        c.clone()
+    };
+    crate::config::save(&snapshot).map_err(|e| e.to_string())?;
+    crate::preview_overlay_position(&app);
+    Ok(())
+}
+
 // --- Auto-update -------------------------------------------------------------
 
 /// The version of a staged (already-downloaded) update, if one is ready. Drives

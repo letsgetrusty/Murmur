@@ -99,6 +99,7 @@ async function loadConfig() {
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
+    el("overlay-position").value = currentConfig.overlay_position ?? "bottom-center";
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
@@ -192,6 +193,11 @@ async function loadOptions() {
   mic.addEventListener("change", (e) => {
     const v = e.target.value;
     invoke(CMD.SET_MIC, { name: v === "" ? null : v });
+  });
+  el("overlay-position").addEventListener("change", (e) => {
+    const position = e.target.value;
+    invoke(CMD.SET_OVERLAY_POSITION, { position }); // saves + flashes a preview
+    if (currentConfig) currentConfig.overlay_position = position;
   });
 
   // Speed/voice/mic can also change from the tray or a hotkey (e.g. Cmd+Ctrl+S
