@@ -40,6 +40,9 @@ tokio = { version = "1", features = ["sync", "rt", "time"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
+# ObjC completion-handler blocks — used to await AVCaptureDevice's async
+# microphone-permission request (see permissions.rs). objc2 family, MIT.
+block2 = "0.6"
 
 # Phase B — dictation history (embedded, single-user)
 rusqlite = { version = "0.32", features = ["bundled"] }

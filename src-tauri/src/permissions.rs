@@ -1,8 +1,11 @@
 // macOS permission checks + System Settings deep-links, used by the first-run
 // onboarding flow. All read-only status probes here are safe to call from any
-// thread. Triggering the microphone *prompt* is a capture attempt and lives in
-// `audio::probe_microphone`.
+// thread. Triggering the microphone *prompt* (`request_microphone_access`) uses
+// AVCaptureDevice and blocks on the user's response, so it must run off the main
+// thread.
 
+use block2::RcBlock;
+use objc2::runtime::Bool;
 use objc2::{class, msg_send};
 use objc2_foundation::NSString;
 
@@ -35,6 +38,55 @@ pub fn microphone_status() -> i64 {
         let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
         status
     }
+}
+
+/// Trigger the macOS microphone-permission prompt via the sanctioned
+/// `AVCaptureDevice.requestAccessForMediaType:completionHandler:` API and block
+/// until the user answers, returning the resulting `AVAuthorizationStatus`
+/// (see `microphone_status`). Unlike opening a capture stream, this reliably
+/// raises the TCC dialog under the hardened runtime, and — because it awaits the
+/// completion handler — returns the *real* decision instead of "not determined".
+///
+/// If access is already decided, the handler fires immediately with the current
+/// grant. A 2-minute timeout guards against a prompt the user never answers so
+/// the calling (blocking) thread can't wedge. **Must not run on the main thread**
+/// — it blocks; the onboarding command dispatches it to a blocking pool thread.
+pub fn request_microphone_access() -> i64 {
+    // Already authorized/denied/restricted: no prompt needed, report as-is.
+    let current = microphone_status();
+    if current != 0 {
+        log::info!("mic: request — already decided (status {current}), no prompt");
+        return current;
+    }
+    log::info!("mic: requesting access (raising TCC prompt)…");
+
+    let (tx, rx) = std::sync::mpsc::sync_channel::<bool>(1);
+    // The completion handler is invoked once, on an arbitrary dispatch queue,
+    // after the user responds. `tx` (SyncSender) is Send+Sync, so signaling from
+    // that thread is safe; a send after our timeout just errors harmlessly.
+    let handler = RcBlock::new(move |granted: Bool| {
+        let _ = tx.send(granted.as_bool());
+    });
+
+    // SAFETY: `requestAccessForMediaType:completionHandler:` is a class method on
+    // AVCaptureDevice taking an NSString media type and a `void(^)(BOOL)` block.
+    // The callee copies the block, so our `RcBlock` may drop when this returns.
+    unsafe {
+        let media_type = NSString::from_str("soun"); // AVMediaTypeAudio
+        let cls = class!(AVCaptureDevice);
+        let _: () = msg_send![
+            cls,
+            requestAccessForMediaType: &*media_type,
+            completionHandler: &*handler,
+        ];
+    }
+
+    // Wait for the user's decision (or give up after the timeout); then read the
+    // authoritative status either way.
+    let _ = rx.recv_timeout(std::time::Duration::from_secs(120));
+    let result = microphone_status();
+    log::info!("mic: request resolved (status {result})");
+    result
 }
 
 /// Open a System Settings privacy pane via its `x-apple.systempreferences:`

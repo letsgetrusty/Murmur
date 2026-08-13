@@ -15,6 +15,11 @@ let step = 0;
 // that grant only takes effect for the Fn tap after a relaunch.
 let accessibilityGranted = false;
 
+// True while a microphone-permission request is awaiting the user's answer. The
+// request now blocks until they respond, so the 1.5s status poll must not reset
+// the button out from under the "Waiting…" state while the dialog is up.
+let micRequestPending = false;
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const stepEl = (n) => $(`.ob-step[data-step="${n}"]`);
@@ -74,6 +79,9 @@ function renderPermissions(status) {
   $("#ax-relaunch-note").hidden = !accessibilityGranted;
 
   // Microphone: 0 notDetermined, 1 restricted, 2 denied, 3 authorized
+  // While a request is in flight the click handler owns the button (showing
+  // "Waiting…"); don't let the status poll clobber it back to "Enable".
+  if (micRequestPending) return;
   const mic = status.microphone;
   const micBtn = $("#perm-mic [data-mic-action]");
   if (mic === 3) {
@@ -266,10 +274,13 @@ function init() {
     }
     btn.disabled = true;
     btn.textContent = "Waiting…";
+    micRequestPending = true;
     try {
       const status = await invoke(CMD.REQUEST_MICROPHONE);
+      micRequestPending = false;
       renderPermissions({ accessibility: accessibilityGranted, microphone: status });
     } catch (_) {
+      micRequestPending = false;
       btn.disabled = false;
       btn.textContent = "Enable";
     }

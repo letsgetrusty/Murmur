@@ -2630,6 +2630,7 @@ version = "0.1.6"
 dependencies = [
  "anyhow",
  "arboard",
+ "block2",
  "cpal",
  "enigo",
  "env_logger",

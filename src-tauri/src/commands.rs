@@ -309,18 +309,15 @@ pub fn open_microphone_settings() {
     crate::permissions::open_microphone_settings();
 }
 
-/// Trigger the macOS microphone-permission prompt (via a brief capture) and
-/// return the resulting authorization status. Runs the capture on a blocking
-/// thread since the cpal stream is `!Send`.
+/// Trigger the macOS microphone-permission prompt and return the resulting
+/// authorization status. Uses `AVCaptureDevice.requestAccess`, which reliably
+/// raises the TCC dialog and reports the user's actual decision (it blocks until
+/// they answer) — run on a blocking pool thread so the async runtime isn't held.
 #[tauri::command]
 pub async fn request_microphone() -> i64 {
-    let _ = tauri::async_runtime::spawn_blocking(|| {
-        if let Err(e) = crate::audio::probe_microphone() {
-            log::warn!("onboarding: mic probe failed: {e}");
-        }
-    })
-    .await;
-    crate::permissions::microphone_status()
+    tauri::async_runtime::spawn_blocking(crate::permissions::request_microphone_access)
+        .await
+        .unwrap_or_else(|_| crate::permissions::microphone_status())
 }
 
 /// Mark onboarding complete and persist it. The caller (onboarding JS) then

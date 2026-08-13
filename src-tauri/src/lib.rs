@@ -202,12 +202,25 @@ pub fn run() {
     }
     builder.init();
 
-    // Enumerate cpal input devices BEFORE Tauri/NSApp takes over the main
-    // thread. Calling into CoreAudio HAL from inside the
-    // NSApplicationDidFinishLaunching notification handler segfaults the
-    // release build (HALDeviceList::GetData on a not-yet-ready audio
-    // subsystem). Querying from the bare process at startup is reliable.
-    let mic_names = audio::list_input_devices();
+    // Enumerate cpal input devices for the tray mic picker BEFORE Tauri/NSApp
+    // takes over the main thread. Calling into CoreAudio HAL from inside the
+    // NSApplicationDidFinishLaunching notification handler segfaults the release
+    // build (HALDeviceList::GetData on a not-yet-ready audio subsystem), so we
+    // query from the bare process at startup.
+    //
+    // But only once the microphone permission already exists: on macOS, touching
+    // CoreAudio input enumeration raises the TCC mic prompt out of context ("as
+    // soon as the app opens"), preempting the in-context grant onboarding's
+    // Enable button (AVCaptureDevice.requestAccess) is meant to drive — and a
+    // grant obtained that way leaves AVCaptureDevice's authorization status
+    // stale, so onboarding would still read "not enabled". When not yet
+    // authorized we start with an empty picker; it populates on the next launch
+    // after the grant.
+    let mic_names = if permissions::microphone_status() == 3 {
+        audio::list_input_devices()
+    } else {
+        Vec::new()
+    };
     let cfg = config::load();
 
     tauri::Builder::default()
