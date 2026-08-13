@@ -82,7 +82,7 @@ pub fn focused_window_center() -> Option<(f64, f64)> {
             return None;
         }
         let result = (|| {
-            let app = copy_attr(system, "AXFocusedApplicationAttribute")?;
+            let app = copy_attr(system, "AXFocusedApplication")?;
             let win = copy_attr(app, "AXFocusedWindow");
             CFRelease(app);
             let win = win?;
