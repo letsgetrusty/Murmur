@@ -113,6 +113,24 @@ pub struct AppState {
     /// Registered start/stop dictation cue sounds (see `sound.rs`). `Copy`, so no
     /// locking; playback is gated on the `dictation_sound` config flag.
     pub cues: sound::Cues,
+    /// (finish time, focused-window center) of the previous dictation. A follow-up
+    /// gets a separating space only if it lands within
+    /// `DICTATION_CONTINUATION_WINDOW` AND into the same window — transcripts are
+    /// trimmed (`stt::strip_nonspeech`), so without this, re-engaging Fn mid-thought
+    /// pastes "One.Two.". Keying on the window (not just time) avoids a stray
+    /// leading space when the follow-up is a different app/field.
+    pub last_dictation: Mutex<Option<(std::time::Instant, (f64, f64))>>,
+}
+
+/// How long after a dictation a follow-up still counts as continuing the same
+/// thought. Paired with the same-window check below.
+const DICTATION_CONTINUATION_WINDOW: Duration = Duration::from_secs(10);
+
+/// Whether two focused-window centers are the "same window" — their centers
+/// coincide within a couple points (the window doesn't move as text is inserted,
+/// so an unchanged center means we're still typing into the same window).
+fn same_window(a: (f64, f64), b: (f64, f64)) -> bool {
+    (a.0 - b.0).abs() < 2.0 && (a.1 - b.1).abs() < 2.0
 }
 
 /// Latest download progress for one model, mirrored from the download tasks.
@@ -372,6 +390,7 @@ pub fn run() {
                 model_wait_active: AtomicBool::new(false),
                 dictation_gen: AtomicU64::new(0),
                 cues: sound::Cues::load(),
+                last_dictation: Mutex::new(None),
             });
 
             // Clean up orphaned `.part` temps from interrupted downloads of models
@@ -1836,11 +1855,37 @@ async fn run_dictation<R: Runtime>(
         if was_refined { Some(&final_text) } else { None },
     );
     let chars = final_text.chars().count();
+    // Continuation spacing: prepend a space when this dictation lands soon after
+    // the previous one AND into the same window (re-engaging Fn to continue a
+    // thought). History keeps the clean text; only the pasted copy is spaced.
+    let cur_win = focus::focused_window_center();
+    let continues = {
+        let last = app
+            .state::<AppState>()
+            .last_dictation
+            .lock()
+            .ok()
+            .and_then(|g| *g);
+        matches!((last, cur_win), (Some((t, w)), Some(cw))
+            if t.elapsed() <= DICTATION_CONTINUATION_WINDOW && same_window(w, cw))
+    };
+    let to_paste =
+        if continues && !final_text.is_empty() && !final_text.starts_with(char::is_whitespace) {
+            format!(" {final_text}")
+        } else {
+            final_text
+        };
     // `inject::paste_text` calls enigo, which posts CGEvents via Quartz.
     // CGEventPost requires a CFRunLoop on the calling thread — tokio workers
     // don't have one, and calling from a bare worker exits the process
     // silently. Run on the main thread (NSApp's run loop) instead.
-    match paste_on_main_thread(app, final_text).await {
+    let paste_result = paste_on_main_thread(app, to_paste).await;
+    // Record this paste for the next continuation check — only when we know the
+    // window, so an unknown window can't chain a stray space onto the next one.
+    if let Ok(mut g) = app.state::<AppState>().last_dictation.lock() {
+        *g = cur_win.map(|cw| (std::time::Instant::now(), cw));
+    }
+    match paste_result {
         Ok(()) => (OverlayState::Done { chars }, 600),
         Err(e) => {
             log::warn!("dictation: paste failed: {e}");
