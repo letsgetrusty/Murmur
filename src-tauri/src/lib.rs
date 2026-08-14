@@ -434,15 +434,18 @@ pub fn run() {
                 spawn_download(app.handle(), ipc::download::KOKORO);
             }
 
-            // Warm the heavy on-device models in the background so the first
-            // dictation / read-aloud of the session doesn't stall on the model
-            // load. Only when the assets are already on disk — on first run the
-            // downloads above haven't finished, and the first use warms them
-            // then (dictation via `hotkeys::on_press`). Kokoro warming loads
-            // ~310 MB, so it's gated on the user having opted into it.
-            if stt_model_ready(app.handle()) {
-                app.state::<AppState>().transcriber.warm();
-            }
+            // Deliberately DON'T warm Whisper at startup. Warming loads its
+            // weights + compiles the Metal graph and pins that resident before
+            // the user has done anything — it's what doubled idle memory
+            // (~700 MB → ~1.5 GB) and rubs against AGENTS.md "keep idle memory
+            // low." `hotkeys::on_press` already warms it on the dictation
+            // keypress, overlapping the load with the seconds the user spends
+            // speaking, so the first real dictation is still warm by release —
+            // we just no longer pay for it while idle.
+            //
+            // Kokoro is the exception: read-aloud speaks immediately on the
+            // keypress with no hold to hide a cold load behind, so warm it up
+            // front — but only when the user has actually opted into it (~310 MB).
             if cfg.onboarding_done && cfg.tts_provider == "kokoro" && tts::kokoro_assets_present() {
                 app.state::<AppState>().speaker.warm();
             }
@@ -828,6 +831,16 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let emit = |downloaded, total| emit_download_progress(&app, id, downloaded, total);
+        // Was the asset already on disk before this task? `ensure_*` returns Ok
+        // instantly for a present model, so warming unconditionally in the Ok
+        // branch below would fire on EVERY launch — loading the model + compiling
+        // its graph and pinning it resident, which is what doubled idle memory.
+        // Warm only when we actually downloaded (first run / model switch).
+        let was_present = match id {
+            ipc::download::WHISPER => stt_model_ready(&app),
+            ipc::download::KOKORO => tts::kokoro_assets_present(),
+            _ => true,
+        };
         let res = if id == ipc::download::WHISPER {
             stt::ensure_local_model(&stt_model, emit).await.map(|_| ())
         } else if id == ipc::download::LLM {
@@ -847,12 +860,17 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
             Ok(()) => {
                 // Freshly downloaded → warm it now (load + graph compile) so the
                 // first dictation / read-aloud after a first-run or model switch
-                // isn't the one paying the cold-start cost.
-                if let Some(state) = app.try_state::<AppState>() {
-                    if id == ipc::download::WHISPER {
-                        state.transcriber.warm();
-                    } else if id == ipc::download::KOKORO {
-                        state.speaker.warm();
+                // isn't the one paying the cold-start cost. Skip when the model was
+                // already present: at steady state STT warms lazily on the
+                // dictation keypress (hotkeys::on_press, hidden under the hold) and
+                // Kokoro up front in setup when selected — no idle load here.
+                if !was_present {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        if id == ipc::download::WHISPER {
+                            state.transcriber.warm();
+                        } else if id == ipc::download::KOKORO {
+                            state.speaker.warm();
+                        }
                     }
                 }
             }
