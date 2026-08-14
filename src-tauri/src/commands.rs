@@ -35,6 +35,34 @@ pub fn set_onboarding_test(state: State<AppState>, step: String) {
     state.onboarding_read_test.store(read, Release);
 }
 
+/// Temporarily unregister the global-shortcut chords while the hotkey recorder is
+/// capturing. Without this, pressing a currently-bound combo fires its action
+/// (e.g. read-aloud) instead of reaching the recorder — you couldn't re-record a
+/// key that's already assigned. Paired with `resume_shortcuts`.
+#[tauri::command]
+pub fn suspend_shortcuts(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| e.to_string())
+}
+
+/// Re-register the chords from config after `suspend_shortcuts`. Clears first so
+/// it's a clean slate regardless of what happened while suspended — e.g. a
+/// `set_hotkey` capture already registered the new chord, which would otherwise
+/// double-register here.
+#[tauri::command]
+pub fn resume_shortcuts(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let cfg = state
+        .config
+        .lock()
+        .map(|c| c.clone())
+        .map_err(|e| e.to_string())?;
+    let _ = app.global_shortcut().unregister_all();
+    crate::hotkeys::register(&app, &cfg).map_err(|e| e.to_string())
+}
+
 /// Persist an edited config and apply it live. The shared `AppState.config` is
 /// what the refiner reads on each refine, so refine model/prompt changes take
 /// effect immediately; TTS/mic changes take effect on their next use.

@@ -350,6 +350,32 @@ kbd {
   color: var(--text);
 }
 
+/* Highlightable sample text for the read-aloud test. */
+.read-sample {
+  margin: var(--space-lg) 0 0;
+  padding: var(--space-lg);
+  font-size: var(--fs-base);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Done-step success check. */
+.ob-check {
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-pill);
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
+  margin-bottom: var(--space-lg);
+}
+
 /* "Change key" row under a try card (dictate select / read-aloud recorder). */
 .ob-key-row {
   display: flex;

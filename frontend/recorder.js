@@ -18,12 +18,12 @@ export const RESERVED_SHORTCUTS = new Set([
 ]);
 
 // One recorder captures at a time across the whole window.
-let activeStop = null;
+let activeCancel = null;
 
 // Cancel any in-progress capture (restoring its label). For flows that mutate
 // bindings out from under an open recorder, e.g. "Reset to defaults".
 export function cancelActiveRecorder() {
-  if (activeStop) activeStop(true);
+  if (activeCancel) activeCancel();
 }
 
 // Turn a `.recorder` button into a live chord capturer.
@@ -31,24 +31,36 @@ export function cancelActiveRecorder() {
 //   cancel).
 // - `onCapture(shortcut)` persists a validated combo; if its promise rejects,
 //   the label reverts and briefly flashes invalid.
-// Returns `{ render, stop }` — `render()` re-syncs the label from `getCurrent()`.
-export function bindRecorder(button, { getCurrent, onCapture }) {
+// - `onOpen()` / `onClose()` (optional) fire when capture starts / ends — used
+//   to suspend + resume the global shortcuts so a currently-bound combo reaches
+//   the recorder instead of firing its action. `onClose` runs only *after* a
+//   successful capture is applied, so the resume re-registers the new binding.
+// Returns `{ render, cancel }` — `render()` re-syncs the label from `getCurrent()`.
+export function bindRecorder(button, { getCurrent, onCapture, onOpen, onClose }) {
   const render = () => {
     button.textContent = prettyShortcut(getCurrent());
   };
 
-  function stop(restore) {
+  // Stop listening + drop the recording styling. Does NOT resume shortcuts —
+  // callers decide when (after a rebind vs. immediately on cancel).
+  function teardown() {
     window.removeEventListener("keydown", onKey, true);
     button.classList.remove("recording", "invalid");
-    if (restore) render();
-    if (activeStop === stop) activeStop = null;
+    if (activeCancel === cancel) activeCancel = null;
+  }
+
+  // Abandon capture: restore the label and resume shortcuts.
+  function cancel() {
+    teardown();
+    render();
+    onClose?.();
   }
 
   async function onKey(e) {
     e.preventDefault();
     e.stopPropagation();
     if (e.key === "Escape") {
-      stop(true); // reverting the label is the cancel confirmation
+      cancel(); // reverting the label is the cancel confirmation
       return;
     }
     const key = codeToKey(e.code);
@@ -71,7 +83,7 @@ export function bindRecorder(button, { getCurrent, onCapture }) {
       button.textContent = "Reserved — pick another";
       return;
     }
-    stop(false);
+    teardown();
     button.textContent = prettyShortcut(shortcut); // label change confirms success
     try {
       await onCapture(shortcut);
@@ -79,18 +91,21 @@ export function bindRecorder(button, { getCurrent, onCapture }) {
       render();
       button.classList.add("invalid");
       setTimeout(() => button.classList.remove("invalid"), 1800);
+    } finally {
+      onClose?.(); // resume only after the new binding is registered
     }
   }
 
   button.addEventListener("click", () => {
-    if (activeStop) activeStop(true);
-    activeStop = stop;
+    if (activeCancel) activeCancel();
+    activeCancel = cancel;
     button.classList.remove("invalid");
     button.classList.add("recording");
     button.textContent = "Press keys…";
+    onOpen?.(); // suspend shortcuts so the keys reach us
     window.addEventListener("keydown", onKey, true);
   });
 
   render();
-  return { render, stop };
+  return { render, cancel };
 }

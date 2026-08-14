@@ -26,11 +26,8 @@
             </g>
           </svg>
           <h1>Welcome to Murmur</h1>
-          <p class="ob-lead">Voice dictation and read-aloud for your Mac.</p>
-          <p class="ob-privacy">
-            <span class="ob-lock">🔒</span> <b>100% on-device</b> — your voice
-            never leaves your Mac.
-          </p>
+          <p class="ob-lead">Dictation and read-aloud for your Mac.</p>
+          <p class="ob-privacy"><span class="ob-lock">🔒</span> 100% on-device.</p>
         </div>
         <footer class="ob-foot">
           <span></span>
@@ -42,9 +39,7 @@
       <section class="ob-step" data-step="1" hidden>
         <div class="ob-body">
           <h1>Grant permissions</h1>
-          <p class="ob-lead">
-            Murmur needs two macOS permissions to hear you and type for you.
-          </p>
+          <p class="ob-lead">Two quick macOS permissions.</p>
 
           <div class="perm-row" id="perm-ax">
             <div class="perm-icon" aria-hidden="true">⌨️</div>
@@ -52,10 +47,7 @@
               <div class="perm-name">
                 Accessibility <span class="perm-badge" data-badge>Checking…</span>
               </div>
-              <div class="hint">
-                Lets Murmur paste dictated text and use the <b>Fn</b> key to
-                start recording.
-              </div>
+              <div class="hint">Paste text and use your dictate key.</div>
             </div>
             <button class="small-btn" data-open-ax>Open Settings</button>
           </div>
@@ -66,14 +58,13 @@
               <div class="perm-name">
                 Microphone <span class="perm-badge" data-badge>Checking…</span>
               </div>
-              <div class="hint">Lets Murmur capture your voice for dictation.</div>
+              <div class="hint">Hear your voice.</div>
             </div>
             <button class="small-btn" data-mic-action>Enable</button>
           </div>
 
           <p class="hint ob-note" id="ax-relaunch-note" hidden>
-            Accessibility was just granted — Murmur will relaunch at the end
-            of setup to activate the Fn key.
+            Murmur will relaunch at the end to activate the Fn key.
           </p>
         </div>
         <footer class="ob-foot">
@@ -87,8 +78,7 @@
         <div class="ob-body">
           <h1>Downloading models</h1>
           <p class="ob-lead">
-            The speech and refinement models download once, then run offline
-            forever. You can continue setup while they finish.
+            Downloads once, then runs offline. Keep going while they finish.
           </p>
 
           <div class="dl-row" id="dl-whisper">
@@ -118,10 +108,6 @@
             <div class="dl-track"><div class="dl-fill" data-fill></div></div>
           </div>
 
-          <p class="hint ob-note">
-            Downloads continue in the background if you move on. You can switch
-            the read-aloud voice anytime in Settings.
-          </p>
         </div>
         <footer class="ob-foot">
           <button class="small-btn" data-back>Back</button>
@@ -133,10 +119,7 @@
       <section class="ob-step" data-step="3" hidden>
         <div class="ob-body">
           <h1>Try it out</h1>
-          <p class="ob-lead">
-            Hold your dictate key and say a few words — exactly how you'll use
-            Murmur everywhere.
-          </p>
+          <p class="ob-lead">Hold your dictate key and speak.</p>
 
           <div class="try-box">
             <div class="try-card" id="try-card">
@@ -172,10 +155,7 @@
             </select>
           </div>
 
-          <p class="hint ob-note">
-            No Fn key? Pick another above. Nothing leaves your Mac — the audio is
-            transcribed on-device.
-          </p>
+          <p class="hint ob-note">No Fn key? Pick another above.</p>
         </div>
         <footer class="ob-foot">
           <button class="small-btn" data-back>Back</button>
@@ -187,9 +167,10 @@
       <section class="ob-step" data-step="4" hidden>
         <div class="ob-body">
           <h1>Read aloud</h1>
-          <p class="ob-lead">
-            Murmur can read text on your screen out loud. Press your read-aloud
-            key to hear a sample.
+          <p class="ob-lead">Highlight the text, then press your read-aloud key.</p>
+
+          <p class="read-sample" id="read-sample">
+            Murmur reads highlighted text aloud, in the voice you choose.
           </p>
 
           <div class="try-box">
@@ -197,9 +178,9 @@
               <span class="try-mic-icon" aria-hidden="true">🔊</span>
               <div class="try-card-text">
                 <div class="try-headline" id="read-headline">
-                  Press <kbd id="read-key">⌘⇧R</kbd> to hear a sample
+                  Select the text, then press <kbd>⌘⇧R</kbd>
                 </div>
-                <div class="try-sub" id="read-sub">You should hear a voice.</div>
+                <div class="try-sub" id="read-sub">You'll hear it read back.</div>
               </div>
             </div>
           </div>
@@ -213,11 +194,6 @@
               data-action="tts_toggle"
             ></button>
           </div>
-
-          <p class="hint ob-note">
-            Reads your selected text — or the clipboard if nothing's selected.
-            Change the voice anytime in Settings.
-          </p>
         </div>
         <footer class="ob-foot">
           <button class="small-btn" data-back>Back</button>
@@ -227,30 +203,14 @@
 
       <!-- Step 5: Done -->
       <section class="ob-step" data-step="5" hidden>
-        <div class="ob-body">
-          <h1>You're all set</h1>
-          <p class="ob-lead">Here's how to use Murmur. It lives in your menu bar.</p>
-
-          <div class="key-list">
-            <div class="key-item">
-              <kbd>Fn</kbd>
-              <span>Hold to dictate — release to paste at your cursor.</span>
-            </div>
-            <div class="key-item">
-              <kbd>Fn</kbd><span class="key-plus">+</span><kbd>Ctrl</kbd>
-              <span>Hold to dictate <b>and</b> clean it up with the LLM.</span>
-            </div>
-            <div class="key-item">
-              <kbd>⌘</kbd><span class="key-plus">+</span><kbd>⇧</kbd
-              ><span class="key-plus">+</span><kbd>R</kbd>
-              <span>Read the selected text (or clipboard) aloud.</span>
-            </div>
+        <div class="ob-body ob-center">
+          <div class="ob-check" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
           </div>
-
-          <p class="hint ob-note">
-            No <b>Fn</b> key on your keyboard? Pick a different dictate key from
-            the menu-bar icon → Settings. Change any of this there later, too.
-          </p>
+          <h1>You're all set</h1>
+          <p class="ob-lead">Murmur lives in your menu bar. Tweak anything in Settings.</p>
         </div>
         <footer class="ob-foot">
           <button class="small-btn" data-back>Back</button>

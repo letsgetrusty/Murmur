@@ -291,6 +291,8 @@ pub fn run() {
             commands::close_onboarding,
             commands::set_overlay_position,
             commands::set_onboarding_test,
+            commands::suspend_shortcuts,
+            commands::resume_shortcuts,
             commands::pending_update_version,
             commands::install_staged_update,
         ])
@@ -1018,8 +1020,6 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     // selection — no clipboard capture, no overlay. Reports progress to the
     // onboarding window so it can show "Playing…" then "done".
     if state.onboarding_read_test.load(Ordering::Acquire) {
-        const SAMPLE: &str =
-            "Murmur can read any text on your screen aloud, in the voice you choose.";
         let provider = state
             .config
             .lock()
@@ -1030,9 +1030,17 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             emit_read_test(app, "unavailable");
             return;
         }
-        emit_read_test(app, "speaking");
-        state.speaker.speak(SAMPLE);
-        spawn_read_test_watcher(app.clone());
+        // Read the user's highlighted text — the real selection → TTS path —
+        // reporting to the onboarding window instead of the overlay. Nudge them
+        // to highlight the sample first if nothing's selected.
+        match selection::capture_selection().ok().flatten() {
+            Some(t) if !t.trim().is_empty() => {
+                emit_read_test(app, "speaking");
+                state.speaker.speak(&t);
+                spawn_read_test_watcher(app.clone());
+            }
+            _ => emit_read_test(app, "select-first"),
+        }
         return;
     }
     // Neural read-aloud requested but its voice model isn't downloaded yet: surface

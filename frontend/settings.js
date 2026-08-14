@@ -268,6 +268,10 @@ function initHotkeys() {
         await invoke(CMD.SET_HOTKEY, { action, shortcut });
         currentConfig[HOTKEY_FIELD[action]] = shortcut; // persist for restore
       },
+      // Suspend chords while capturing so a bound combo reaches the recorder
+      // instead of firing; resume once the new binding is registered.
+      onOpen: () => invoke?.(CMD.SUSPEND_SHORTCUTS).catch(() => {}),
+      onClose: () => invoke?.(CMD.RESUME_SHORTCUTS).catch(() => {}),
     });
   }
 

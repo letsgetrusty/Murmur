@@ -349,8 +349,8 @@ function readPrompt(sub) {
   const card = $("#read-card");
   if (!card) return;
   card.classList.remove("recording");
-  $("#read-headline").innerHTML = `Press <kbd>${prettyShortcut(ttsHotkey)}</kbd> to hear a sample`;
-  $("#read-sub").textContent = sub ?? "You should hear a voice.";
+  $("#read-headline").innerHTML = `Select the text, then press <kbd>${prettyShortcut(ttsHotkey)}</kbd>`;
+  $("#read-sub").textContent = sub ?? "You'll hear it read back.";
 }
 
 function renderReadEvent({ phase }) {
@@ -359,15 +359,16 @@ function renderReadEvent({ phase }) {
   if (phase === "speaking") {
     card.classList.add("recording");
     $("#read-headline").textContent = "Playing…";
-    $("#read-sub").textContent = "You should hear Murmur reading now.";
+    $("#read-sub").textContent = "You should hear it now.";
   } else if (phase === "unavailable") {
     card.classList.remove("recording");
     $("#read-headline").textContent = "Voice still downloading…";
-    $("#read-sub").textContent =
-      "The neural voice is finishing its one-time download — try again in a moment.";
+    $("#read-sub").textContent = "The neural voice is finishing its one-time download.";
+  } else if (phase === "select-first") {
+    readPrompt("Highlight the sample text above first.");
   } else {
     // done
-    readPrompt("Heard it? Press again to replay, or Continue.");
+    readPrompt("Heard it? Highlight and press again to replay.");
   }
 }
 
@@ -497,6 +498,10 @@ function init() {
         ttsHotkey = shortcut;
         readPrompt();
       },
+      // Suspend chords while capturing — otherwise pressing the current
+      // read-aloud key just fires read-aloud instead of re-recording it.
+      onOpen: () => invoke?.(CMD.SUSPEND_SHORTCUTS).catch(() => {}),
+      onClose: () => invoke?.(CMD.RESUME_SHORTCUTS).catch(() => {}),
     });
   }
   loadConfig();
