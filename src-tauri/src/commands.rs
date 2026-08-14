@@ -16,30 +16,18 @@ pub fn get_config(state: State<AppState>) -> Config {
 
 // --- Onboarding: guided first-success "Try it" -------------------------------
 
-/// Begin a throwaway test recording for the onboarding first-success step. Uses
-/// the same dictation worker + configured mic as real dictation; the paired
-/// `test_dictation_stop` reports the transcript back to the onboarding window
-/// (the `test-dictation-result` event) instead of pasting. Warms the model first
-/// so the load overlaps the seconds the user is speaking.
+/// Arm/disarm the onboarding "Try it" step. While armed, a real dictation-trigger
+/// press (Fn/chord) records a throwaway clip and reports the transcript to the
+/// onboarding window instead of pasting — see `hotkeys::on_press`. Warms the
+/// model when arming so the first hold isn't slowed by the load.
 #[tauri::command]
-pub fn test_dictation_start(state: State<AppState>) -> Result<(), String> {
-    state.transcriber.warm();
+pub fn set_onboarding_test(state: State<AppState>, armed: bool) {
+    if armed {
+        state.transcriber.warm();
+    }
     state
-        .tx
-        .send(crate::DictationCmd::Start)
-        .map_err(|e| e.to_string())
-}
-
-/// Stop the onboarding test recording and transcribe it. The result (text +
-/// whether any audio was heard) arrives via the `test-dictation-result` event.
-#[tauri::command]
-pub fn test_dictation_stop(state: State<AppState>) -> Result<(), String> {
-    state
-        .tx
-        .send(crate::DictationCmd::Stop {
-            mode: crate::DictationMode::Test,
-        })
-        .map_err(|e| e.to_string())
+        .onboarding_test
+        .store(armed, std::sync::atomic::Ordering::Release);
 }
 
 /// Persist an edited config and apply it live. The shared `AppState.config` is
@@ -306,10 +294,16 @@ pub struct OnboardingStatus {
     llm_ready: bool,
     /// Whether the Kokoro neural-voice assets are already on disk.
     kokoro_ready: bool,
+    /// Whether the Fn dictation tap is installed and live. Distinct from
+    /// `accessibility`: right after a fresh grant the tap installs live (via
+    /// `fn_key::try_activate` below) so this flips true without a relaunch — but
+    /// in the rare "born disabled" case it stays false and the app must relaunch.
+    /// Drives whether the "Try it" step can use the real Fn key now.
+    fn_tap_active: bool,
 }
 
 #[tauri::command]
-pub fn onboarding_status(state: State<AppState>) -> OnboardingStatus {
+pub fn onboarding_status(app: AppHandle, state: State<AppState>) -> OnboardingStatus {
     let (stt_model, llm_model) = state
         .config
         .lock()
@@ -318,12 +312,20 @@ pub fn onboarding_status(state: State<AppState>) -> OnboardingStatus {
     let whisper_ready = crate::stt::model_path(&stt_model)
         .map(|p| p.exists())
         .unwrap_or(false);
+    let accessibility = crate::permissions::accessibility_granted();
+    // Accessibility just granted but the Fn tap not live yet? Install it now, so a
+    // grant made during onboarding activates Fn without relaunching the app. No-op
+    // once the tap is live (or a born-disabled attempt already happened).
+    if accessibility {
+        crate::fn_key::try_activate(&app);
+    }
     OnboardingStatus {
-        accessibility: crate::permissions::accessibility_granted(),
+        accessibility,
         microphone: crate::permissions::microphone_status(),
         whisper_ready,
         llm_ready: crate::local_llm::assets_present(&llm_model),
         kokoro_ready: crate::tts::kokoro_assets_present(),
+        fn_tap_active: crate::fn_key::is_active(),
     }
 }
 

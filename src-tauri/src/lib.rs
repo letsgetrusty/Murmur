@@ -104,6 +104,11 @@ pub struct AppState {
     /// release only transcribes when a recording is in flight — guards the
     /// model-download gate and the race where the model becomes ready mid-hold.
     pub recording_armed: AtomicBool,
+    /// True while the onboarding "Try it" step is active. A real dictation-trigger
+    /// press then records a throwaway clip and reports the transcript to the
+    /// onboarding window (no overlay/paste) instead of dictating — see
+    /// `hotkeys::on_press` and `handle_recording`'s `Test` branch.
+    pub onboarding_test: AtomicBool,
     /// True while the "waiting for the speech model" overlay watcher is running,
     /// so a second press doesn't spawn a duplicate.
     pub model_wait_active: AtomicBool,
@@ -281,8 +286,7 @@ pub fn run() {
             commands::finish_onboarding,
             commands::close_onboarding,
             commands::set_overlay_position,
-            commands::test_dictation_start,
-            commands::test_dictation_stop,
+            commands::set_onboarding_test,
             commands::pending_update_version,
             commands::install_staged_update,
         ])
@@ -392,6 +396,7 @@ pub fn run() {
                 read_item,
                 downloads: Arc::new(Mutex::new(Downloads::default())),
                 recording_armed: AtomicBool::new(false),
+                onboarding_test: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
                 dictation_gen: AtomicU64::new(0),
                 cues: sound::Cues::load(),
@@ -1689,14 +1694,34 @@ fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&st
     let _ = app.emit(ipc::event::HISTORY, ()); // nudge the History tab to refresh if open
 }
 
-/// Result of the onboarding "Try it" test dictation, emitted to the onboarding
-/// window. `heard_audio` is false when the clip was effectively silent (the mic
-/// isn't feeding audio — same 1e-4 floor the live path uses); the frontend maps
-/// that to a specific "check your mic" diagnosis rather than a generic retry.
+/// A phase of the onboarding "Try it" test, pushed to the onboarding window.
+/// `phase` is "recording" (trigger held), "transcribing", or "done"; on "done"
+/// `text` is the transcript and `heard_audio` is false when the clip was
+/// effectively silent (the mic isn't feeding audio — the same 1e-4 floor the
+/// live path uses), which the frontend turns into a "check your mic" diagnosis.
 #[derive(Clone, Serialize)]
-struct TestDictationResult {
+struct TestDictationEvent {
+    phase: &'static str,
     text: String,
     heard_audio: bool,
+}
+
+/// Push a "Try it" phase to the onboarding window. Called from `hotkeys::on_press`
+/// (recording) and `handle_recording` (transcribing/done).
+pub(crate) fn emit_test_state<R: Runtime>(
+    app: &AppHandle<R>,
+    phase: &'static str,
+    text: String,
+    heard_audio: bool,
+) {
+    let _ = app.emit(
+        ipc::event::TEST_DICTATION_RESULT,
+        TestDictationEvent {
+            phase,
+            text,
+            heard_audio,
+        },
+    );
 }
 
 fn handle_recording<R: Runtime>(
@@ -1713,6 +1738,7 @@ fn handle_recording<R: Runtime>(
     if mode == DictationMode::Test {
         let heard = recording.mean_abs >= 1e-4;
         tauri::async_runtime::spawn(async move {
+            emit_test_state(&app, "transcribing", String::new(), heard);
             let text = if heard && recording.duration_ms >= 200 {
                 transcriber
                     .transcribe(&recording.wav)
@@ -1721,13 +1747,7 @@ fn handle_recording<R: Runtime>(
             } else {
                 String::new()
             };
-            let _ = app.emit(
-                ipc::event::TEST_DICTATION_RESULT,
-                TestDictationResult {
-                    text: text.trim().to_string(),
-                    heard_audio: heard,
-                },
-            );
+            emit_test_state(&app, "done", text.trim().to_string(), heard);
         });
         return;
     }

@@ -248,12 +248,44 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
 /// Returns `Ok(())` on success and on permission-denied (we log and degrade
 /// to chord-only). Returns `Err` only for ownership-leak conditions worth
 /// failing setup over.
+/// Whether the Fn CGEventTap is installed AND enabled. The tap installs at
+/// startup gated on Accessibility; if the grant lands later (during onboarding),
+/// [`try_activate`] re-runs [`install`] so Fn goes live without a relaunch. Set
+/// once and left set — the tap is leaked for the process lifetime, never torn
+/// down.
+static TAP_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Whether we've already created a tap object this process. Guards against
+/// leaking a second tap when a first came up "born disabled" after a fresh grant
+/// — that case needs a relaunch, not another tap.
+static TAP_CREATED: AtomicBool = AtomicBool::new(false);
+
+/// Is the Fn tap installed and live? False when Accessibility wasn't granted at
+/// install time (or the rare born-disabled case). Onboarding reads this to
+/// decide whether Fn can be tested now or the app must relaunch first.
+pub fn is_active() -> bool {
+    TAP_ACTIVE.load(Ordering::Acquire)
+}
+
+/// Try to bring the Fn tap live now — for when Accessibility is granted
+/// mid-session (onboarding), so Fn activates without a relaunch. No-op once the
+/// tap is active or a born-disabled attempt already happened. The tap attaches to
+/// the main thread's run loop, so installation hops there.
+pub fn try_activate<R: Runtime>(app: &AppHandle<R>) {
+    if TAP_ACTIVE.load(Ordering::Acquire) || TAP_CREATED.load(Ordering::Acquire) {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = install(handle);
+    });
+}
+
 pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
-    let state = Box::into_raw(Box::new(TapState {
-        app,
-        trigger_down: AtomicBool::new(false),
-        refine_latch: AtomicBool::new(false),
-    })) as *mut c_void;
+    // Idempotent: once the tap is live, re-invocations (via `try_activate` when
+    // Accessibility is granted mid-session) are no-ops.
+    if TAP_ACTIVE.load(Ordering::Acquire) {
+        return Ok(());
+    }
 
     // SAFETY: the CoreGraphics/CoreFoundation/ApplicationServices functions are
     // called with the signatures declared for the linked frameworks; `state` is
@@ -275,11 +307,21 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         // that then overrides the Accessibility grant and wedges the tap off.
         if !ax_trusted {
             log::warn!(
-                "Fn-key: Accessibility not granted — Fn-hold disabled. Grant Murmur in System Settings → Privacy & Security → Accessibility, then relaunch."
+                "Fn-key: Accessibility not granted — Fn-hold disabled. It installs live once you grant Murmur in System Settings → Privacy & Security → Accessibility (or on the next launch)."
             );
-            let _ = Box::from_raw(state as *mut TapState<R>);
             return Ok(());
         }
+        // A prior attempt already made a tap the system left disabled — that
+        // needs a relaunch, not another (leaked) tap. Bail before allocating.
+        if TAP_CREATED.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+
+        let state = Box::into_raw(Box::new(TapState {
+            app,
+            trigger_down: AtomicBool::new(false),
+            refine_latch: AtomicBool::new(false),
+        })) as *mut c_void;
 
         let tap = CGEventTapCreate(
             KCG_SESSION_EVENT_TAP,
@@ -301,6 +343,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
         CGEventTapEnable(tap, true);
         if CGEventTapIsEnabled(tap) {
+            TAP_ACTIVE.store(true, Ordering::Release);
             log::info!("Fn-key tap installed and enabled");
         } else {
             log::warn!(

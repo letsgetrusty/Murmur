@@ -134,15 +134,20 @@
         <div class="ob-body">
           <h1>Try it out</h1>
           <p class="ob-lead">
-            Let's make sure Murmur can hear you. Hold the button and say a few
-            words, then release.
+            Hold your dictate key and say a few words — exactly how you'll use
+            Murmur everywhere.
           </p>
 
           <div class="try-box">
-            <button class="try-mic" id="try-mic" type="button" disabled>
+            <div class="try-card" id="try-card">
               <span class="try-mic-icon" aria-hidden="true">🎙️</span>
-              <span class="try-mic-label" id="try-mic-label">Hold to talk</span>
-            </button>
+              <div class="try-card-text">
+                <div class="try-headline" id="try-headline">
+                  Hold <kbd>Fn</kbd> and speak
+                </div>
+                <div class="try-sub" id="try-sub">Release when you're done.</div>
+              </div>
+            </div>
 
             <div class="try-result" id="try-result" hidden>
               <div class="try-transcript" id="try-transcript"></div>
@@ -151,9 +156,7 @@
           </div>
 
           <p class="hint ob-note">
-            Uses your mic and the on-device speech model — nothing leaves your
-            Mac. Once it works here, the same thing happens when you hold
-            <b>Fn</b> anywhere.
+            Nothing leaves your Mac — the audio is transcribed on-device.
           </p>
         </div>
         <footer class="ob-foot">

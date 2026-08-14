@@ -13,12 +13,11 @@ let step = 0;
 // True once we observe Accessibility currently granted (sticky).
 let accessibilityGranted = false;
 
-// Whether Accessibility was ALREADY granted on the first status poll. The Fn tap
-// installs at startup gated on Accessibility, so a grant made *during* onboarding
-// only activates the tap after a relaunch — but if it was already granted at
-// launch, the tap is already live and no relaunch is needed. `null` until the
-// first poll observes it.
-let accessibilityGrantedAtStart = null;
+// Whether the Fn dictation tap is live. It installs at startup gated on
+// Accessibility and — via fn_key::try_activate on the backend — re-installs live
+// when the grant lands during onboarding. Until it's true, Fn can't be tested and
+// finishing needs a relaunch to activate it.
+let fnTapActive = false;
 
 // True while a microphone-permission request is awaiting the user's answer. The
 // request now blocks until they respond, so the 1.5s status poll must not reset
@@ -60,9 +59,10 @@ function goTo(n) {
   // Start the Kokoro download when the user reaches the downloads step, so its
   // bar fills alongside Whisper/Qwen.
   if (step === DOWNLOAD_STEP) startNeural();
-  // Reflect speech-model readiness on the "Hold to talk" button when we land
-  // on the Try-it step (it can't record until Whisper is on disk).
-  if (step === TRY_STEP) updateTryStep();
+  // Arm the "Try it" test only while its step is showing, so a real Fn/chord
+  // press elsewhere in onboarding still behaves normally. Refresh the card too.
+  invoke?.(CMD.SET_ONBOARDING_TEST, { armed: step === TRY_STEP }).catch(() => {});
+  if (step === TRY_STEP) updateTryCard();
 }
 
 // --- Permissions -------------------------------------------------------------
@@ -74,18 +74,14 @@ function setBadge(rowId, text, kind) {
   badge.className = `perm-badge${kind ? " " + kind : ""}`;
 }
 
-// A relaunch is needed only when Accessibility was granted during this session
-// (off at start, on now) — that's what arms the startup-installed Fn tap.
+// A relaunch is only needed if Accessibility is granted but the Fn tap didn't
+// come up live (the rare "born disabled" case). When install-on-grant works —
+// the common path — the tap is already active and no relaunch is required.
 function needsRelaunch() {
-  return accessibilityGranted && accessibilityGrantedAtStart === false;
+  return accessibilityGranted && !fnTapActive;
 }
 
 function renderPermissions(status) {
-  // Capture the initial Accessibility state on the first poll, so we can tell a
-  // fresh grant (needs a relaunch to arm the Fn tap) from one already in effect.
-  if (accessibilityGrantedAtStart === null) {
-    accessibilityGrantedAtStart = status.accessibility;
-  }
   // Accessibility
   if (status.accessibility) {
     accessibilityGranted = true;
@@ -126,6 +122,7 @@ async function refreshStatus() {
   if (!invoke) return;
   try {
     const status = await invoke(CMD.ONBOARDING_STATUS);
+    fnTapActive = !!status.fn_tap_active;
     renderPermissions(status);
     // Seed the download bars for anything already on disk.
     if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
@@ -133,6 +130,7 @@ async function refreshStatus() {
     if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
     // Reflect speech-model readiness on the Finish button (gated on Whisper).
     updateFinish();
+    updateTryCard();
   } catch (e) {
     /* transient; polled again shortly */
   }
@@ -201,7 +199,7 @@ function markDownloadDone(id) {
     whisper.ready = true;
     whisper.failed = false;
     updateFinish();
-    updateTryStep(); // Whisper just landed — the "Try it" mic can go live
+    updateTryCard(); // Whisper just landed — the "Try it" prompt can go live
   }
   const row = $(`#${DL_EL[id]}`);
   if (!row) return;
@@ -253,65 +251,54 @@ function fmtMB(bytes) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
 }
 
-// --- Try it (guided first success) -------------------------------------------
+// --- Try it (guided first success, real hotkey) ------------------------------
 
-let tryRecording = false; // mic held down, capturing
-let tryBusy = false; // released, awaiting the transcript
+// "idle" (showing the prompt), "recording" (Fn held), or "transcribing". The
+// backend drives recording/transcribing/done via the TEST_DICTATION_RESULT
+// event; updateTryCard only touches the card while idle so it can't clobber a
+// live "Listening…" message.
+let tryPhase = "idle";
 
-// Enable "Hold to talk" only once Whisper is on disk — recording before then
-// would transcribe to nothing and read as a failure that isn't one.
-function updateTryStep() {
-  const btn = $("#try-mic");
-  const label = $("#try-mic-label");
-  if (!btn || !label || tryRecording || tryBusy) return;
-  if (!invoke || whisper.ready) {
-    btn.disabled = false;
-    label.textContent = "Hold to talk";
+function setCard(headlineHtml, subText) {
+  $("#try-headline").innerHTML = headlineHtml;
+  $("#try-sub").textContent = subText;
+}
+
+// The idle prompt, reflecting what's actually possible right now: hold Fn (tap
+// live + model ready), wait for the model, or finish-to-activate Fn.
+function updateTryCard() {
+  if (tryPhase !== "idle") return;
+  const card = $("#try-card");
+  if (!card) return;
+  card.classList.remove("recording");
+  if (invoke && !fnTapActive) {
+    setCard("Fn turns on after setup", "Finish and Murmur restarts to activate it.");
+  } else if (invoke && !whisper.ready) {
+    setCard("Preparing the speech model…", "It downloads once, then runs offline.");
   } else {
-    btn.disabled = true;
-    label.textContent = "Preparing speech model…";
+    setCard("Hold <kbd>Fn</kbd> and speak", "Release when you're done.");
   }
 }
 
-async function tryStart() {
-  const btn = $("#try-mic");
-  if (!btn || btn.disabled || tryRecording || tryBusy) return;
-  tryRecording = true;
-  btn.classList.add("recording");
-  $("#try-mic-label").textContent = "Listening… release to stop";
-  $("#try-result").hidden = true;
-  try {
-    await invoke(CMD.TEST_DICTATION_START);
-  } catch (_) {
-    tryRecording = false;
-    btn.classList.remove("recording");
-    updateTryStep();
+function renderTryEvent({ phase, text, heard_audio }) {
+  tryPhase = phase === "done" ? "idle" : phase;
+  const card = $("#try-card");
+  if (phase === "recording") {
+    card.classList.add("recording");
+    setCard("Listening…", "Keep talking — release when you're done.");
+    $("#try-result").hidden = true;
+    return;
   }
-}
-
-async function tryStop() {
-  if (!tryRecording) return;
-  tryRecording = false;
-  tryBusy = true;
-  const btn = $("#try-mic");
-  btn.classList.remove("recording");
-  btn.disabled = true;
-  $("#try-mic-label").textContent = "Transcribing…";
-  try {
-    // The transcript comes back via the TEST_DICTATION_RESULT event.
-    await invoke(CMD.TEST_DICTATION_STOP);
-  } catch (_) {
-    tryBusy = false;
-    updateTryStep();
+  if (phase === "transcribing") {
+    card.classList.remove("recording");
+    setCard("Transcribing…", "One moment.");
+    return;
   }
-}
-
-function renderTryResult({ text, heard_audio }) {
-  tryBusy = false;
+  // done
+  card.classList.remove("recording");
   const result = $("#try-result");
   const transcript = $("#try-transcript");
   const status = $("#try-status");
-  updateTryStep();
   result.hidden = false;
   result.classList.remove("ok", "warn");
   if (heard_audio && text) {
@@ -321,13 +308,14 @@ function renderTryResult({ text, heard_audio }) {
   } else if (!heard_audio) {
     transcript.textContent = "";
     status.textContent =
-      "We couldn't hear anything. Check your mic is connected and Murmur has Microphone access (go Back a step), then try again.";
+      "We couldn't hear anything. Check your mic is connected and Murmur has Microphone access (go Back a step), then hold Fn to try again.";
     result.classList.add("warn");
   } else {
     transcript.textContent = "";
-    status.textContent = "We didn't catch any words — try again, a little louder and clearer.";
+    status.textContent = "We didn't catch any words — hold Fn and try again, a little louder.";
     result.classList.add("warn");
   }
+  updateTryCard(); // reset the prompt for another go
 }
 
 // --- Finish ------------------------------------------------------------------
@@ -409,22 +397,9 @@ function init() {
     })
   );
 
-  // "Try it" push-to-talk. Pointer capture keeps the release event even if the
-  // cursor drifts off the button mid-hold.
-  const tryMic = $("#try-mic");
-  if (tryMic) {
-    tryMic.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      tryMic.setPointerCapture?.(e.pointerId);
-      tryStart();
-    });
-    tryMic.addEventListener("pointerup", (e) => {
-      tryMic.releasePointerCapture?.(e.pointerId);
-      tryStop();
-    });
-    tryMic.addEventListener("pointercancel", tryStop);
-  }
-  listen?.(EVENTS.TEST_DICTATION_RESULT, (e) => renderTryResult(e.payload));
+  // "Try it" runs off the real dictate key (Fn/chord). The backend routes an
+  // armed test press into recording → transcribing → done phases here.
+  listen?.(EVENTS.TEST_DICTATION_RESULT, (e) => renderTryEvent(e.payload));
 
   // Model-download progress from the backend's prefetch.
   listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));

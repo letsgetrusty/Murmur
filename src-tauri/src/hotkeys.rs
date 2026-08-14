@@ -145,6 +145,21 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
         crate::begin_model_wait(app);
         return;
     }
+    // Onboarding "Try it": the user is testing with the real trigger. Route it to
+    // the test path — warm + record, but no overlay, Esc hijack, or paste. The
+    // transcript goes to the onboarding window (handle_recording's Test branch).
+    if app
+        .state::<AppState>()
+        .onboarding_test
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        app.state::<AppState>().transcriber.warm();
+        crate::emit_test_state(app, "recording", String::new(), false);
+        if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Start) {
+            log::warn!("hotkey: dictation worker unreachable: {e}");
+        }
+        return;
+    }
     log::info!("hotkey: press");
     // Load the model now (in the background) so it's resident by the time the
     // user releases — overlapping the load with the seconds they're speaking.
@@ -165,6 +180,21 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 /// Done/Error and schedules the idle render once transcribe + inject return.
 /// `mode` selects plain / refined / command handling of the transcript.
 pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
+    // Onboarding "Try it": commit the throwaway clip as a Test, which reports the
+    // transcript to the onboarding window instead of pasting. No overlay/Esc were
+    // set up on press, so skip the recording_armed accounting below.
+    if app
+        .state::<AppState>()
+        .onboarding_test
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop {
+            mode: DictationMode::Test,
+        }) {
+            log::warn!("hotkey: dictation worker unreachable: {e}");
+        }
+        return;
+    }
     // Leave the Esc hijack registered — it stays live through the
     // transcribe/refine phase so the user can still cancel after releasing the
     // trigger; the worker / `handle_recording` free it when the dictation ends.
