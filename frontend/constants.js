@@ -14,6 +14,7 @@ export const EVENTS = {
   UPDATE_STAGED: "update-staged", // settings: an update finished downloading
   UPDATE_NONE: "update-none", // settings: check found no update
   CONFIG_CHANGED: "config-changed", // settings: speed/voice/mic changed elsewhere
+  TEST_DICTATION_RESULT: "test-dictation-result", // onboarding: Try-it test result
 };
 
 // Tauri commands. Must match the #[tauri::command] fn names in src-tauri/src.
@@ -46,6 +47,8 @@ export const CMD = {
   FINISH_ONBOARDING: "finish_onboarding",
   CLOSE_ONBOARDING: "close_onboarding",
   SET_OVERLAY_POSITION: "set_overlay_position",
+  TEST_DICTATION_START: "test_dictation_start",
+  TEST_DICTATION_STOP: "test_dictation_stop",
   REQUEST_MICROPHONE: "request_microphone",
   OPEN_ACCESSIBILITY_SETTINGS: "open_accessibility_settings",
   OPEN_MICROPHONE_SETTINGS: "open_microphone_settings",

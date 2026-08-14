@@ -14,6 +14,34 @@ pub fn get_config(state: State<AppState>) -> Config {
     state.config.lock().map(|c| c.clone()).unwrap_or_default()
 }
 
+// --- Onboarding: guided first-success "Try it" -------------------------------
+
+/// Begin a throwaway test recording for the onboarding first-success step. Uses
+/// the same dictation worker + configured mic as real dictation; the paired
+/// `test_dictation_stop` reports the transcript back to the onboarding window
+/// (the `test-dictation-result` event) instead of pasting. Warms the model first
+/// so the load overlaps the seconds the user is speaking.
+#[tauri::command]
+pub fn test_dictation_start(state: State<AppState>) -> Result<(), String> {
+    state.transcriber.warm();
+    state
+        .tx
+        .send(crate::DictationCmd::Start)
+        .map_err(|e| e.to_string())
+}
+
+/// Stop the onboarding test recording and transcribe it. The result (text +
+/// whether any audio was heard) arrives via the `test-dictation-result` event.
+#[tauri::command]
+pub fn test_dictation_stop(state: State<AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(crate::DictationCmd::Stop {
+            mode: crate::DictationMode::Test,
+        })
+        .map_err(|e| e.to_string())
+}
+
 /// Persist an edited config and apply it live. The shared `AppState.config` is
 /// what the refiner reads on each refine, so refine model/prompt changes take
 /// effect immediately; TTS/mic changes take effect on their next use.

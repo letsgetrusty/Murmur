@@ -256,3 +256,97 @@ kbd {
   border-radius: var(--radius-control);
   color: var(--text);
 }
+
+/* Try-it first-success test ----------------------------------------------- */
+.try-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-lg);
+  margin-top: var(--space-3xl);
+}
+.try-mic {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-2xl);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.08s ease;
+}
+.try-mic:not(:disabled):hover {
+  border-color: var(--accent-soft-border);
+}
+.try-mic:not(:disabled):active {
+  transform: translateY(1px);
+}
+.try-mic:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.try-mic.recording {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: try-pulse 1.3s ease-in-out infinite;
+}
+.try-mic-icon {
+  font-size: 16px;
+}
+@keyframes try-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(var(--accent-rgb), 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .try-mic.recording {
+    animation: none;
+  }
+}
+.try-result {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+.try-result.ok {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft-bg);
+}
+.try-result.warn {
+  border-color: rgba(240, 86, 75, 0.4);
+  background: rgba(240, 86, 75, 0.1);
+}
+.try-transcript {
+  font-size: var(--fs-base);
+  font-style: italic;
+  color: var(--text);
+}
+.try-transcript:empty {
+  display: none;
+}
+.try-status {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.try-transcript:not(:empty) + .try-status {
+  margin-top: var(--space-xs);
+}
+.try-result.ok .try-status {
+  color: var(--text);
+}

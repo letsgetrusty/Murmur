@@ -7,7 +7,7 @@ import { EVENTS, CMD, DOWNLOAD } from "./constants.js";
 const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
-const STEPS = 4;
+const STEPS = 5;
 let step = 0;
 
 // True once we observe Accessibility currently granted (sticky).
@@ -47,8 +47,9 @@ function renderDots() {
   });
 }
 
-// Step 2 is "Downloading models".
+// Step 2 is "Downloading models"; step 3 is the "Try it" first-success test.
 const DOWNLOAD_STEP = 2;
+const TRY_STEP = 3;
 
 function goTo(n) {
   step = Math.max(0, Math.min(STEPS - 1, n));
@@ -59,6 +60,9 @@ function goTo(n) {
   // Start the Kokoro download when the user reaches the downloads step, so its
   // bar fills alongside Whisper/Qwen.
   if (step === DOWNLOAD_STEP) startNeural();
+  // Reflect speech-model readiness on the "Hold to talk" button when we land
+  // on the Try-it step (it can't record until Whisper is on disk).
+  if (step === TRY_STEP) updateTryStep();
 }
 
 // --- Permissions -------------------------------------------------------------
@@ -197,6 +201,7 @@ function markDownloadDone(id) {
     whisper.ready = true;
     whisper.failed = false;
     updateFinish();
+    updateTryStep(); // Whisper just landed — the "Try it" mic can go live
   }
   const row = $(`#${DL_EL[id]}`);
   if (!row) return;
@@ -246,6 +251,83 @@ function renderDownload({ id, downloaded, total, failed }) {
 function fmtMB(bytes) {
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
+}
+
+// --- Try it (guided first success) -------------------------------------------
+
+let tryRecording = false; // mic held down, capturing
+let tryBusy = false; // released, awaiting the transcript
+
+// Enable "Hold to talk" only once Whisper is on disk — recording before then
+// would transcribe to nothing and read as a failure that isn't one.
+function updateTryStep() {
+  const btn = $("#try-mic");
+  const label = $("#try-mic-label");
+  if (!btn || !label || tryRecording || tryBusy) return;
+  if (!invoke || whisper.ready) {
+    btn.disabled = false;
+    label.textContent = "Hold to talk";
+  } else {
+    btn.disabled = true;
+    label.textContent = "Preparing speech model…";
+  }
+}
+
+async function tryStart() {
+  const btn = $("#try-mic");
+  if (!btn || btn.disabled || tryRecording || tryBusy) return;
+  tryRecording = true;
+  btn.classList.add("recording");
+  $("#try-mic-label").textContent = "Listening… release to stop";
+  $("#try-result").hidden = true;
+  try {
+    await invoke(CMD.TEST_DICTATION_START);
+  } catch (_) {
+    tryRecording = false;
+    btn.classList.remove("recording");
+    updateTryStep();
+  }
+}
+
+async function tryStop() {
+  if (!tryRecording) return;
+  tryRecording = false;
+  tryBusy = true;
+  const btn = $("#try-mic");
+  btn.classList.remove("recording");
+  btn.disabled = true;
+  $("#try-mic-label").textContent = "Transcribing…";
+  try {
+    // The transcript comes back via the TEST_DICTATION_RESULT event.
+    await invoke(CMD.TEST_DICTATION_STOP);
+  } catch (_) {
+    tryBusy = false;
+    updateTryStep();
+  }
+}
+
+function renderTryResult({ text, heard_audio }) {
+  tryBusy = false;
+  const result = $("#try-result");
+  const transcript = $("#try-transcript");
+  const status = $("#try-status");
+  updateTryStep();
+  result.hidden = false;
+  result.classList.remove("ok", "warn");
+  if (heard_audio && text) {
+    transcript.textContent = `“${text}”`;
+    status.textContent = "Heard you clearly — transcribed on-device. ✓";
+    result.classList.add("ok");
+  } else if (!heard_audio) {
+    transcript.textContent = "";
+    status.textContent =
+      "We couldn't hear anything. Check your mic is connected and Murmur has Microphone access (go Back a step), then try again.";
+    result.classList.add("warn");
+  } else {
+    transcript.textContent = "";
+    status.textContent = "We didn't catch any words — try again, a little louder and clearer.";
+    result.classList.add("warn");
+  }
 }
 
 // --- Finish ------------------------------------------------------------------
@@ -326,6 +408,23 @@ function init() {
       });
     })
   );
+
+  // "Try it" push-to-talk. Pointer capture keeps the release event even if the
+  // cursor drifts off the button mid-hold.
+  const tryMic = $("#try-mic");
+  if (tryMic) {
+    tryMic.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      tryMic.setPointerCapture?.(e.pointerId);
+      tryStart();
+    });
+    tryMic.addEventListener("pointerup", (e) => {
+      tryMic.releasePointerCapture?.(e.pointerId);
+      tryStop();
+    });
+    tryMic.addEventListener("pointercancel", tryStop);
+  }
+  listen?.(EVENTS.TEST_DICTATION_RESULT, (e) => renderTryResult(e.payload));
 
   // Model-download progress from the backend's prefetch.
   listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));

@@ -21,6 +21,9 @@ pub mod event {
     /// Settings: speed/voice/mic changed from the tray or a hotkey — the window
     /// re-syncs those controls.
     pub const CONFIG_CHANGED: &str = "config-changed";
+    /// Onboarding: result of the "Try it" test dictation (transcript + whether
+    /// any audio was heard).
+    pub const TEST_DICTATION_RESULT: &str = "test-dictation-result";
 }
 
 /// Model-download ids carried in the MODEL_DOWNLOAD payload's `id` field
@@ -110,6 +113,7 @@ mod tests {
             super::event::UPDATE_STAGED,
             super::event::UPDATE_NONE,
             super::event::CONFIG_CHANGED,
+            super::event::TEST_DICTATION_RESULT,
         ]);
         assert_eq!(js_object("EVENTS"), rust);
     }

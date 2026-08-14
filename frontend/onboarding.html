@@ -129,8 +129,41 @@
         </footer>
       </section>
 
-      <!-- Step 3: Done -->
+      <!-- Step 3: Try it (guided first success) -->
       <section class="ob-step" data-step="3" hidden>
+        <div class="ob-body">
+          <h1>Try it out</h1>
+          <p class="ob-lead">
+            Let's make sure Murmur can hear you. Hold the button and say a few
+            words, then release.
+          </p>
+
+          <div class="try-box">
+            <button class="try-mic" id="try-mic" type="button" disabled>
+              <span class="try-mic-icon" aria-hidden="true">🎙️</span>
+              <span class="try-mic-label" id="try-mic-label">Hold to talk</span>
+            </button>
+
+            <div class="try-result" id="try-result" hidden>
+              <div class="try-transcript" id="try-transcript"></div>
+              <div class="try-status" id="try-status"></div>
+            </div>
+          </div>
+
+          <p class="hint ob-note">
+            Uses your mic and the on-device speech model — nothing leaves your
+            Mac. Once it works here, the same thing happens when you hold
+            <b>Fn</b> anywhere.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <button class="small-btn" data-back>Back</button>
+          <button class="primary" data-next>Continue</button>
+        </footer>
+      </section>
+
+      <!-- Step 4: Done -->
+      <section class="ob-step" data-step="4" hidden>
         <div class="ob-body">
           <h1>You're all set</h1>
           <p class="ob-lead">Here's how to use Murmur. It lives in your menu bar.</p>

@@ -42,6 +42,9 @@ pub enum DictationMode {
     Plain,
     /// Run the transcript through the LLM refiner, then paste (Fn+Ctrl).
     Refine,
+    /// Onboarding "Try it": transcribe and report the text back to the
+    /// onboarding window instead of pasting — no refine, overlay, or history.
+    Test,
 }
 
 pub enum DictationCmd {
@@ -278,6 +281,8 @@ pub fn run() {
             commands::finish_onboarding,
             commands::close_onboarding,
             commands::set_overlay_position,
+            commands::test_dictation_start,
+            commands::test_dictation_stop,
             commands::pending_update_version,
             commands::install_staged_update,
         ])
@@ -1684,6 +1689,16 @@ fn record_history<R: Runtime>(app: &AppHandle<R>, raw: &str, refined: Option<&st
     let _ = app.emit(ipc::event::HISTORY, ()); // nudge the History tab to refresh if open
 }
 
+/// Result of the onboarding "Try it" test dictation, emitted to the onboarding
+/// window. `heard_audio` is false when the clip was effectively silent (the mic
+/// isn't feeding audio — same 1e-4 floor the live path uses); the frontend maps
+/// that to a specific "check your mic" diagnosis rather than a generic retry.
+#[derive(Clone, Serialize)]
+struct TestDictationResult {
+    text: String,
+    heard_audio: bool,
+}
+
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -1691,6 +1706,31 @@ fn handle_recording<R: Runtime>(
     recording: audio::Recording,
     mode: DictationMode,
 ) {
+    // Onboarding "Try it": no overlay, paste, refine, or history — just
+    // transcribe (unless the clip was silent or too short) and report the text
+    // back to the onboarding window, which turns it into a success or a
+    // diagnosis. This validates the real mic → capture → STT path end to end.
+    if mode == DictationMode::Test {
+        let heard = recording.mean_abs >= 1e-4;
+        tauri::async_runtime::spawn(async move {
+            let text = if heard && recording.duration_ms >= 200 {
+                transcriber
+                    .transcribe(&recording.wav)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let _ = app.emit(
+                ipc::event::TEST_DICTATION_RESULT,
+                TestDictationResult {
+                    text: text.trim().to_string(),
+                    heard_audio: heard,
+                },
+            );
+        });
+        return;
+    }
     // These early exits end the dictation, so free the Esc hijack on_press
     // registered (it stays live through transcribe/refine otherwise).
     if recording.duration_ms < 200 {
