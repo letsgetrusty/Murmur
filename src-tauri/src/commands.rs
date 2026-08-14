@@ -16,18 +16,23 @@ pub fn get_config(state: State<AppState>) -> Config {
 
 // --- Onboarding: guided first-success "Try it" -------------------------------
 
-/// Arm/disarm the onboarding "Try it" step. While armed, a real dictation-trigger
-/// press (Fn/chord) records a throwaway clip and reports the transcript to the
-/// onboarding window instead of pasting — see `hotkeys::on_press`. Warms the
-/// model when arming so the first hold isn't slowed by the load.
+/// Arm the onboarding test for the given step ("dictation", "read", or anything
+/// else to disarm both). While a step is armed, a real key press is routed to a
+/// throwaway test that reports back to the onboarding window instead of
+/// dictating / reading a selection — see `hotkeys::on_press` and `tts_toggle`.
+/// Warms the relevant model on arm so the first press isn't slowed by the load.
 #[tauri::command]
-pub fn set_onboarding_test(state: State<AppState>, armed: bool) {
-    if armed {
+pub fn set_onboarding_test(state: State<AppState>, step: String) {
+    use std::sync::atomic::Ordering::Release;
+    let dictation = step == "dictation";
+    let read = step == "read";
+    if dictation {
         state.transcriber.warm();
+    } else if read {
+        state.speaker.warm();
     }
-    state
-        .onboarding_test
-        .store(armed, std::sync::atomic::Ordering::Release);
+    state.onboarding_test.store(dictation, Release);
+    state.onboarding_read_test.store(read, Release);
 }
 
 /// Persist an edited config and apply it live. The shared `AppState.config` is

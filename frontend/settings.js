@@ -2,7 +2,7 @@
 // (the overlay is event-driven; this window is request/response).
 
 import { EVENTS, CMD, TABS } from "./constants.js";
-import { prettyShortcut, codeToKey } from "./shortcuts.js";
+import { bindRecorder, cancelActiveRecorder } from "./recorder.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -226,19 +226,6 @@ const HOTKEY_FIELD = {
   tts_speed: "hotkey_tts_speed",
 };
 
-// Combos we never let a global shortcut take: core macOS editing keys and the
-// ones Murmur synthesizes for paste/copy — binding those would break dictation.
-// Mirrors is_reserved_shortcut() in hotkeys.rs (the backend rejects them too).
-const RESERVED_SHORTCUTS = new Set([
-  "Cmd+V",
-  "Cmd+C",
-  "Cmd+X",
-  "Cmd+A",
-  "Cmd+Z",
-  "Cmd+Q",
-  "Cmd+W",
-]);
-
 // Short label for the "Dictate & refine" combo's leading key — mirrors the
 // chosen hold-to-talk trigger so the refine hint stays accurate.
 const TRIGGER_BADGE = {
@@ -264,80 +251,23 @@ function flashInvalid(elm) {
   setTimeout(() => elm.classList.remove("invalid"), 1800);
 }
 
-let recording = null;
+// One shared recorder per `.recorder` button; `renderHotkeys` repaints them all
+// (after a Reset). Capture/validation lives in recorder.js.
+const recorders = {};
 
 function renderHotkeys() {
-  for (const btn of document.querySelectorAll(".recorder")) {
-    btn.textContent = prettyShortcut(currentConfig[HOTKEY_FIELD[btn.dataset.action]]);
-  }
-}
-
-function stopRecording(restore) {
-  if (!recording) return;
-  window.removeEventListener("keydown", onRecordKey, true);
-  recording.button.classList.remove("recording", "invalid");
-  if (restore) {
-    recording.button.textContent = prettyShortcut(
-      currentConfig[HOTKEY_FIELD[recording.action]]
-    );
-  }
-  recording = null;
-}
-
-async function onRecordKey(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  if (e.key === "Escape") {
-    stopRecording(true); // reverting the label is the cancel confirmation
-    return;
-  }
-  const key = codeToKey(e.code);
-  if (!key) return; // still waiting for a non-modifier key
-
-  const mods = [];
-  if (e.metaKey) mods.push("Cmd");
-  if (e.ctrlKey) mods.push("Ctrl");
-  if (e.altKey) mods.push("Alt");
-  if (e.shiftKey) mods.push("Shift");
-  if (mods.length === 0) {
-    // Inline validation on the active recorder; keep listening so the user can
-    // immediately retry with a modifier held.
-    recording.button.classList.add("invalid");
-    recording.button.textContent = "Hold a modifier ⌘⌃⌥⇧";
-    return;
-  }
-
-  const shortcut = [...mods, key].join("+");
-  // Refuse core-editing / app-synthesized combos (Cmd+V, Cmd+C, …). Binding one
-  // globally would swallow the app's own paste and silently break dictation.
-  // Keep listening so the user can pick something else.
-  if (RESERVED_SHORTCUTS.has(shortcut)) {
-    recording.button.classList.add("invalid");
-    recording.button.textContent = "Reserved — pick another";
-    return;
-  }
-  const { action, button } = recording;
-  stopRecording(false);
-  button.textContent = prettyShortcut(shortcut); // label change confirms success
-  try {
-    await invoke(CMD.SET_HOTKEY, { action, shortcut });
-    currentConfig[HOTKEY_FIELD[action]] = shortcut;
-  } catch (err) {
-    button.textContent = prettyShortcut(currentConfig[HOTKEY_FIELD[action]]);
-    flashInvalid(button);
-  }
+  for (const h of Object.values(recorders)) h.render();
 }
 
 function initHotkeys() {
-  renderHotkeys();
   for (const btn of document.querySelectorAll(".recorder")) {
-    btn.addEventListener("click", () => {
-      if (recording) stopRecording(true);
-      recording = { action: btn.dataset.action, button: btn };
-      btn.classList.remove("invalid");
-      btn.classList.add("recording");
-      btn.textContent = "Press keys…";
-      window.addEventListener("keydown", onRecordKey, true);
+    const action = btn.dataset.action;
+    recorders[action] = bindRecorder(btn, {
+      getCurrent: () => currentConfig[HOTKEY_FIELD[action]],
+      onCapture: async (shortcut) => {
+        await invoke(CMD.SET_HOTKEY, { action, shortcut });
+        currentConfig[HOTKEY_FIELD[action]] = shortcut; // persist for restore
+      },
     });
   }
 
@@ -388,7 +318,7 @@ function initHotkeys() {
         cancelLabel: "Cancel",
       });
       if (!ok) return;
-      if (recording) stopRecording(true);
+      cancelActiveRecorder();
       try {
         currentConfig = await invoke(CMD.RESET_HOTKEYS);
         renderHotkeys();

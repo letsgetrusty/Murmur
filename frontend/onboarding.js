@@ -3,12 +3,31 @@
 // the Fn tap picks up a freshly granted Accessibility permission.
 
 import { EVENTS, CMD, DOWNLOAD } from "./constants.js";
+import { bindRecorder } from "./recorder.js";
+import { prettyShortcut } from "./shortcuts.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
-const STEPS = 5;
+const STEPS = 6;
 let step = 0;
+
+// The current dictate trigger + read-aloud chord, mirrored from config so the
+// cards can show the right keys and the pickers restore on a failed change.
+let dictationTrigger = "Fn";
+let ttsHotkey = "CmdOrCtrl+Shift+R";
+let ttsRecorder = null;
+
+// kbd label for each dictate trigger (matches Settings' badge map).
+const TRIGGER_KBD = {
+  Fn: "Fn",
+  RightCtrl: "Right ⌃",
+  RightAlt: "Right ⌥",
+  RightCmd: "Right ⌘",
+  Ctrl: "⌃",
+  Alt: "⌥",
+  Cmd: "⌘",
+};
 
 // True once we observe Accessibility currently granted (sticky).
 let accessibilityGranted = false;
@@ -46,9 +65,10 @@ function renderDots() {
   });
 }
 
-// Step 2 is "Downloading models"; step 3 is the "Try it" first-success test.
+// Step 2 downloads models; step 3 tests dictation; step 4 tests read-aloud.
 const DOWNLOAD_STEP = 2;
 const TRY_STEP = 3;
+const READ_STEP = 4;
 
 function goTo(n) {
   step = Math.max(0, Math.min(STEPS - 1, n));
@@ -59,10 +79,12 @@ function goTo(n) {
   // Start the Kokoro download when the user reaches the downloads step, so its
   // bar fills alongside Whisper/Qwen.
   if (step === DOWNLOAD_STEP) startNeural();
-  // Arm the "Try it" test only while its step is showing, so a real Fn/chord
-  // press elsewhere in onboarding still behaves normally. Refresh the card too.
-  invoke?.(CMD.SET_ONBOARDING_TEST, { armed: step === TRY_STEP }).catch(() => {});
+  // Arm the matching test only while its step is showing, so a real key press
+  // elsewhere in onboarding still behaves normally.
+  const testStep = step === TRY_STEP ? "dictation" : step === READ_STEP ? "read" : "none";
+  invoke?.(CMD.SET_ONBOARDING_TEST, { step: testStep }).catch(() => {});
   if (step === TRY_STEP) updateTryCard();
+  if (step === READ_STEP) readPrompt();
 }
 
 // --- Permissions -------------------------------------------------------------
@@ -276,7 +298,8 @@ function updateTryCard() {
   } else if (invoke && !whisper.ready) {
     setCard("Preparing the speech model…", "It downloads once, then runs offline.");
   } else {
-    setCard("Hold <kbd>Fn</kbd> and speak", "Release when you're done.");
+    const key = TRIGGER_KBD[dictationTrigger] ?? "Fn";
+    setCard(`Hold <kbd>${key}</kbd> and speak`, "Release when you're done.");
   }
 }
 
@@ -316,6 +339,54 @@ function renderTryEvent({ phase, text, heard_audio }) {
     result.classList.add("warn");
   }
   updateTryCard(); // reset the prompt for another go
+}
+
+// --- Try read-aloud ----------------------------------------------------------
+
+// The idle prompt, showing the current read-aloud key. Rebuilds the headline
+// (so the <kbd> reflects a rebind) rather than just swapping text.
+function readPrompt(sub) {
+  const card = $("#read-card");
+  if (!card) return;
+  card.classList.remove("recording");
+  $("#read-headline").innerHTML = `Press <kbd>${prettyShortcut(ttsHotkey)}</kbd> to hear a sample`;
+  $("#read-sub").textContent = sub ?? "You should hear a voice.";
+}
+
+function renderReadEvent({ phase }) {
+  const card = $("#read-card");
+  if (!card) return;
+  if (phase === "speaking") {
+    card.classList.add("recording");
+    $("#read-headline").textContent = "Playing…";
+    $("#read-sub").textContent = "You should hear Murmur reading now.";
+  } else if (phase === "unavailable") {
+    card.classList.remove("recording");
+    $("#read-headline").textContent = "Voice still downloading…";
+    $("#read-sub").textContent =
+      "The neural voice is finishing its one-time download — try again in a moment.";
+  } else {
+    // done
+    readPrompt("Heard it? Press again to replay, or Continue.");
+  }
+}
+
+// --- Config (dictate trigger + read-aloud key) -------------------------------
+
+async function loadConfig() {
+  if (!invoke) return;
+  try {
+    const c = await invoke(CMD.GET_CONFIG);
+    dictationTrigger = c.dictation_trigger ?? "Fn";
+    ttsHotkey = c.hotkey_tts ?? "CmdOrCtrl+Shift+R";
+    const sel = $("#ob-dictation-trigger");
+    if (sel) sel.value = dictationTrigger;
+    ttsRecorder?.render();
+    readPrompt();
+    updateTryCard();
+  } catch (_) {
+    /* transient — cards fall back to defaults */
+  }
 }
 
 // --- Finish ------------------------------------------------------------------
@@ -400,6 +471,35 @@ function init() {
   // "Try it" runs off the real dictate key (Fn/chord). The backend routes an
   // armed test press into recording → transcribing → done phases here.
   listen?.(EVENTS.TEST_DICTATION_RESULT, (e) => renderTryEvent(e.payload));
+  listen?.(EVENTS.TEST_READ_RESULT, (e) => renderReadEvent(e.payload));
+
+  // Change the dictate key live (read by the Fn tap). Updates the "Try it" card.
+  const trigSel = $("#ob-dictation-trigger");
+  trigSel?.addEventListener("change", async (e) => {
+    const trigger = e.target.value;
+    try {
+      await invoke(CMD.SET_DICTATION_TRIGGER, { trigger });
+      dictationTrigger = trigger;
+      updateTryCard();
+    } catch (_) {
+      e.target.value = dictationTrigger;
+    }
+  });
+
+  // Change the read-aloud key live (re-registers the chord), via the same
+  // press-your-combo recorder the Settings window uses.
+  const ttsBtn = $("#ob-tts-recorder");
+  if (ttsBtn) {
+    ttsRecorder = bindRecorder(ttsBtn, {
+      getCurrent: () => ttsHotkey,
+      onCapture: async (shortcut) => {
+        await invoke(CMD.SET_HOTKEY, { action: "tts_toggle", shortcut });
+        ttsHotkey = shortcut;
+        readPrompt();
+      },
+    });
+  }
+  loadConfig();
 
   // Model-download progress from the backend's prefetch.
   listen?.(EVENTS.MODEL_DOWNLOAD, (e) => renderDownload(e.payload));

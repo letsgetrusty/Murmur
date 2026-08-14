@@ -155,8 +155,26 @@
             </div>
           </div>
 
+          <div class="ob-key-row">
+            <span class="ob-key-label">Dictate key</span>
+            <select id="ob-dictation-trigger">
+              <option value="Fn">Fn key</option>
+              <optgroup label="Dedicated key — no Fn needed">
+                <option value="RightCtrl">Right ⌃ Control</option>
+                <option value="RightAlt">Right ⌥ Option</option>
+                <option value="RightCmd">Right ⌘ Command</option>
+              </optgroup>
+              <optgroup label="Any-side modifier">
+                <option value="Ctrl">⌃ Control</option>
+                <option value="Alt">⌥ Option</option>
+                <option value="Cmd">⌘ Command</option>
+              </optgroup>
+            </select>
+          </div>
+
           <p class="hint ob-note">
-            Nothing leaves your Mac — the audio is transcribed on-device.
+            No Fn key? Pick another above. Nothing leaves your Mac — the audio is
+            transcribed on-device.
           </p>
         </div>
         <footer class="ob-foot">
@@ -165,8 +183,50 @@
         </footer>
       </section>
 
-      <!-- Step 4: Done -->
+      <!-- Step 4: Try read-aloud -->
       <section class="ob-step" data-step="4" hidden>
+        <div class="ob-body">
+          <h1>Read aloud</h1>
+          <p class="ob-lead">
+            Murmur can read text on your screen out loud. Press your read-aloud
+            key to hear a sample.
+          </p>
+
+          <div class="try-box">
+            <div class="try-card" id="read-card">
+              <span class="try-mic-icon" aria-hidden="true">🔊</span>
+              <div class="try-card-text">
+                <div class="try-headline" id="read-headline">
+                  Press <kbd id="read-key">⌘⇧R</kbd> to hear a sample
+                </div>
+                <div class="try-sub" id="read-sub">You should hear a voice.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ob-key-row">
+            <span class="ob-key-label">Read-aloud key</span>
+            <button
+              class="recorder"
+              id="ob-tts-recorder"
+              type="button"
+              data-action="tts_toggle"
+            ></button>
+          </div>
+
+          <p class="hint ob-note">
+            Reads your selected text — or the clipboard if nothing's selected.
+            Change the voice anytime in Settings.
+          </p>
+        </div>
+        <footer class="ob-foot">
+          <button class="small-btn" data-back>Back</button>
+          <button class="primary" data-next>Continue</button>
+        </footer>
+      </section>
+
+      <!-- Step 5: Done -->
+      <section class="ob-step" data-step="5" hidden>
         <div class="ob-body">
           <h1>You're all set</h1>
           <p class="ob-lead">Here's how to use Murmur. It lives in your menu bar.</p>

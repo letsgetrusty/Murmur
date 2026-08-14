@@ -15,6 +15,7 @@ export const EVENTS = {
   UPDATE_NONE: "update-none", // settings: check found no update
   CONFIG_CHANGED: "config-changed", // settings: speed/voice/mic changed elsewhere
   TEST_DICTATION_RESULT: "test-dictation-result", // onboarding: Try-it test result
+  TEST_READ_RESULT: "test-read-result", // onboarding: read-aloud sample phase
 };
 
 // Tauri commands. Must match the #[tauri::command] fn names in src-tauri/src.

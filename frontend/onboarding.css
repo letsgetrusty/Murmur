@@ -349,3 +349,16 @@ kbd {
 .try-result.ok .try-status {
   color: var(--text);
 }
+
+/* "Change key" row under a try card (dictate select / read-aloud recorder). */
+.ob-key-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+}
+.ob-key-label {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}

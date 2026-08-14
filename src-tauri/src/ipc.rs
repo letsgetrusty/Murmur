@@ -24,6 +24,8 @@ pub mod event {
     /// Onboarding: result of the "Try it" test dictation (transcript + whether
     /// any audio was heard).
     pub const TEST_DICTATION_RESULT: &str = "test-dictation-result";
+    /// Onboarding: phase of the "Try read-aloud" sample (speaking/done/…).
+    pub const TEST_READ_RESULT: &str = "test-read-result";
 }
 
 /// Model-download ids carried in the MODEL_DOWNLOAD payload's `id` field
@@ -114,6 +116,7 @@ mod tests {
             super::event::UPDATE_NONE,
             super::event::CONFIG_CHANGED,
             super::event::TEST_DICTATION_RESULT,
+            super::event::TEST_READ_RESULT,
         ]);
         assert_eq!(js_object("EVENTS"), rust);
     }

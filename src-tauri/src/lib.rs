@@ -104,11 +104,15 @@ pub struct AppState {
     /// release only transcribes when a recording is in flight — guards the
     /// model-download gate and the race where the model becomes ready mid-hold.
     pub recording_armed: AtomicBool,
-    /// True while the onboarding "Try it" step is active. A real dictation-trigger
-    /// press then records a throwaway clip and reports the transcript to the
-    /// onboarding window (no overlay/paste) instead of dictating — see
-    /// `hotkeys::on_press` and `handle_recording`'s `Test` branch.
+    /// True while the onboarding "Try dictation" step is active. A real
+    /// dictation-trigger press then records a throwaway clip and reports the
+    /// transcript to the onboarding window (no overlay/paste) instead of
+    /// dictating — see `hotkeys::on_press` and `handle_recording`'s `Test` branch.
     pub onboarding_test: AtomicBool,
+    /// True while the onboarding "Try read-aloud" step is active. A read-aloud
+    /// key press then speaks a fixed sample (no selection capture / overlay) and
+    /// reports progress to the onboarding window — see `tts_toggle`.
+    pub onboarding_read_test: AtomicBool,
     /// True while the "waiting for the speech model" overlay watcher is running,
     /// so a second press doesn't spawn a duplicate.
     pub model_wait_active: AtomicBool,
@@ -397,6 +401,7 @@ pub fn run() {
                 downloads: Arc::new(Mutex::new(Downloads::default())),
                 recording_armed: AtomicBool::new(false),
                 onboarding_test: AtomicBool::new(false),
+                onboarding_read_test: AtomicBool::new(false),
                 model_wait_active: AtomicBool::new(false),
                 dictation_gen: AtomicU64::new(0),
                 cues: sound::Cues::load(),
@@ -1008,6 +1013,27 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
     if state.speaker.is_speaking() {
         log::info!("tts: cancel in-progress read, starting a new one");
         state.speaker.stop();
+    }
+    // Onboarding "Try read-aloud": speak a fixed sample instead of reading a
+    // selection — no clipboard capture, no overlay. Reports progress to the
+    // onboarding window so it can show "Playing…" then "done".
+    if state.onboarding_read_test.load(Ordering::Acquire) {
+        const SAMPLE: &str =
+            "Murmur can read any text on your screen aloud, in the voice you choose.";
+        let provider = state
+            .config
+            .lock()
+            .map(|c| c.tts_provider.clone())
+            .unwrap_or_default();
+        if provider == "kokoro" && !tts::kokoro_assets_present() {
+            spawn_download(app, ipc::download::KOKORO);
+            emit_read_test(app, "unavailable");
+            return;
+        }
+        emit_read_test(app, "speaking");
+        state.speaker.speak(SAMPLE);
+        spawn_read_test_watcher(app.clone());
+        return;
     }
     // Neural read-aloud requested but its voice model isn't downloaded yet: surface
     // it on the overlay (and keep the download going) rather than doing nothing.
@@ -1722,6 +1748,46 @@ pub(crate) fn emit_test_state<R: Runtime>(
             heard_audio,
         },
     );
+}
+
+/// A phase of the onboarding "Try read-aloud" test: "speaking", "done", or
+/// "unavailable" (the neural voice is still downloading).
+#[derive(Clone, Serialize)]
+struct ReadTestEvent {
+    phase: &'static str,
+}
+
+/// Push a "Try read-aloud" phase to the onboarding window.
+pub(crate) fn emit_read_test<R: Runtime>(app: &AppHandle<R>, phase: &'static str) {
+    let _ = app.emit(ipc::event::TEST_READ_RESULT, ReadTestEvent { phase });
+}
+
+/// Wait for the onboarding read-aloud sample to finish, then tell the window.
+/// Mirrors `spawn_tts_idle_watcher` but reports to onboarding rather than driving
+/// the overlay + Esc.
+fn spawn_read_test_watcher<R: Runtime>(app: AppHandle<R>) {
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        // Wait for playback to actually start (bail if it never does).
+        loop {
+            if app.state::<AppState>().speaker.is_speaking() {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                emit_read_test(&app, "done");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(80));
+        }
+        // Then wait for it to end.
+        loop {
+            std::thread::sleep(Duration::from_millis(120));
+            if !app.state::<AppState>().speaker.is_speaking() {
+                emit_read_test(&app, "done");
+                return;
+            }
+        }
+    });
 }
 
 fn handle_recording<R: Runtime>(
