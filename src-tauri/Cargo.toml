@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.2.0"
+version = "0.3.0"
 description = "Voice tool: on-device dictation, read-aloud TTS, and LLM refinement"
 edition = "2021"
 rust-version = "1.77"
