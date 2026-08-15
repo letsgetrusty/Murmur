@@ -11,10 +11,10 @@ There are no accounts, no analytics, no telemetry, and no tracking of any kind.
   on-device Whisper model and then discarded. It is never uploaded anywhere.
 - **Your text.** Refinement (the Fn+Ctrl cleanup) and read-aloud run entirely on
   local models. The text you dictate or have read aloud never leaves your Mac.
-- **Dictation history.** If enabled, transcripts are stored in a local SQLite
-  database under `~/Library/Application Support/murmur/`. You can search,
-  delete individual entries, clear all history, or turn recording off in
-  Settings. Nothing is synced or backed up by Murmur.
+- **Dictation history.** Transcripts are stored in a local SQLite database under
+  `~/Library/Application Support/murmur/`. You can search, delete individual
+  entries, or clear all history in Settings. Nothing is synced or backed up by
+  Murmur.
 - **Clipboard & selected text** are read/written only transiently to paste
   dictated text and to capture a selection for read-aloud. They are not stored or
   transmitted.
