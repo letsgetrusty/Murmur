@@ -33,6 +33,21 @@ pub fn set_onboarding_test(state: State<AppState>, step: String) {
     }
     state.onboarding_test.store(dictation, Release);
     state.onboarding_read_test.store(read, Release);
+    if !read {
+        // Leaving the read step drops any stale selection.
+        if let Ok(mut sel) = state.onboarding_read_selection.lock() {
+            sel.clear();
+        }
+    }
+}
+
+/// Report the onboarding sample text the webview currently has selected. Stored
+/// for `tts_toggle`'s read test to read aloud — see `AppState::onboarding_read_selection`.
+#[tauri::command]
+pub fn report_read_selection(state: State<AppState>, text: String) {
+    if let Ok(mut sel) = state.onboarding_read_selection.lock() {
+        *sel = text;
+    }
 }
 
 /// Temporarily unregister the global-shortcut chords while the hotkey recorder is

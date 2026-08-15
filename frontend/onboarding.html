@@ -9,77 +9,77 @@
     <link rel="stylesheet" href="./onboarding.css" />
   </head>
   <body>
-    <div class="ob">
-      <!-- Progress dots -->
-      <div class="ob-dots" id="ob-dots" aria-hidden="true"></div>
+    <!-- The whole chromeless window is a drag handle ("deep" = the subtree drags;
+         Tauri auto-excludes buttons/selects/inputs). Selectable text opts out with
+         data-tauri-drag-region="false". -->
+    <div class="ob" data-tauri-drag-region="deep">
+      <!-- Progress across the top; fill width set per step in onboarding.js. -->
+      <div class="ob-progress">
+        <div class="ob-progress-fill" id="ob-progress"></div>
+      </div>
 
-      <!-- Step 0: Welcome -->
-      <section class="ob-step" data-step="0">
-        <div class="ob-body ob-center">
-          <svg class="ob-logo" viewBox="0 0 24 24" width="52" height="52" aria-hidden="true">
-            <g fill="currentColor">
-              <rect x="1.3" y="8.5" width="2.6" height="7" rx="1.3" />
-              <rect x="6" y="5.5" width="2.6" height="13" rx="1.3" />
-              <rect x="10.7" y="3" width="2.6" height="18" rx="1.3" />
-              <rect x="15.4" y="6.5" width="2.6" height="11" rx="1.3" />
-              <rect x="20.1" y="9" width="2.6" height="6" rx="1.3" />
-            </g>
-          </svg>
-          <h1>Welcome to Murmur</h1>
-          <p class="ob-lead">Dictation and read-aloud for your Mac.</p>
-          <p class="ob-privacy"><span class="ob-lock">🔒</span> 100% on-device.</p>
-        </div>
-        <footer class="ob-foot">
-          <span></span>
-          <button class="primary" data-next>Get started</button>
-        </footer>
-      </section>
+      <div class="ob-scroll">
+        <!-- Shared Back, top-left. Hidden on the first step. -->
+        <button class="ob-back" id="ob-back" type="button" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          Back
+        </button>
 
-      <!-- Step 1: Permissions -->
-      <section class="ob-step" data-step="1" hidden>
-        <div class="ob-body">
-          <h1>Grant permissions</h1>
+        <!-- Step 0: Welcome -->
+        <section class="ob-step ob-center" data-step="0" data-cta="Get started" data-prog="12">
+          <div class="ob-hero">
+            <svg viewBox="0 0 24 24" width="56" height="56" aria-hidden="true">
+              <g fill="currentColor">
+                <rect x="1.3" y="8.5" width="2.6" height="7" rx="1.3" />
+                <rect x="6" y="5.5" width="2.6" height="13" rx="1.3" />
+                <rect x="10.7" y="3" width="2.6" height="18" rx="1.3" />
+                <rect x="15.4" y="6.5" width="2.6" height="11" rx="1.3" />
+                <rect x="20.1" y="9" width="2.6" height="6" rx="1.3" />
+              </g>
+            </svg>
+          </div>
+          <h1 class="ob-title">Welcome to Murmur</h1>
+          <p class="ob-lead">Dictation and read-aloud for your Mac — 100% on-device.</p>
+        </section>
+
+        <!-- Step 1: Permissions -->
+        <section class="ob-step" data-step="1" data-cta="Continue" data-prog="30" hidden>
+          <h1 class="ob-title">Grant permissions</h1>
           <p class="ob-lead">Two quick macOS permissions.</p>
 
           <div class="perm-row" id="perm-ax">
-            <div class="perm-icon" aria-hidden="true">⌨️</div>
+            <div class="perm-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
+            </div>
             <div class="perm-text">
-              <div class="perm-name">
-                Accessibility <span class="perm-badge" data-badge>Checking…</span>
-              </div>
+              <div class="perm-name">Accessibility</div>
               <div class="hint">Paste text and use your dictate key.</div>
             </div>
-            <button class="small-btn" data-open-ax>Open Settings</button>
+            <span class="perm-badge ok" data-badge hidden>Granted</span>
+            <button class="primary small" data-open-ax>Open Settings</button>
           </div>
 
           <div class="perm-row" id="perm-mic">
-            <div class="perm-icon" aria-hidden="true">🎙️</div>
+            <div class="perm-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10a7 7 0 0 1-14 0M12 17v4" /></svg>
+            </div>
             <div class="perm-text">
-              <div class="perm-name">
-                Microphone <span class="perm-badge" data-badge>Checking…</span>
-              </div>
+              <div class="perm-name">Microphone</div>
               <div class="hint">Hear your voice.</div>
             </div>
-            <button class="small-btn" data-mic-action>Enable</button>
+            <span class="perm-badge ok" data-badge hidden>Granted</span>
+            <button class="primary small" data-mic-action>Enable</button>
           </div>
 
           <p class="hint ob-note" id="ax-relaunch-note" hidden>
             Murmur will relaunch at the end to activate the Fn key.
           </p>
-        </div>
-        <footer class="ob-foot">
-          <button class="small-btn" data-back>Back</button>
-          <button class="primary" data-next>Continue</button>
-        </footer>
-      </section>
+        </section>
 
-      <!-- Step 2: Models -->
-      <section class="ob-step" data-step="2" hidden>
-        <div class="ob-body">
-          <h1>Downloading models</h1>
-          <p class="ob-lead">
-            Downloads once, then runs offline. Keep going while they finish.
-          </p>
+        <!-- Step 2: Models (Continue gated until all three finish) -->
+        <section class="ob-step" data-step="2" data-cta="Continue" data-prog="48" data-gate="download" hidden>
+          <h1 class="ob-title">Downloading models</h1>
+          <p class="ob-lead">Downloads once, then runs entirely offline. Hang tight — this only happens now.</p>
 
           <div class="dl-row" id="dl-whisper">
             <div class="dl-head">
@@ -101,46 +101,25 @@
 
           <div class="dl-row" id="dl-kokoro">
             <div class="dl-head">
-              <span class="dl-name">Read-aloud · Kokoro (neural)</span>
+              <span class="dl-name">Read-aloud · Kokoro</span>
               <span class="dl-pct" data-pct>—</span>
               <button class="small-btn dl-retry" data-retry="kokoro" hidden>Retry</button>
             </div>
             <div class="dl-track"><div class="dl-fill" data-fill></div></div>
           </div>
+        </section>
 
-        </div>
-        <footer class="ob-foot">
-          <button class="small-btn" data-back>Back</button>
-          <button class="primary" data-next>Continue</button>
-        </footer>
-      </section>
+        <!-- Step 3: Try dictation -->
+        <section class="ob-step" data-step="3" data-cta="Continue" data-prog="66" hidden>
+          <h1 class="ob-title">Try it out</h1>
+          <p class="ob-lead">
+            Press and hold <span class="sc-pill" id="try-key">Fn</span> and start speaking
+          </p>
 
-      <!-- Step 3: Try it (guided first success) -->
-      <section class="ob-step" data-step="3" hidden>
-        <div class="ob-body">
-          <h1>Try it out</h1>
-          <p class="ob-lead">Hold your dictate key and speak.</p>
-
-          <div class="try-box">
-            <div class="try-card" id="try-card">
-              <span class="try-mic-icon" aria-hidden="true">🎙️</span>
-              <div class="try-card-text">
-                <div class="try-headline" id="try-headline">
-                  Hold <kbd>Fn</kbd> and speak
-                </div>
-                <div class="try-sub" id="try-sub">Release when you're done.</div>
-              </div>
-            </div>
-
-            <div class="try-result" id="try-result" hidden>
-              <div class="try-transcript" id="try-transcript"></div>
-              <div class="try-status" id="try-status"></div>
-            </div>
-          </div>
-
-          <div class="ob-key-row">
-            <span class="ob-key-label">Dictate key</span>
-            <select id="ob-dictation-trigger">
+          <span class="ob-change">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
+            Change key
+            <select class="ob-change-ctl" id="ob-dictation-trigger" aria-label="Change dictate key">
               <option value="Fn">Fn key</option>
               <optgroup label="Dedicated key — no Fn needed">
                 <option value="RightCtrl">Right ⌃ Control</option>
@@ -153,70 +132,53 @@
                 <option value="Cmd">⌘ Command</option>
               </optgroup>
             </select>
+          </span>
+
+          <div class="ob-record" id="try-card" data-tauri-drag-region="false">
+            <div class="ob-record-line">
+              <span class="ob-cur" id="try-cur" aria-hidden="true"></span>
+              <span id="try-headline">Say “This is my first dictation with Murmur”</span>
+            </div>
+            <div class="ob-record-status" id="try-status" hidden></div>
           </div>
+        </section>
 
-          <p class="hint ob-note">No Fn key? Pick another above.</p>
-        </div>
-        <footer class="ob-foot">
-          <button class="small-btn" data-back>Back</button>
-          <button class="primary" data-next>Continue</button>
-        </footer>
-      </section>
+        <!-- Step 4: Try read-aloud -->
+        <section class="ob-step" data-step="4" data-cta="Continue" data-prog="84" hidden>
+          <h1 class="ob-title">Read aloud</h1>
+          <p class="ob-lead">
+            Highlight the text, then press <span class="sc-pill" id="read-key">⌘⇧R</span>
+          </p>
 
-      <!-- Step 4: Try read-aloud -->
-      <section class="ob-step" data-step="4" hidden>
-        <div class="ob-body">
-          <h1>Read aloud</h1>
-          <p class="ob-lead">Highlight the text, then press your read-aloud key.</p>
+          <span class="ob-change">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
+            Change key
+            <button class="recorder ob-change-ctl" id="ob-tts-recorder" type="button" data-action="tts_toggle"></button>
+          </span>
 
-          <p class="read-sample" id="read-sample">
+          <p class="read-sample" id="read-sample" data-tauri-drag-region="false">
             Murmur reads highlighted text aloud, in the voice you choose.
           </p>
 
-          <div class="try-box">
-            <div class="try-card" id="read-card">
-              <span class="try-mic-icon" aria-hidden="true">🔊</span>
-              <div class="try-card-text">
-                <div class="try-headline" id="read-headline">
-                  Select the text, then press <kbd>⌘⇧R</kbd>
-                </div>
-                <div class="try-sub" id="read-sub">You'll hear it read back.</div>
-              </div>
-            </div>
-          </div>
+          <p class="ob-record-status" id="read-card" hidden>
+            <span id="read-headline"></span>
+            <span id="read-sub"></span>
+          </p>
+        </section>
 
-          <div class="ob-key-row">
-            <span class="ob-key-label">Read-aloud key</span>
-            <button
-              class="recorder"
-              id="ob-tts-recorder"
-              type="button"
-              data-action="tts_toggle"
-            ></button>
-          </div>
-        </div>
-        <footer class="ob-foot">
-          <button class="small-btn" data-back>Back</button>
-          <button class="primary" data-next>Continue</button>
-        </footer>
-      </section>
-
-      <!-- Step 5: Done -->
-      <section class="ob-step" data-step="5" hidden>
-        <div class="ob-body ob-center">
+        <!-- Step 5: Done -->
+        <section class="ob-step ob-center" data-step="5" data-cta="Finish" data-prog="100" hidden>
           <div class="ob-check" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
           </div>
-          <h1>You're all set</h1>
-          <p class="ob-lead">Murmur lives in your menu bar. Tweak anything in Settings.</p>
-        </div>
-        <footer class="ob-foot">
-          <button class="small-btn" data-back>Back</button>
-          <button class="primary" id="ob-finish">Finish</button>
-        </footer>
-      </section>
+          <h1 class="ob-title">You're all set</h1>
+          <p class="ob-lead">Murmur lives in your menu bar.</p>
+        </section>
+      </div>
+
+      <footer class="ob-foot">
+        <button class="primary block" id="ob-cta">Get started</button>
+      </footer>
     </div>
 
     <script type="module" src="./onboarding.js"></script>

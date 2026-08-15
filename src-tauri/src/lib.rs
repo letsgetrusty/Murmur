@@ -110,9 +110,15 @@ pub struct AppState {
     /// dictating — see `hotkeys::on_press` and `handle_recording`'s `Test` branch.
     pub onboarding_test: AtomicBool,
     /// True while the onboarding "Try read-aloud" step is active. A read-aloud
-    /// key press then speaks a fixed sample (no selection capture / overlay) and
-    /// reports progress to the onboarding window — see `tts_toggle`.
+    /// key press then reads the highlighted sample and reports progress to the
+    /// onboarding window (no overlay) — see `tts_toggle`.
     pub onboarding_read_test: AtomicBool,
+    /// The onboarding sample text the webview currently has selected, reported
+    /// live via `report_read_selection`. `tts_toggle` reads THIS for the read
+    /// test instead of synthesizing Cmd+C — the trigger's own Shift is still held
+    /// at that moment, so a synthetic Cmd+C becomes Cmd+Shift+C and copies
+    /// nothing. Empty string means nothing is selected.
+    pub onboarding_read_selection: Mutex<String>,
     /// True while the "waiting for the speech model" overlay watcher is running,
     /// so a second press doesn't spawn a duplicate.
     pub model_wait_active: AtomicBool,
@@ -291,6 +297,7 @@ pub fn run() {
             commands::close_onboarding,
             commands::set_overlay_position,
             commands::set_onboarding_test,
+            commands::report_read_selection,
             commands::suspend_shortcuts,
             commands::resume_shortcuts,
             commands::pending_update_version,
@@ -404,6 +411,7 @@ pub fn run() {
                 recording_armed: AtomicBool::new(false),
                 onboarding_test: AtomicBool::new(false),
                 onboarding_read_test: AtomicBool::new(false),
+                onboarding_read_selection: Mutex::new(String::new()),
                 model_wait_active: AtomicBool::new(false),
                 dictation_gen: AtomicU64::new(0),
                 cues: sound::Cues::load(),
@@ -610,11 +618,16 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
     }
     match WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
         .title("Welcome to Murmur")
-        .inner_size(640.0, 620.0)
+        .inner_size(560.0, 500.0)
         .resizable(false)
         .center()
-        // Dark background from creation so there's no white flash before CSS.
-        .background_color(tauri::window::Color(20, 18, 16, 255))
+        // Chromeless, transparent window so the webview paints a self-contained
+        // rounded modal (progress bar to the very top edge, no macOS title bar) —
+        // the onboarding IS the modal. Transparency is already enabled app-wide
+        // (macOSPrivateApi) for the overlay; the rounded corners + drag region
+        // live in onboarding.css / .html.
+        .decorations(false)
+        .transparent(true)
         .build()
     {
         Ok(win) => {
@@ -1030,16 +1043,22 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
             emit_read_test(app, "unavailable");
             return;
         }
-        // Read the user's highlighted text — the real selection → TTS path —
-        // reporting to the onboarding window instead of the overlay. Nudge them
-        // to highlight the sample first if nothing's selected.
-        match selection::capture_selection().ok().flatten() {
-            Some(t) if !t.trim().is_empty() => {
-                emit_read_test(app, "speaking");
-                state.speaker.speak(&t);
-                spawn_read_test_watcher(app.clone());
-            }
-            _ => emit_read_test(app, "select-first"),
+        // Read the sample the webview says is highlighted. We use the webview's
+        // own selection (reported via report_read_selection) rather than
+        // synthesizing Cmd+C: this fires on the trigger's key-down while its Shift
+        // is still held, so a synthetic Cmd+C lands as Cmd+Shift+C and copies
+        // nothing. Nudge them to highlight first if the selection is empty.
+        let selected = state
+            .onboarding_read_selection
+            .lock()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if selected.is_empty() {
+            emit_read_test(app, "select-first");
+        } else {
+            emit_read_test(app, "speaking");
+            state.speaker.speak(&selected);
+            spawn_read_test_watcher(app.clone());
         }
         return;
     }

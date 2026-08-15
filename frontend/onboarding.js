@@ -49,33 +49,41 @@ const stepEl = (n) => $(`.ob-step[data-step="${n}"]`);
 
 // --- Stepper -----------------------------------------------------------------
 
-function buildDots() {
-  const host = $("#ob-dots");
-  for (let i = 0; i < STEPS; i++) {
-    const d = document.createElement("span");
-    d.className = "dot";
-    host.appendChild(d);
-  }
-}
-
-function renderDots() {
-  $$("#ob-dots .dot").forEach((d, i) => {
-    d.classList.toggle("active", i === step);
-    d.classList.toggle("done", i < step);
-  });
-}
-
 // Step 2 downloads models; step 3 tests dictation; step 4 tests read-aloud.
 const DOWNLOAD_STEP = 2;
 const TRY_STEP = 3;
 const READ_STEP = 4;
+
+// Every model must finish before leaving the download step — Continue stays
+// blocked until then, so nobody lands in dictation/read-aloud on a half-fetched
+// model.
+function allModelsReady() {
+  return dlDone[DOWNLOAD.WHISPER] && dlDone[DOWNLOAD.LLM] && dlDone[DOWNLOAD.KOKORO];
+}
+
+// The shared full-width CTA: its label + enabled state follow the current step.
+// On the download step it stays disabled until every model is ready.
+function updateCta() {
+  const cur = stepEl(step);
+  const cta = $("#ob-cta");
+  if (!cur || !cta) return;
+  if (invoke && cur.dataset.gate === "download" && !allModelsReady()) {
+    cta.disabled = true;
+    cta.textContent = "Downloading models…";
+  } else {
+    cta.disabled = false;
+    cta.textContent = cur.dataset.cta;
+  }
+}
 
 function goTo(n) {
   step = Math.max(0, Math.min(STEPS - 1, n));
   $$(".ob-step").forEach((s) => {
     s.hidden = Number(s.dataset.step) !== step;
   });
-  renderDots();
+  $("#ob-progress").style.width = `${stepEl(step).dataset.prog}%`;
+  $("#ob-back").hidden = step === 0;
+  updateCta();
   // Start the Kokoro download when the user reaches the downloads step, so its
   // bar fills alongside Whisper/Qwen.
   if (step === DOWNLOAD_STEP) startNeural();
@@ -83,17 +91,23 @@ function goTo(n) {
   // elsewhere in onboarding still behaves normally.
   const testStep = step === TRY_STEP ? "dictation" : step === READ_STEP ? "read" : "none";
   invoke?.(CMD.SET_ONBOARDING_TEST, { step: testStep }).catch(() => {});
-  if (step === TRY_STEP) updateTryCard();
+  if (step === TRY_STEP) {
+    tryPhase = "idle"; // fresh placeholder each time the step is shown
+    updateTryCard();
+  }
   if (step === READ_STEP) readPrompt();
 }
 
 // --- Permissions -------------------------------------------------------------
 
-function setBadge(rowId, text, kind) {
+// A row's right slot shows the green "Granted" badge once held, otherwise the
+// accent action button — mirroring the reference (never both). Returns the btn.
+function setPerm(rowId, granted, actionSel) {
   const badge = $(`#${rowId} [data-badge]`);
-  if (!badge) return;
-  badge.textContent = text;
-  badge.className = `perm-badge${kind ? " " + kind : ""}`;
+  const btn = $(`#${rowId} ${actionSel}`);
+  if (badge) badge.hidden = !granted;
+  if (btn) btn.hidden = granted;
+  return btn;
 }
 
 // A relaunch is only needed if Accessibility is granted but the Fn tap didn't
@@ -105,14 +119,9 @@ function needsRelaunch() {
 
 function renderPermissions(status) {
   // Accessibility
-  if (status.accessibility) {
-    accessibilityGranted = true;
-    setBadge("perm-ax", "Granted", "ok");
-    $("#perm-ax [data-open-ax]").disabled = true;
-  } else {
-    setBadge("perm-ax", "Not granted", "warn");
-    $("#perm-ax [data-open-ax]").disabled = false;
-  }
+  accessibilityGranted = !!status.accessibility;
+  const axBtn = setPerm("perm-ax", accessibilityGranted, "[data-open-ax]");
+  if (axBtn) axBtn.disabled = false;
   // Relaunch note (and the Finish-time relaunch) apply only to a grant made
   // *this session* — if Accessibility was already on at launch, nothing to do.
   $("#ax-relaunch-note").hidden = !needsRelaunch();
@@ -122,21 +131,13 @@ function renderPermissions(status) {
   // "Waiting…"); don't let the status poll clobber it back to "Enable".
   if (micRequestPending) return;
   const mic = status.microphone;
-  const micBtn = $("#perm-mic [data-mic-action]");
-  if (mic === 3) {
-    setBadge("perm-mic", "Granted", "ok");
-    micBtn.disabled = true;
-    micBtn.textContent = "Enabled";
-  } else if (mic === 2 || mic === 1) {
-    setBadge("perm-mic", "Denied", "warn");
+  const micBtn = setPerm("perm-mic", mic === 3, "[data-mic-action]");
+  if (mic !== 3 && micBtn) {
     micBtn.disabled = false;
-    micBtn.textContent = "Open Settings";
-    micBtn.dataset.mode = "settings";
-  } else {
-    setBadge("perm-mic", "Not set", "");
-    micBtn.disabled = false;
-    micBtn.textContent = "Enable";
-    micBtn.dataset.mode = "request";
+    // Denied/restricted can only be flipped in System Settings; not-set prompts.
+    const denied = mic === 2 || mic === 1;
+    micBtn.textContent = denied ? "Open Settings" : "Enable";
+    micBtn.dataset.mode = denied ? "settings" : "request";
   }
 }
 
@@ -151,7 +152,7 @@ async function refreshStatus() {
     if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
     if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
     // Reflect speech-model readiness on the Finish button (gated on Whisper).
-    updateFinish();
+    updateCta();
     updateTryCard();
   } catch (e) {
     /* transient; polled again shortly */
@@ -183,30 +184,10 @@ function startNeural() {
   });
 }
 
-// Whisper is the one model dictation can't work without, so the Finish button
-// waits for it — nobody exits onboarding into a speech-to-text feature that
-// silently does nothing. Qwen/Kokoro keep downloading in the background and
-// self-heal, so they don't gate finishing.
+// Whisper's live progress, used only to word the "Try it" card ("Preparing the
+// speech model…") until it's on disk. All three models gate the download step's
+// Continue (see updateCta); this object just tracks Whisper for that message.
 const whisper = { ready: false, failed: false, downloaded: 0, total: 0 };
-
-function updateFinish() {
-  const btn = $("#ob-finish");
-  if (!btn) return;
-  if (!invoke || whisper.ready) {
-    // Ready — or IPC unavailable, in which case never trap the user.
-    btn.disabled = false;
-    btn.textContent = "Finish";
-  } else if (whisper.failed) {
-    // Offline / download error — let them out; dictation self-heals on retry.
-    btn.disabled = false;
-    btn.textContent = "Finish anyway";
-  } else {
-    btn.disabled = true;
-    const pct =
-      whisper.total > 0 ? ` ${Math.round((whisper.downloaded / whisper.total) * 100)}%` : "…";
-    btn.textContent = `Downloading speech model${pct}`;
-  }
-}
 
 // Show/hide a row's Retry button (shown only when its download has failed).
 function setRetry(id, show) {
@@ -220,7 +201,7 @@ function markDownloadDone(id) {
   if (id === DOWNLOAD.WHISPER) {
     whisper.ready = true;
     whisper.failed = false;
-    updateFinish();
+    updateCta();
     updateTryCard(); // Whisper just landed — the "Try it" prompt can go live
   }
   const row = $(`#${DL_EL[id]}`);
@@ -230,7 +211,10 @@ function markDownloadDone(id) {
   fill.classList.add("done");
   fill.classList.remove("failed");
   setRetry(id, false);
-  $("[data-pct]", row).textContent = "Ready ✓";
+  const pct = $("[data-pct]", row);
+  pct.classList.add("done");
+  pct.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>Ready';
 }
 
 function renderDownload({ id, downloaded, total, failed }) {
@@ -241,10 +225,11 @@ function renderDownload({ id, downloaded, total, failed }) {
     whisper.downloaded = downloaded;
     whisper.total = total;
     whisper.failed = failed;
-    updateFinish();
+    updateCta();
   }
   const fill = $("[data-fill]", row);
   const pct = $("[data-pct]", row);
+  pct.classList.remove("done"); // re-download: drop any prior "✓ Ready"
   if (failed) {
     fill.classList.add("failed");
     pct.textContent = "Download failed";
@@ -260,7 +245,7 @@ function renderDownload({ id, downloaded, total, failed }) {
     if (frac >= 1) {
       markDownloadDone(id);
     } else {
-      pct.textContent = `${(frac * 100).toFixed(0)}% · ${fmtMB(downloaded)} / ${fmtMB(total)}`;
+      pct.textContent = `${fmtMB(downloaded)} / ${fmtMB(total)}`;
     }
   } else {
     // No Content-Length — show bytes pulled so far.
@@ -275,100 +260,100 @@ function fmtMB(bytes) {
 
 // --- Try it (guided first success, real hotkey) ------------------------------
 
-// "idle" (showing the prompt), "recording" (Fn held), or "transcribing". The
-// backend drives recording/transcribing/done via the TEST_DICTATION_RESULT
-// event; updateTryCard only touches the card while idle so it can't clobber a
-// live "Listening…" message.
+// "idle" (placeholder), "recording" (key held), "transcribing", or "done"
+// (transcript shown). The backend drives recording/transcribing/done via the
+// TEST_DICTATION_RESULT event; updateTryCard only touches the box while idle so
+// it can't clobber a live "Listening…" message or the shown transcript.
 let tryPhase = "idle";
 
-function setCard(headlineHtml, subText) {
-  $("#try-headline").innerHTML = headlineHtml;
-  $("#try-sub").textContent = subText;
-}
-
-// The idle prompt, reflecting what's actually possible right now: hold Fn (tap
-// live + model ready), wait for the model, or finish-to-activate Fn.
-function updateTryCard() {
-  if (tryPhase !== "idle") return;
+// Paint the record box: the main line, an optional status line under it, whether
+// the caret blinks (input-like states) and which state class to apply.
+function setCard(headline, status, { caret = false, cls = "" } = {}) {
   const card = $("#try-card");
   if (!card) return;
-  card.classList.remove("recording");
+  card.classList.remove("recording", "ok", "warn");
+  if (cls) card.classList.add(cls);
+  $("#try-headline").textContent = headline;
+  const cur = $("#try-cur");
+  if (cur) cur.hidden = !caret;
+  const st = $("#try-status");
+  if (st) {
+    st.textContent = status ?? "";
+    st.hidden = !status;
+  }
+}
+
+// The idle placeholder, reflecting what's actually possible right now: type-to-
+// dictate (tap live + model ready), wait for the model, or finish-to-activate Fn.
+function updateTryCard() {
+  const keyEl = $("#try-key");
+  if (keyEl) keyEl.textContent = TRIGGER_KBD[dictationTrigger] ?? "Fn";
+  if (tryPhase !== "idle" || !$("#try-card")) return;
   if (invoke && !fnTapActive) {
-    setCard("Fn turns on after setup", "Finish and Murmur restarts to activate it.");
+    setCard("Fn turns on after setup — finish and Murmur restarts to activate it.", null);
   } else if (invoke && !whisper.ready) {
-    setCard("Preparing the speech model…", "It downloads once, then runs offline.");
+    setCard("Preparing the speech model… it downloads once, then runs offline.", null);
   } else {
-    const key = TRIGGER_KBD[dictationTrigger] ?? "Fn";
-    setCard(`Hold <kbd>${key}</kbd> and speak`, "Release when you're done.");
+    setCard("Say “This is my first dictation with Murmur”", null, { caret: true });
   }
 }
 
 function renderTryEvent({ phase, text, heard_audio }) {
-  tryPhase = phase === "done" ? "idle" : phase;
-  const card = $("#try-card");
+  tryPhase = phase; // keep "done" so a status poll can't wipe the transcript
   if (phase === "recording") {
-    card.classList.add("recording");
-    setCard("Listening…", "Keep talking — release when you're done.");
-    $("#try-result").hidden = true;
+    setCard("Listening…", "Keep talking — release when you're done.", {
+      caret: true,
+      cls: "recording",
+    });
     return;
   }
   if (phase === "transcribing") {
-    card.classList.remove("recording");
     setCard("Transcribing…", "One moment.");
     return;
   }
-  // done
-  card.classList.remove("recording");
-  const result = $("#try-result");
-  const transcript = $("#try-transcript");
-  const status = $("#try-status");
-  result.hidden = false;
-  result.classList.remove("ok", "warn");
+  // done — leave the result on screen; the next key press flips to "Listening…"
   if (heard_audio && text) {
-    transcript.textContent = `“${text}”`;
-    status.textContent = "Heard you clearly — transcribed on-device. ✓";
-    result.classList.add("ok");
+    setCard(`“${text}”`, "Heard you clearly — transcribed on-device. ✓", { cls: "ok" });
   } else if (!heard_audio) {
-    transcript.textContent = "";
-    status.textContent =
-      "We couldn't hear anything. Check your mic is connected and Murmur has Microphone access (go Back a step), then hold Fn to try again.";
-    result.classList.add("warn");
+    setCard(
+      "We couldn't hear anything.",
+      "Check your mic is connected and Murmur has Microphone access (go Back a step), then hold your key to try again.",
+      { cls: "warn" },
+    );
   } else {
-    transcript.textContent = "";
-    status.textContent = "We didn't catch any words — hold Fn and try again, a little louder.";
-    result.classList.add("warn");
+    setCard("No words caught.", "Hold your key and try again, a little louder.", { cls: "warn" });
   }
-  updateTryCard(); // reset the prompt for another go
 }
 
 // --- Try read-aloud ----------------------------------------------------------
 
-// The idle prompt, showing the current read-aloud key. Rebuilds the headline
-// (so the <kbd> reflects a rebind) rather than just swapping text.
-function readPrompt(sub) {
+// Sync the sub's key pill and drive the status line under the sample. With no
+// headline the line is hidden (the reference shows nothing until you try it).
+function readPrompt(headline, sub, { active = false } = {}) {
+  const keyEl = $("#read-key");
+  if (keyEl) keyEl.textContent = prettyShortcut(ttsHotkey);
   const card = $("#read-card");
   if (!card) return;
   card.classList.remove("recording");
-  $("#read-headline").innerHTML = `Select the text, then press <kbd>${prettyShortcut(ttsHotkey)}</kbd>`;
-  $("#read-sub").textContent = sub ?? "You'll hear it read back.";
+  if (headline == null) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  $("#read-headline").textContent = headline;
+  $("#read-sub").textContent = sub ?? "";
+  if (active) card.classList.add("recording");
 }
 
 function renderReadEvent({ phase }) {
-  const card = $("#read-card");
-  if (!card) return;
   if (phase === "speaking") {
-    card.classList.add("recording");
-    $("#read-headline").textContent = "Playing…";
-    $("#read-sub").textContent = "You should hear it now.";
+    readPrompt("Playing…", "You should hear it now.", { active: true });
   } else if (phase === "unavailable") {
-    card.classList.remove("recording");
-    $("#read-headline").textContent = "Voice still downloading…";
-    $("#read-sub").textContent = "The neural voice is finishing its one-time download.";
+    readPrompt("Voice still downloading…", "The neural voice is finishing its one-time download.");
   } else if (phase === "select-first") {
-    readPrompt("Highlight the sample text above first.");
+    readPrompt("Highlight the sample text above first.", "Then press your read-aloud key.");
   } else {
-    // done
-    readPrompt("Heard it? Highlight and press again to replay.");
+    readPrompt("Heard it?", "Highlight and press again to replay.");
   }
 }
 
@@ -393,7 +378,7 @@ async function loadConfig() {
 // --- Finish ------------------------------------------------------------------
 
 async function finish() {
-  const btn = $("#ob-finish");
+  const btn = $("#ob-cta");
   btn.disabled = true;
   // Read-aloud defaults to Kokoro (already the config default); it's changed in
   // Settings, not here. The model keeps downloading via the startup prefetch
@@ -417,11 +402,31 @@ async function finish() {
 // --- Wiring ------------------------------------------------------------------
 
 function init() {
-  buildDots();
   goTo(0);
 
-  $$("[data-next]").forEach((b) => b.addEventListener("click", () => goTo(step + 1)));
-  $$("[data-back]").forEach((b) => b.addEventListener("click", () => goTo(step - 1)));
+  // Shared full-width CTA advances (or finishes on the last step); shared Back.
+  $("#ob-cta").addEventListener("click", () => {
+    if (step >= STEPS - 1) finish();
+    else goTo(step + 1);
+  });
+  $("#ob-back").addEventListener("click", () => goTo(step - 1));
+
+  // The window is chromeless (no title bar / close button), so Esc is the close
+  // hatch — except on the live test steps, where Esc cancels the in-flight
+  // dictation/read test instead of dismissing onboarding.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || step === TRY_STEP || step === READ_STEP) return;
+    invoke?.(CMD.CLOSE_ONBOARDING).catch(() => {});
+  });
+
+  // Report the highlighted sample so the read-aloud test can speak it. The
+  // backend can't synthesize Cmd+C for our own window (the trigger's Shift is
+  // still held → Cmd+Shift+C copies nothing), so it reads this instead.
+  document.addEventListener("selectionchange", () => {
+    if (step !== READ_STEP) return;
+    const text = window.getSelection?.().toString() ?? "";
+    invoke?.(CMD.REPORT_READ_SELECTION, { text }).catch(() => {});
+  });
 
   $("[data-open-ax]").addEventListener("click", () => {
     invoke?.(CMD.OPEN_ACCESSIBILITY_SETTINGS);
@@ -446,9 +451,6 @@ function init() {
       btn.textContent = "Enable";
     }
   });
-
-  $("#ob-finish").addEventListener("click", finish);
-  updateFinish(); // gate immediately so it never flashes an enabled "Finish"
 
   // Retry a failed download. spawn_download is guarded backend-side, so a
   // double-tap is harmless; reset the row optimistically for instant feedback.

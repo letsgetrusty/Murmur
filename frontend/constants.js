@@ -49,6 +49,7 @@ export const CMD = {
   CLOSE_ONBOARDING: "close_onboarding",
   SET_OVERLAY_POSITION: "set_overlay_position",
   SET_ONBOARDING_TEST: "set_onboarding_test",
+  REPORT_READ_SELECTION: "report_read_selection",
   SUSPEND_SHORTCUTS: "suspend_shortcuts",
   RESUME_SHORTCUTS: "resume_shortcuts",
   REQUEST_MICROPHONE: "request_microphone",

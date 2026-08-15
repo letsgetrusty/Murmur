@@ -36,6 +36,21 @@
   color: var(--error);
 }
 
+/* Keycap — a physical-key label used in onboarding cards and Settings hints. */
+kbd {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  min-width: 26px;
+  text-align: center;
+  padding: 3px 7px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-control);
+  color: var(--text);
+}
+
 /* Card ------------------------------------------------------------------- */
 .card {
   background: var(--bg-elev);
@@ -83,6 +98,13 @@
 .primary.small {
   padding: var(--control-pad-y) var(--space-xl);
   font-size: var(--fs-sm);
+}
+/* Full-width call-to-action (onboarding footer, modal actions). */
+.primary.block {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--radius);
+  font-size: 15px;
 }
 
 .small-btn {
