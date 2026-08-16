@@ -475,24 +475,31 @@ function fmtTime(ts) {
   );
 }
 
+const TRASH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6M10 11v6M14 11v6"/></svg>';
+
+// A history entry: the transcript, then a dim meta line (time · words · refined),
+// with Copy + a trash-icon delete on the right — matching the design reference.
 function renderHistoryRow(e) {
   const text = e.refined ?? e.raw;
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const meta = `${fmtTime(e.ts)} · ${words} word${words === 1 ? "" : "s"}${
+    e.refined ? " · refined" : ""
+  }`;
+
   const row = document.createElement("div");
-  row.className = "hist-row";
+  row.className = "row";
 
-  const head = document.createElement("div");
-  head.className = "hist-head";
-  const badge = document.createElement("span");
-  badge.className = `hist-badge ${e.refined ? "refined" : "raw"}`;
-  badge.textContent = e.refined ? "Refined" : "Raw";
-  const time = document.createElement("span");
-  time.className = "hist-time";
-  time.textContent = fmtTime(e.ts);
-  const spacer = document.createElement("span");
-  spacer.className = "hist-spacer";
+  const lbl = document.createElement("div");
+  lbl.className = "lbl";
+  const small = document.createElement("small");
+  small.textContent = meta;
+  lbl.append(document.createTextNode(text), small);
 
+  const actions = document.createElement("span");
+  actions.className = "hactions";
   const copy = document.createElement("button");
-  copy.className = "small-btn";
+  copy.className = "btn";
   copy.textContent = "Copy";
   copy.addEventListener("click", async () => {
     try {
@@ -502,8 +509,9 @@ function renderHistoryRow(e) {
     } catch (_) {}
   });
   const del = document.createElement("button");
-  del.className = "small-btn danger";
-  del.textContent = "Delete";
+  del.className = "btn ibtn";
+  del.title = "Delete";
+  del.innerHTML = TRASH_SVG;
   del.addEventListener("click", async () => {
     try {
       await invoke(CMD.DELETE_HISTORY, { id: e.id });
@@ -511,13 +519,9 @@ function renderHistoryRow(e) {
       if (!el("history-list").children.length) el("history-empty").hidden = false;
     } catch (_) {}
   });
-  head.append(badge, time, spacer, copy, del);
+  actions.append(copy, del);
 
-  const body = document.createElement("div");
-  body.className = "hist-text";
-  body.textContent = text;
-
-  row.append(head, body);
+  row.append(lbl, actions);
   return row;
 }
 

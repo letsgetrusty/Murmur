@@ -604,6 +604,7 @@ select.sel.invalid {
 /* ---- History ---- */
 .search {
   display: flex;
+  width: 100%; /* override components.css's fixed 200px */
   align-items: center;
   gap: 9px;
   padding: 9px 13px;
@@ -612,6 +613,28 @@ select.sel.invalid {
   border-radius: var(--radius-control);
   color: var(--state-idle);
   margin-bottom: 2px;
+}
+.hactions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.btn.ibtn {
+  padding: 6px 8px;
+  display: inline-grid;
+  place-items: center;
+}
+.btn.ibtn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+}
+.btn.ibtn:hover {
+  border-color: rgba(240, 86, 75, 0.5);
+}
+.btn.ibtn:hover svg {
+  color: var(--error);
 }
 .search svg {
   width: 14px;
