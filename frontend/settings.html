@@ -9,310 +9,298 @@
     <link rel="stylesheet" href="./settings.css" />
   </head>
   <body>
-    <div class="app">
-      <!-- Persistent update bar: spans the whole window, above every tab.
-           Collapsed = message + Install; the chevron reveals "what changed"
-           (release notes + provenance). Populated by initUpdate() in settings.js. -->
-      <div id="update-banner" class="update-banner" hidden>
-        <div class="update-row">
-          <span class="update-icon" aria-hidden="true">↑</span>
-          <span class="update-text" id="update-text"></span>
-          <button id="update-install" class="primary small">Install &amp; Restart</button>
-          <button
-            id="update-expand"
-            class="update-expand"
-            type="button"
-            aria-expanded="false"
-            aria-controls="update-details"
-            aria-label="Show what changed"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+    <div class="win">
+      <!-- SIDEBAR -->
+      <aside class="side">
+        <!-- Reserves room for the native traffic lights floating in the overlay
+             title bar (the window uses TitleBarStyle::Overlay). -->
+        <div class="side-top"></div>
+        <nav class="nav" id="nav">
+          <button class="nav-item active" data-p="home">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z"/></svg></span>
+            <span class="t">Home</span>
           </button>
-        </div>
-
-        <div id="update-details" class="update-details" hidden>
-          <div class="update-notes-head">
-            <h3 id="update-notes-title">What's new</h3>
-            <span class="update-range" id="update-range"></span>
-          </div>
-
-          <!-- Categorized release notes are injected here by renderUpdateNotes(). -->
-          <div id="update-notes" class="update-notes"></div>
-
-          <!-- Provenance is constant for anything the updater installs from the
-               public endpoint: minisign-verified before staging, Apple-notarized
-               by CI. The diff link's href is set per-release in JS. -->
-          <div class="update-cat update-verified">
-            <div class="update-cat-k">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-              Verified
-            </div>
-            <div class="update-provenance">
-              <span class="prov-item">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-                Signature verified <span class="prov-dim">(minisign)</span>
-              </span>
-              <span class="prov-item">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-                Notarized by Apple
-              </span>
-              <a id="update-diff" class="update-difflink" href="#" target="_blank" rel="noopener">
-                View the exact diff
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9" /></svg>
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <aside class="sidebar">
-        <div class="brand">
-          <svg class="brand-mark" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-            <g fill="currentColor">
-              <rect x="1.3" y="8.5" width="2.6" height="7" rx="1.3" />
-              <rect x="6" y="5.5" width="2.6" height="13" rx="1.3" />
-              <rect x="10.7" y="3" width="2.6" height="18" rx="1.3" />
-              <rect x="15.4" y="6.5" width="2.6" height="11" rx="1.3" />
-              <rect x="20.1" y="9" width="2.6" height="6" rx="1.3" />
-            </g>
-          </svg>
-          Murmur
-        </div>
-        <nav>
-          <button class="nav-item active" data-tab="history">History</button>
-          <button class="nav-item" data-tab="settings">Settings</button>
-          <button class="nav-item" data-tab="insights">Insights</button>
-          <button class="nav-item" data-tab="support">Support</button>
+          <button class="nav-item" data-p="dictation">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v4"/></svg></span>
+            <span class="t">Dictation</span>
+          </button>
+          <button class="nav-item" data-p="read">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+            <span class="t">Read-aloud</span>
+          </button>
+          <div class="sep"></div>
+          <button class="nav-item" data-p="shortcuts">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span>
+            <span class="t">Shortcuts</span>
+          </button>
+          <button class="nav-item" data-p="sound">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+            <span class="t">Sound</span>
+          </button>
+          <button class="nav-item" data-p="history">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></span>
+            <span class="t">History</span>
+          </button>
+          <div class="sep"></div>
+          <button class="nav-item" data-p="support">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="m5 5 4 4M15 15l4 4M19 5l-4 4M9 15l-4 4"/></svg></span>
+            <span class="t">Support</span>
+          </button>
         </nav>
+        <div class="side-foot">
+          <div class="brand">
+            <svg class="brand-mark" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><g fill="currentColor"><rect x="1.3" y="8.5" width="2.6" height="7" rx="1.3"/><rect x="6" y="5.5" width="2.6" height="13" rx="1.3"/><rect x="10.7" y="3" width="2.6" height="18" rx="1.3"/><rect x="15.4" y="6.5" width="2.6" height="11" rx="1.3"/><rect x="20.1" y="9" width="2.6" height="6" rx="1.3"/></g></svg>
+            <span>Murmur</span>
+            <span class="ver" id="brand-ver">v0.3.0</span>
+          </div>
+        </div>
       </aside>
 
-      <main class="content">
-        <!-- Settings -->
-        <section id="tab-settings" class="tab">
-          <header class="tab-head">
-            <h1>Settings</h1>
-            <span id="status" class="status"></span>
-          </header>
+      <!-- MAIN -->
+      <main class="main">
+        <div class="topbar" data-tauri-drag-region>
+          <span class="status" id="status"></span>
+          <span class="mic-wrap">
+            <svg class="mic-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v4"/></svg>
+            <select class="mic" id="mic" aria-label="Audio input"></select>
+          </span>
+        </div>
 
-          <div class="card">
-            <h2>Models</h2>
-            <p class="hint">All on-device — private, offline, no API key.</p>
-            <div class="row">
-              <span class="row-label">Dictation (speech → text)</span>
-              <select id="stt-model">
-                <option value="base.en">Whisper · base.en — fastest (~142 MB)</option>
-                <option value="small.en">Whisper · small.en — balanced (~466 MB)</option>
-                <option value="medium.en">Whisper · medium.en — most accurate (~1.5 GB)</option>
-              </select>
+        <!-- Update banner: content-scoped strip. Collapsed = message + Install;
+             the chevron reveals "what changed". Populated by initUpdate(). -->
+        <div id="update-banner" class="ubar" hidden>
+          <div class="ubar-row">
+            <span class="ubar-txt" id="update-text"></span>
+            <button id="update-install" class="btn accent">Install &amp; Restart</button>
+            <button id="update-expand" class="ubar-exp" type="button" aria-expanded="false" aria-controls="update-details" aria-label="Show what changed">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div id="update-details" class="ubar-notes" hidden>
+            <div class="un-head">
+              <h3 id="update-notes-title">What's new</h3>
+              <span class="un-range" id="update-range"></span>
             </div>
-            <div class="row">
-              <span class="row-label">Refinement (cleans up dictation)</span>
-              <select id="llm-model">
-                <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M — fastest (~1.1 GB)</option>
-                <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M — balanced (~1.2 GB)</option>
-                <option value="Qwen3-1.7B-Q8_0">Qwen3 1.7B · Q8_0 — most accurate (~1.8 GB)</option>
-              </select>
-            </div>
-            <div class="row">
-              <span class="row-label">Read-aloud (text → speech)</span>
-              <select id="tts-provider">
-                <option value="native">macOS built-in — fast, no download</option>
-                <option value="kokoro">Kokoro — neural, higher quality (~310 MB)</option>
-              </select>
-            </div>
-            <div id="engine-relaunch" class="engine-relaunch" hidden>
-              <span class="hint">Saved — relaunch to apply the new model.</span>
-              <button id="engine-relaunch-btn" class="primary small">Relaunch now</button>
+            <div id="update-notes" class="update-notes"></div>
+            <div class="un-cat verified">
+              <div class="un-cat-k">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Verified
+              </div>
+              <div class="un-prov">
+                <span class="pi2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Signature verified <span class="prov-dim">(minisign)</span></span>
+                <span class="pi2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Notarized by Apple</span>
+                <a id="update-diff" class="un-diff" href="#" target="_blank" rel="noopener">View diff <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+              </div>
             </div>
           </div>
+        </div>
 
-          <div class="card">
-            <h2>Audio</h2>
-            <div class="row">
-              <span class="row-label">Read-aloud voice</span>
-              <select id="voice"></select>
-            </div>
-            <div class="row">
-              <span class="row-label">Read-aloud speed</span>
-              <select id="speed"></select>
-            </div>
-            <div class="row">
-              <span class="row-label">Microphone (dictation input)</span>
-              <select id="mic"></select>
-            </div>
+        <div class="content">
+          <!-- Engine change needs a relaunch (backends build once at startup).
+               Lives above the panes so it's visible whichever engine you changed. -->
+          <div id="engine-relaunch" class="engine-relaunch" hidden>
+            <span class="hint">Saved — relaunch to apply the new model.</span>
+            <button id="engine-relaunch-btn" class="btn accent">Relaunch now</button>
           </div>
 
-          <div class="card">
-            <h2>Overlay</h2>
-            <div class="row">
-              <span class="row-label">Status pill position</span>
-              <select id="overlay-position">
-                <option value="bottom-center">Bottom center</option>
-                <option value="bottom-left">Bottom left</option>
-                <option value="bottom-right">Bottom right</option>
-                <option value="top-center">Top center</option>
-                <option value="top-left">Top left</option>
-                <option value="top-right">Top right</option>
-              </select>
+          <!-- HOME -->
+          <section class="pane active" id="tab-home">
+            <div class="stats">
+              <div class="st"><div class="n" id="ins-dictations">—</div><div class="k">Dictations</div></div>
+              <div class="st"><div class="n" id="ins-words">—</div><div class="k">Words dictated</div></div>
+              <div class="st"><div class="n" id="ins-time">—</div><div class="k">Time speaking</div></div>
+              <div class="st"><div class="n" id="ins-reads">—</div><div class="k">Read-alouds</div></div>
             </div>
-          </div>
 
-          <div class="card">
-            <div class="card-head">
-              <h2>Keyboard shortcuts</h2>
-              <button id="reset-hotkeys" class="small-btn">Reset to defaults</button>
+            <div class="sec-label">Get started</div>
+            <div class="card gs-card">
+              <div class="gs">
+                <span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v4"/></svg></span>
+                <div><div class="gt">Try dictation</div><div class="gd">Hold your dictate key and speak.</div></div>
+                <span class="kbd gs-kbd" id="gs-dictate-kbd">Fn</span>
+              </div>
+              <div class="gs">
+                <span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+                <div><div class="gt">Try read aloud</div><div class="gd">Highlight text and hear it spoken.</div></div>
+                <span class="kbd gs-kbd" id="gs-read-kbd">⌘⇧R</span>
+              </div>
+              <div class="gs clickable" data-goto="shortcuts">
+                <span class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span>
+                <div><div class="gt">Customize your shortcuts</div><div class="gd">Change the keys for dictation and read-aloud.</div></div>
+                <svg class="chev-r" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </div>
             </div>
-            <div class="row">
-              <span class="row-label">Dictate — hold to talk</span>
-              <select id="dictation-trigger">
-                <option value="Fn">Fn key</option>
-                <optgroup label="Dedicated key — no Fn needed">
-                  <option value="RightCtrl">Right ⌃ Control</option>
-                  <option value="RightAlt">Right ⌥ Option</option>
-                  <option value="RightCmd">Right ⌘ Command</option>
-                </optgroup>
-                <optgroup label="Any-side modifier — also fires with shortcuts">
-                  <option value="Ctrl">⌃ Control</option>
-                  <option value="Alt">⌥ Option</option>
-                  <option value="Cmd">⌘ Command</option>
-                </optgroup>
-              </select>
+
+            <div class="sec-label sec-label-row">Activity <span class="sec-note" id="ins-activity-note">Last 14 days</span></div>
+            <div class="card activity-card">
+              <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
             </div>
-            <div class="row">
-              <span class="row-label">Dictate — alternate shortcut (hold)</span>
-              <button class="recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+D"></button>
-            </div>
-            <div class="row">
-              <span class="row-label">Read selection aloud</span>
-              <button class="recorder" data-action="tts_toggle" data-default="CmdOrCtrl+Shift+R"></button>
-            </div>
-            <div class="row">
-              <span class="row-label">Cycle read-aloud speed</span>
-              <button class="recorder" data-action="tts_speed" data-default="Cmd+Ctrl+S"></button>
-            </div>
-            <div class="row">
-              <span class="row-label">Dictate &amp; refine</span>
-              <span class="refine-combo">
-                <span class="fn-badge" id="refine-trigger-badge">Fn</span>
-                <span class="plus">+</span>
-                <select id="refine-modifier">
-                  <option value="Ctrl">⌃ Control</option>
-                  <option value="Shift">⇧ Shift</option>
-                  <option value="Alt">⌥ Option</option>
-                  <option value="Cmd">⌘ Command</option>
+          </section>
+
+          <!-- DICTATION -->
+          <section class="pane" id="tab-dictation">
+            <div class="sec-label">Speech model</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Model<small>Whisper · runs locally with Metal</small></div>
+                <select class="sel" id="stt-model">
+                  <option value="base.en">Whisper base.en — 142 MB · fastest</option>
+                  <option value="small.en">Whisper small.en — 466 MB · balanced</option>
+                  <option value="medium.en">Whisper medium.en — 1.5 GB · most accurate</option>
                 </select>
-              </span>
+              </div>
+              <div class="row">
+                <div class="lbl">Dictation trigger<small>Rebind in <span class="ilink" data-goto="shortcuts">Shortcuts</span></small></div>
+                <span class="kbd" id="dict-trigger-kbd">Fn</span>
+              </div>
             </div>
-            <p id="hotkey-status" class="hint">
-              Hold your dictate key (or an alternate shortcut) to talk, then
-              release to paste. Add the modifier above to also <b>refine</b>
-              (clean up) your words. No Fn key? Pick a different dictate key above.
+
+            <div class="sec-label">Refinement</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Model<small>Local Qwen3 cleans filler + punctuation</small></div>
+                <select class="sel" id="llm-model">
+                  <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M — 1.1 GB · fastest</option>
+                  <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M — 1.2 GB · balanced</option>
+                  <option value="Qwen3-1.7B-Q8_0">Qwen3 1.7B · Q8_0 — 1.8 GB · most accurate</option>
+                </select>
+              </div>
+              <div class="row row-block">
+                <div class="lbl">Instructions</div>
+                <textarea class="ta" id="refine-prompt" rows="6" spellcheck="false"></textarea>
+              </div>
+              <div class="row">
+                <div class="lbl">Refinement trigger<small>Rebind in <span class="ilink" data-goto="shortcuts">Shortcuts</span></small></div>
+                <span class="combo"><span class="kbd" id="refine-trigger-kbd">Fn</span> <span class="plus-dim">+</span> <span class="kbd" id="refine-mod-kbd">Ctrl</span></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- READ-ALOUD -->
+          <section class="pane" id="tab-read">
+            <div class="sec-label">Voice</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Engine<small>Native (AVSpeech) or neural (Kokoro)</small></div>
+                <select class="sel" id="tts-provider">
+                  <option value="native">macOS built-in — fast, no download</option>
+                  <option value="kokoro">Kokoro — neural, higher quality (~310 MB)</option>
+                </select>
+              </div>
+              <div class="row"><div class="lbl">Voice</div><select class="sel" id="voice"></select></div>
+              <div class="row"><div class="lbl">Speed</div><select class="sel" id="speed"></select></div>
+            </div>
+
+            <div class="sec-label">Behavior</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">When nothing's selected<small>Reads whatever's on the clipboard instead</small></div>
+                <span class="row-static">Clipboard fallback</span>
+              </div>
+              <div class="row">
+                <div class="lbl">Read-aloud trigger<small>Rebind in <span class="ilink" data-goto="shortcuts">Shortcuts</span></small></div>
+                <span class="kbd" id="read-trigger-kbd">⌘⇧R</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- SHORTCUTS -->
+          <section class="pane" id="tab-shortcuts">
+            <div class="sec-label sec-label-row">Keyboard <span class="link" id="reset-hotkeys">Reset to defaults</span></div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Dictate — hold to talk<small>Fn, a right-side modifier, or a plain modifier</small></div>
+                <select class="sel" id="dictation-trigger">
+                  <option value="Fn">Fn key</option>
+                  <optgroup label="Dedicated key — no Fn needed">
+                    <option value="RightCtrl">Right ⌃ Control</option>
+                    <option value="RightAlt">Right ⌥ Option</option>
+                    <option value="RightCmd">Right ⌘ Command</option>
+                  </optgroup>
+                  <optgroup label="Any-side modifier — also fires with shortcuts">
+                    <option value="Ctrl">⌃ Control</option>
+                    <option value="Alt">⌥ Option</option>
+                    <option value="Cmd">⌘ Command</option>
+                  </optgroup>
+                </select>
+              </div>
+              <div class="row"><div class="lbl">Dictate — alternate shortcut (hold)</div><button class="rec recorder" data-action="dictate" data-default="CmdOrCtrl+Shift+D"></button></div>
+              <div class="row"><div class="lbl">Read selection aloud</div><button class="rec recorder" data-action="tts_toggle" data-default="CmdOrCtrl+Shift+R"></button></div>
+              <div class="row"><div class="lbl">Cycle read-aloud speed</div><button class="rec recorder" data-action="tts_speed" data-default="Cmd+Ctrl+S"></button></div>
+              <div class="row">
+                <div class="lbl">Dictate &amp; refine</div>
+                <span class="combo">
+                  <span class="kbd" id="refine-trigger-badge">Fn</span>
+                  <span class="plus-dim">+</span>
+                  <select class="sel sel-narrow" id="refine-modifier">
+                    <option value="Ctrl">⌃ Control</option>
+                    <option value="Shift">⇧ Shift</option>
+                    <option value="Alt">⌥ Option</option>
+                    <option value="Cmd">⌘ Command</option>
+                  </select>
+                </span>
+              </div>
+            </div>
+            <p id="hotkey-status" class="pane-note">
+              Hold your dictate key (or an alternate shortcut) to talk, then release
+              to paste. Add the modifier above to also <b>refine</b> (clean up) your
+              words. No Fn key? Pick a different dictate key above.
             </p>
+          </section>
 
-            <label class="field">
-              <span class="field-label">Refinement instructions</span>
-              <textarea id="refine-prompt" rows="9" spellcheck="false"></textarea>
-            </label>
-          </div>
-
-        </section>
-
-        <!-- Insights -->
-        <section id="tab-insights" class="tab">
-          <header class="tab-head">
-            <h1>Insights</h1>
-          </header>
-
-          <div class="stat-grid">
-            <div class="stat">
-              <span class="stat-label">Dictations</span>
-              <span class="stat-value" id="ins-dictations">—</span>
-              <span class="stat-sub" id="ins-dictations-sub"></span>
+          <!-- SOUND -->
+          <section class="pane" id="tab-sound">
+            <div class="sec-label">Cues</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Start / stop cue<small>A subtle tick when dictation begins and ends</small></div>
+                <button class="toggle" id="sound-cue" type="button" role="switch" aria-checked="false" aria-label="Start/stop cue"></button>
+              </div>
             </div>
-            <div class="stat">
-              <span class="stat-label">Words dictated</span>
-              <span class="stat-value" id="ins-words">—</span>
-              <span class="stat-sub" id="ins-words-sub"></span>
+            <div class="sec-label">Status pill</div>
+            <div class="card">
+              <div class="row">
+                <div class="lbl">Position<small>Where the floating status pill appears</small></div>
+                <select class="sel" id="overlay-position">
+                  <option value="bottom-center">Bottom center</option>
+                  <option value="bottom-left">Bottom left</option>
+                  <option value="bottom-right">Bottom right</option>
+                  <option value="top-center">Top center</option>
+                  <option value="top-left">Top left</option>
+                  <option value="top-right">Top right</option>
+                </select>
+              </div>
             </div>
-            <div class="stat">
-              <span class="stat-label">Time speaking</span>
-              <span class="stat-value" id="ins-time">—</span>
-              <span class="stat-sub" id="ins-time-sub"></span>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Read-alouds</span>
-              <span class="stat-value" id="ins-reads">—</span>
-              <span class="stat-sub" id="ins-reads-sub"></span>
-            </div>
-          </div>
+          </section>
 
-          <div class="card">
-            <div class="card-head">
-              <h2>Activity</h2>
-              <span class="hint" id="ins-activity-note">Last 14 days</span>
+          <!-- HISTORY -->
+          <section class="pane" id="tab-history">
+            <div class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input id="history-search" type="search" placeholder="Search history" autocomplete="off" spellcheck="false" />
             </div>
-            <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
-          </div>
-
-        </section>
-
-        <!-- Support -->
-        <section id="tab-support" class="tab">
-          <header class="tab-head">
-            <h1>Support</h1>
-          </header>
-
-          <div class="card">
-            <h2>About</h2>
-            <div class="row">
-              <span class="row-label">Version</span>
-              <span id="app-version" class="support-value">—</span>
+            <div class="sec-label sec-label-row">Dictations <span class="link danger" id="history-clear">Clear all</span></div>
+            <div class="card" id="history-card"><div id="history-list"></div></div>
+            <div id="history-empty" class="empty" hidden>
+              <p>No dictations yet.</p>
+              <p class="hint">Dictate with Murmur and your history shows up here (stored locally).</p>
             </div>
-          </div>
+          </section>
 
-          <div class="card">
-            <h2>Feedback</h2>
-            <p class="hint">
-              Found a bug or have a feature idea? Open an issue on GitHub — it
-              genuinely helps.
-            </p>
-            <div class="row">
-              <span class="row-label">Report a bug or request a feature</span>
-              <button id="report-issue" class="primary small">Open GitHub Issues</button>
+          <!-- SUPPORT -->
+          <section class="pane" id="tab-support">
+            <div class="sec-label">About</div>
+            <div class="card">
+              <div class="row"><div class="lbl">Version</div><span class="ver-val" id="app-version">—</span></div>
             </div>
-            <div class="row">
-              <span class="row-label">Source code</span>
-              <button id="view-github" class="small-btn">View on GitHub</button>
+            <div class="sec-label">Feedback</div>
+            <div class="card">
+              <div class="row"><div class="lbl">Report a bug or request a feature<small>Found a bug or an idea? Opening an issue genuinely helps.</small></div><button class="btn feed-btn" id="report-issue">Open GitHub Issues</button></div>
+              <div class="row"><div class="lbl">Source code</div><button class="btn feed-btn" id="view-github">View on GitHub</button></div>
             </div>
-          </div>
-        </section>
-
-        <!-- History -->
-        <section id="tab-history" class="tab active">
-          <header class="tab-head">
-            <h1>History</h1>
-            <div class="actions">
-              <input
-                id="history-search"
-                class="search"
-                type="search"
-                placeholder="Search…"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button id="history-clear" class="small-btn danger">Clear all</button>
-            </div>
-          </header>
-          <div id="history-list"></div>
-          <div id="history-empty" class="empty" hidden>
-            <p>No dictations yet.</p>
-            <p class="hint">Dictate with Murmur and your history shows up here (stored locally).</p>
-          </div>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 

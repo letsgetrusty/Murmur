@@ -23,7 +23,7 @@ describe("constants integrity", () => {
 
   it("TABS covers exactly the settings tabs", () => {
     expect(new Set(Object.values(TABS))).toEqual(
-      new Set(["history", "insights", "settings", "support"])
+      new Set(["home", "dictation", "read", "shortcuts", "sound", "history", "support"])
     );
   });
 });

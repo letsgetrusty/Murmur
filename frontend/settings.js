@@ -3,6 +3,7 @@
 
 import { EVENTS, CMD, TABS } from "./constants.js";
 import { bindRecorder, cancelActiveRecorder } from "./recorder.js";
+import { prettyShortcut } from "./shortcuts.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -10,6 +11,28 @@ const invoke = window.__TAURI__?.core?.invoke;
 let currentConfig = null;
 
 const el = (id) => document.getElementById(id);
+const setText = (id, text) => {
+  const e = el(id);
+  if (e) e.textContent = text;
+};
+
+// Short glyphs for the read-only "trigger" references shown on Dictation /
+// Read-aloud / Home (the real bindings are edited on Shortcuts). TRIGGER_BADGE
+// (defined below) maps the hold-to-talk trigger; these map the refine modifier.
+const MOD_LABEL = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", Cmd: "⌘" };
+
+// Repaint every read-only trigger chip from the live config.
+function syncTriggerRefs() {
+  const trig = TRIGGER_BADGE[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
+  const mod = MOD_LABEL[currentConfig?.refine_modifier ?? "Ctrl"] ?? "⌃";
+  const read = prettyShortcut(currentConfig?.hotkey_tts ?? "CmdOrCtrl+Shift+R");
+  setText("dict-trigger-kbd", trig);
+  setText("refine-trigger-kbd", trig);
+  setText("refine-mod-kbd", mod);
+  setText("read-trigger-kbd", read);
+  setText("gs-dictate-kbd", trig);
+  setText("gs-read-kbd", read);
+}
 
 // --- Settings tab: config load + engine switches -----------------------------
 
@@ -100,6 +123,7 @@ async function loadConfig() {
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("overlay-position").value = currentConfig.overlay_position ?? "bottom-center";
+    syncTriggerRefs();
   } catch (e) {
     setStatus(`Load failed: ${e}`, "error");
   }
@@ -178,6 +202,7 @@ async function loadOptions() {
   voice.value = currentConfig.tts_voice_id;
 
   fillMics(opts.mics);
+  const mic = el("mic");
 
   speed.addEventListener("change", (e) =>
     invoke(CMD.SET_SPEED, { speed: parseFloat(e.target.value) })
@@ -209,9 +234,15 @@ async function loadOptions() {
       currentConfig.tts_speed = cfg.tts_speed;
       currentConfig.tts_voice_id = cfg.tts_voice_id;
       currentConfig.mic_name = cfg.mic_name;
+      // A tray/hotkey rebind can also move the read-aloud chord or dictate
+      // trigger — keep the read-only trigger chips in sync too.
+      currentConfig.hotkey_tts = cfg.hotkey_tts;
+      currentConfig.dictation_trigger = cfg.dictation_trigger;
+      currentConfig.refine_modifier = cfg.refine_modifier;
       el("speed").value = String(cfg.tts_speed);
       el("voice").value = cfg.tts_voice_id;
       el("mic").value = cfg.mic_name ?? "";
+      syncTriggerRefs();
     } catch (_) {
       /* transient */
     }
@@ -267,6 +298,7 @@ function initHotkeys() {
       onCapture: async (shortcut) => {
         await invoke(CMD.SET_HOTKEY, { action, shortcut });
         currentConfig[HOTKEY_FIELD[action]] = shortcut; // persist for restore
+        syncTriggerRefs(); // read-aloud chip reflects a tts_toggle rebind
       },
       // Suspend chords while capturing so a bound combo reaches the recorder
       // instead of firing; resume once the new binding is registered.
@@ -287,6 +319,7 @@ function initHotkeys() {
         await invoke(CMD.SET_DICTATION_TRIGGER, { trigger });
         currentConfig.dictation_trigger = trigger; // selected value confirms it
         syncTriggerBadge();
+        syncTriggerRefs();
       } catch (err) {
         dt.value = currentConfig.dictation_trigger ?? "Fn";
         flashInvalid(dt);
@@ -303,6 +336,7 @@ function initHotkeys() {
       try {
         await invoke(CMD.SET_REFINE_MODIFIER, { modifier });
         currentConfig.refine_modifier = modifier; // selected value confirms it
+        syncTriggerRefs();
       } catch (err) {
         rm.value = currentConfig.refine_modifier ?? "Ctrl";
         flashInvalid(rm);
@@ -329,6 +363,7 @@ function initHotkeys() {
         if (dt) dt.value = currentConfig.dictation_trigger ?? "Fn";
         if (rm) rm.value = currentConfig.refine_modifier ?? "Ctrl";
         syncTriggerBadge();
+        syncTriggerRefs();
         setStatus("Key bindings reset to defaults ✓", "ok");
         setTimeout(() => setStatus(""), 1500);
       } catch (err) {
@@ -377,24 +412,10 @@ function renderInsights() {
   const u = localUsage || {};
   const s = insStats || { total: 0, refined: 0, words: 0, days: [] };
 
-  const dictations = u.stt_count || 0;
-  el("ins-dictations").textContent = dictations.toLocaleString();
-  el("ins-dictations-sub").textContent = (u.refine_count || 0)
-    ? `${(u.refine_count || 0).toLocaleString()} refined`
-    : "";
-
-  el("ins-words").textContent = (s.words || 0).toLocaleString();
-  el("ins-words-sub").textContent = s.total ? `~${Math.round(s.words / s.total)} per dictation` : "";
-
-  el("ins-time").textContent = fmtDuration(u.stt_seconds);
-  el("ins-time-sub").textContent = dictations
-    ? `~${Math.round((u.stt_seconds || 0) / dictations)}s each`
-    : "";
-
-  el("ins-reads").textContent = (u.tts_count || 0).toLocaleString();
-  el("ins-reads-sub").textContent = (u.tts_chars || 0)
-    ? `${(u.tts_chars || 0).toLocaleString()} chars`
-    : "";
+  setText("ins-dictations", (u.stt_count || 0).toLocaleString());
+  setText("ins-words", (s.words || 0).toLocaleString());
+  setText("ins-time", fmtDuration(u.stt_seconds));
+  setText("ins-reads", (u.tts_count || 0).toLocaleString());
 
   renderActivity(s);
 }
@@ -544,7 +565,7 @@ function initHistory() {
   // Refresh live when a new dictation lands and we're on the relevant tab.
   window.__TAURI__?.event?.listen?.(EVENTS.HISTORY, () => {
     if (document.getElementById(`tab-${TABS.HISTORY}`)?.classList.contains("active")) loadHistory();
-    if (document.getElementById(`tab-${TABS.INSIGHTS}`)?.classList.contains("active")) loadInsights();
+    if (document.getElementById(`tab-${TABS.HOME}`)?.classList.contains("active")) loadInsights();
   });
 }
 
@@ -557,9 +578,10 @@ async function loadSupport() {
   if (!invoke) return;
   try {
     const version = await invoke(CMD.APP_VERSION);
-    el("app-version").textContent = `v${version}`;
+    setText("app-version", `v${version}`);
+    setText("brand-ver", `v${version}`);
   } catch (_) {
-    el("app-version").textContent = "unknown";
+    setText("app-version", "unknown");
   }
 }
 
@@ -569,17 +591,45 @@ function initSupport() {
   el("view-github")?.addEventListener("click", () => open(REPO_URL));
 }
 
+// --- Sound (dictation start/stop cue) ----------------------------------------
+
+function paintSoundCue() {
+  const t = el("sound-cue");
+  if (!t) return;
+  const on = currentConfig?.dictation_sound ?? true;
+  t.classList.toggle("on", on);
+  t.setAttribute("aria-checked", String(on));
+}
+
+function initSound() {
+  const t = el("sound-cue");
+  if (!t) return;
+  paintSoundCue();
+  t.addEventListener("click", async () => {
+    if (!invoke || !currentConfig) return;
+    const next = { ...currentConfig, dictation_sound: !currentConfig.dictation_sound };
+    try {
+      await invoke(CMD.SAVE_CONFIG, { config: next });
+      currentConfig = next;
+      paintSoundCue();
+    } catch (e) {
+      setStatus(`Save failed: ${e}`, "error");
+    }
+  });
+}
+
 // --- Tabs & init --------------------------------------------------------------
 
 function switchTab(name) {
   for (const b of document.querySelectorAll(".nav-item")) {
-    b.classList.toggle("active", b.dataset.tab === name);
+    b.classList.toggle("active", b.dataset.p === name);
   }
-  for (const t of document.querySelectorAll(".tab")) {
+  for (const t of document.querySelectorAll(".pane")) {
     t.classList.toggle("active", t.id === `tab-${name}`);
   }
+  document.querySelector(".content").scrollTop = 0;
   if (name === TABS.HISTORY) loadHistory();
-  if (name === TABS.INSIGHTS) loadInsights();
+  if (name === TABS.HOME) loadInsights();
 }
 
 // --- UI zoom (Cmd +/-/0) ------------------------------------------------------
@@ -772,7 +822,12 @@ function initUpdate() {
 async function init() {
   initZoom();
   for (const b of document.querySelectorAll(".nav-item")) {
-    b.addEventListener("click", () => switchTab(b.dataset.tab));
+    b.addEventListener("click", () => switchTab(b.dataset.p));
+  }
+  // In-content links that jump to a tab (Home's "Customize shortcuts", the
+  // "Rebind in Shortcuts" hints on Dictation/Read-aloud).
+  for (const e of document.querySelectorAll("[data-goto]")) {
+    e.addEventListener("click", () => switchTab(e.dataset.goto));
   }
   for (const id of ["stt-model", "llm-model", "tts-provider"]) {
     el(id).addEventListener("change", saveEngines);
@@ -785,6 +840,7 @@ async function init() {
   await loadConfig();
   await loadOptions();
   initHotkeys();
+  initSound();
   initUsage();
   initHistory();
   initUpdate();
@@ -802,9 +858,9 @@ async function init() {
 
   // Populate whichever tab is active on launch (switchTab handles this on click,
   // but the landing tab is set in markup and never goes through it).
-  const landing = document.querySelector(".nav-item.active")?.dataset.tab;
+  const landing = document.querySelector(".nav-item.active")?.dataset.p;
   if (landing === TABS.HISTORY) loadHistory();
-  else if (landing === TABS.INSIGHTS) loadInsights();
+  else if (landing === TABS.HOME) loadInsights();
 }
 
 if (document.readyState === "loading") {

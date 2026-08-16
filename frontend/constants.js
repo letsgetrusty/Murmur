@@ -60,9 +60,12 @@ export const CMD = {
 // Settings-window tabs: the value is both the nav `data-tab` and the
 // `#tab-<value>` section id.
 export const TABS = {
+  HOME: "home",
+  DICTATION: "dictation",
+  READ: "read",
+  SHORTCUTS: "shortcuts",
+  SOUND: "sound",
   HISTORY: "history",
-  INSIGHTS: "insights",
-  SETTINGS: "settings",
   SUPPORT: "support",
 };
 

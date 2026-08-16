@@ -586,6 +586,11 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
     match WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
         .title("Murmur")
+        // Unified-sidebar look (matches the design reference): a transparent
+        // overlay title bar so the native traffic lights float over the sidebar
+        // top with no title strip. The sidebar reserves top room for them.
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
         .inner_size(900.0, 640.0)
         .min_inner_size(640.0, 460.0)
         // Cap the width so the content column (max 820px, see settings.css .tab)
