@@ -72,6 +72,11 @@ body {
   color: var(--text);
   font-weight: 600;
 }
+/* components.css draws a flush left accent bar on the active nav item; the
+   reference uses the tinted row + accent icon instead, so suppress it. */
+.nav-item.active::before {
+  display: none;
+}
 .nav-item .ic {
   width: 26px;
   height: 26px;
@@ -157,9 +162,11 @@ body {
 select.mic {
   -webkit-appearance: none;
   appearance: none;
+  min-width: 0;
   max-width: 210px;
   padding: 5px 20px 5px 2px;
   border: 0;
+  box-shadow: none;
   background: transparent
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23978d83' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>")
     no-repeat right 2px center;

@@ -591,7 +591,10 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         // top with no title strip. The sidebar reserves top room for them.
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .inner_size(900.0, 640.0)
+        // No fullscreen/zoom for a settings window; the green button is also
+        // hidden below so the traffic lights read red + yellow (matches the ref).
+        .maximizable(false)
+        .inner_size(960.0, 680.0)
         .min_inner_size(640.0, 460.0)
         // Cap the width so the content column (max 820px, see settings.css .tab)
         // always fills the pane — past this the window would just grow empty
@@ -605,6 +608,24 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         .build()
     {
         Ok(win) => {
+            // Hide the green zoom button so the traffic lights read red + yellow
+            // only, matching the design reference.
+            #[cfg(target_os = "macos")]
+            if let Ok(ns_window) = win.ns_window() {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                // SAFETY: `ns_window` is the live NSWindow* Tauri just created;
+                // `standardWindowButton:`/`setHidden:` are standard AppKit
+                // selectors on it. Runs on the main thread (window creation).
+                unsafe {
+                    let ns_window = ns_window as *mut AnyObject;
+                    // standardWindowButton: NSWindowButton::ZoomButton (= 2)
+                    let zoom: *mut AnyObject = msg_send![ns_window, standardWindowButton: 2usize];
+                    if !zoom.is_null() {
+                        let _: () = msg_send![zoom, setHidden: true];
+                    }
+                }
+            }
             let _ = win.set_focus();
         }
         Err(e) => log::warn!("failed to create settings window: {e}"),
