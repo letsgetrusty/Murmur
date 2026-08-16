@@ -57,7 +57,7 @@ body {
   pointer-events: none;
   z-index: 0;
 }
-.dot,
+.pill-ind,
 .label {
   position: relative;
   z-index: 1;
@@ -70,19 +70,20 @@ body {
   pointer-events: none;
 }
 
-.dot {
-  /* position:relative anchors the recording pulse ring (.dot::before, which is
-     inset:0 absolute) to the dot itself — without it the ring falls back to the
-     nearest positioned ancestor and only lands correctly by accident of the
-     recording transform. */
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--state-idle);
-  box-shadow: none;
-  transition: background 160ms ease, box-shadow 160ms ease;
+/* Leading indicator: a per-state glyph (design "1A"). main.js swaps its
+   contents on each state change — a waveform, a spinner, or an SVG icon. Accent
+   by default; neutral for "done", red for "error" (set per-state below). */
+.pill-ind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+  color: var(--accent);
+}
+.pill-ind svg {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .label {
@@ -92,73 +93,57 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Recording — orange (accent) dot that grows *and* glows brighter with the live
-   audio level, so you can see it tracking your voice. The --audio-level custom
-   property is updated by main.js from the "audio:level" Tauri event (~15 Hz),
-   already curved + smoothed. The .dot::before ring keeps a gentle idle pulse so
-   it still reads as "recording" during silence. */
-.pill[data-state="recording"] .dot {
-  background: var(--state-recording);
-  box-shadow: 0 0 calc(6px + var(--audio-level, 0) * 14px)
-    rgba(var(--accent-rgb), calc(0.4 + var(--audio-level, 0) * 0.5));
-  transform: scale(calc(1 + var(--audio-level, 0) * 0.9));
-  transition: transform 90ms ease-out, box-shadow 90ms ease-out;
+/* Recording — a live waveform in accent. Each bar's height is set directly by
+   main.js from the mic level (a scrolling history of the "audio:level" event,
+   ~15 Hz), so it tracks your actual voice rather than playing a canned loop.
+   The transition smooths between samples; the 12% baseline keeps a faint
+   "listening" wave during silence. */
+.wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 15px;
 }
-.pill[data-state="recording"] .dot::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  animation: pulse 1.4s ease-in-out infinite;
-  background: rgba(var(--accent-rgb), 0.45);
-  z-index: -1;
+.wave i {
+  width: 2.5px;
+  height: 12%;
+  border-radius: 2px;
+  background: currentColor;
+  transition: height 80ms ease-out;
 }
 
-/* Preparing — a required model is still downloading. Pulsing dot + the
-   .pill-fill bar shows download progress; roomier so the label isn't clipped. */
+/* Transcribing + refining — an accent spinner ring (the label distinguishes
+   them). */
+.spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Preparing — a required model is still downloading. The .pill-fill bar shows
+   download progress; roomier so the label isn't clipped. */
 .pill[data-state="preparing"] {
   max-width: 340px;
 }
-.pill[data-state="preparing"] .dot {
-  background: var(--state-transcribing);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
-  animation: pulse 1s ease-in-out infinite;
+
+/* Done — neutral check (Murmur never signals success with green). */
+.pill[data-state="done"] .pill-ind {
+  color: var(--state-done);
 }
 
-/* Transcribing — pulsing dot (mid-gray). */
-.pill[data-state="transcribing"] .dot {
-  background: var(--state-transcribing);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
-  animation: pulse 0.7s ease-in-out infinite;
-}
-
-/* Refining (Fn+Ctrl) — pulsing dot, brighter than transcribing; the label
-   text is what actually distinguishes the two states. */
-.pill[data-state="refining"] .dot {
-  background: var(--state-refining);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
-  animation: pulse 0.7s ease-in-out infinite;
-}
-
-/* Done — solid white. */
-.pill[data-state="done"] .dot {
-  background: var(--state-done);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
-}
-
-/* Error — solid amber/red, label tinted. Roomier than the default pill so
-   longer messages (e.g. "model still downloading (45%)…") aren't clipped. */
+/* Error — red-tinted capsule + red glyph. Roomier so longer messages
+   (e.g. "model still downloading (45%)…") aren't clipped. */
 .pill[data-state="error"] {
   background: var(--overlay-error-bg);
   color: var(--overlay-error-text);
   max-width: 380px;
 }
-.pill[data-state="error"] .dot {
-  background: var(--state-error);
-  box-shadow: 0 0 8px rgba(240, 86, 75, 0.6);
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1);    opacity: 1;   }
-  50%      { transform: scale(1.25); opacity: 0.6; }
+.pill[data-state="error"] .pill-ind {
+  color: var(--state-error);
 }
