@@ -69,6 +69,9 @@ pub struct Config {
     /// Play a subtle start/stop sound when dictation begins/ends. On by default.
     #[serde(default = "default_dictation_sound")]
     pub dictation_sound: bool,
+    /// Read-aloud reads the clipboard when nothing is selected. On by default.
+    #[serde(default = "default_dictation_sound")]
+    pub tts_clipboard_fallback: bool,
     /// Screen anchor for the status overlay pill. One of "bottom-center"
     /// (default), "bottom-left", "bottom-right", "top-center", "top-left",
     /// "top-right" — lets the user move it off a docked app row / the Dock.
@@ -156,6 +159,7 @@ impl Default for Config {
             llm_model: default_llm_model(),
             onboarding_done: false,
             dictation_sound: default_dictation_sound(),
+            tts_clipboard_fallback: default_dictation_sound(),
             overlay_position: default_overlay_position(),
         }
     }

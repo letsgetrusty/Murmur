@@ -130,7 +130,7 @@ body {
   min-height: 0;
 }
 .topbar {
-  height: 44px;
+  height: 46px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -138,6 +138,10 @@ body {
   padding: 0 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: linear-gradient(#1a1613, #171310);
+}
+.tgl {
+  display: inline-flex;
+  color: var(--state-idle);
 }
 .status {
   font-size: 12px;
@@ -164,13 +168,13 @@ select.mic {
   appearance: none;
   min-width: 0;
   max-width: 210px;
-  padding: 5px 20px 5px 2px;
+  padding: 5px 15px 5px 2px;
   border: 0;
   box-shadow: none;
   background: transparent
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23978d83' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>")
-    no-repeat right 2px center;
-  background-size: 11px;
+    no-repeat right 1px center;
+  background-size: 12px;
   color: var(--text-dim);
   font-family: var(--font-sans);
   font-size: 12.5px;
@@ -341,6 +345,30 @@ select.sel.invalid {
   left: 18px;
 }
 
+.seg {
+  display: inline-flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  border-radius: 6px;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
 .rec {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -486,7 +514,7 @@ select.sel.invalid {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 0;
+  padding: 12px 4px;
 }
 .gs + .gs {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -519,9 +547,6 @@ select.sel.invalid {
 .gs.clickable {
   cursor: pointer;
   border-radius: 8px;
-  margin: 0 -8px;
-  padding-left: 8px;
-  padding-right: 8px;
 }
 .gs.clickable:hover {
   background: rgba(255, 255, 255, 0.05);

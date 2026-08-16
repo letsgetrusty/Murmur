@@ -1118,13 +1118,20 @@ pub fn tts_toggle<R: Runtime>(app: &AppHandle<R>) {
         idle_after(app.clone(), Duration::from_millis(3000));
         return;
     }
-    // Prefer the live selection; fall back to the clipboard when there's none,
-    // so text you can't mouse-select (a mouse-capturing terminal TUI, etc.) can
-    // still be read after copying it with the app's own command.
+    // Prefer the live selection; fall back to the clipboard when there's none
+    // (unless the user turned that off in Settings), so text you can't
+    // mouse-select (a mouse-capturing terminal TUI, etc.) can still be read after
+    // copying it with the app's own command.
+    let clipboard_fallback = state
+        .config
+        .lock()
+        .map(|c| c.tts_clipboard_fallback)
+        .unwrap_or(true);
     let sel_t0 = std::time::Instant::now();
     let text = match selection::capture_selection() {
         Ok(Some(text)) => Some(text),
-        Ok(None) => selection::clipboard_text(),
+        Ok(None) if clipboard_fallback => selection::clipboard_text(),
+        Ok(None) => None,
         Err(e) => {
             log::warn!("tts: selection capture failed: {e}");
             show_overlay(app);

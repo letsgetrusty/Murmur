@@ -59,6 +59,7 @@
       <!-- MAIN -->
       <main class="main">
         <div class="topbar" data-tauri-drag-region>
+          <span class="tgl" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></span>
           <span class="status" id="status"></span>
           <span class="mic-wrap">
             <svg class="mic-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v4"/></svg>
@@ -107,10 +108,10 @@
           <!-- HOME -->
           <section class="pane active" id="tab-home">
             <div class="stats">
-              <div class="st"><div class="n" id="ins-dictations">—</div><div class="k">Dictations</div></div>
+              <div class="st"><div class="n" id="ins-wpm">—</div><div class="k">Avg WPM</div></div>
               <div class="st"><div class="n" id="ins-words">—</div><div class="k">Words dictated</div></div>
-              <div class="st"><div class="n" id="ins-time">—</div><div class="k">Time speaking</div></div>
-              <div class="st"><div class="n" id="ins-reads">—</div><div class="k">Read-alouds</div></div>
+              <div class="st"><div class="n" id="ins-dictations">—</div><div class="k">Dictations</div></div>
+              <div class="st"><div class="n" id="ins-saved">—</div><div class="k">Time saved</div></div>
             </div>
 
             <div class="sec-label">Get started</div>
@@ -131,11 +132,6 @@
                 <svg class="chev-r" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
               </div>
             </div>
-
-            <div class="sec-label sec-label-row">Activity <span class="sec-note" id="ins-activity-note">Last 14 days</span></div>
-            <div class="card activity-card">
-              <div class="activity" id="ins-activity" role="img" aria-label="Dictations per day, last 14 days"></div>
-            </div>
           </section>
 
           <!-- DICTATION -->
@@ -145,9 +141,9 @@
               <div class="row">
                 <div class="lbl">Model<small>Whisper · runs locally with Metal</small></div>
                 <select class="sel" id="stt-model">
-                  <option value="base.en">Whisper base.en — 142 MB · fastest</option>
-                  <option value="small.en">Whisper small.en — 466 MB · balanced</option>
-                  <option value="medium.en">Whisper medium.en — 1.5 GB · most accurate</option>
+                  <option value="base.en">Whisper base.en · 142 MB</option>
+                  <option value="small.en">Whisper small.en · 466 MB</option>
+                  <option value="medium.en">Whisper medium.en · 1.5 GB</option>
                 </select>
               </div>
               <div class="row">
@@ -161,9 +157,9 @@
               <div class="row">
                 <div class="lbl">Model<small>Local Qwen3 cleans filler + punctuation</small></div>
                 <select class="sel" id="llm-model">
-                  <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M — 1.1 GB · fastest</option>
-                  <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M — 1.2 GB · balanced</option>
-                  <option value="Qwen3-1.7B-Q8_0">Qwen3 1.7B · Q8_0 — 1.8 GB · most accurate</option>
+                  <option value="Qwen3-1.7B-Q4_K_M">Qwen3 1.7B · Q4_K_M</option>
+                  <option value="Qwen3-1.7B-Q5_K_M">Qwen3 1.7B · Q5_K_M</option>
+                  <option value="Qwen3-1.7B-Q8_0">Qwen3 1.7B · Q8_0</option>
                 </select>
               </div>
               <div class="row row-block">
@@ -184,19 +180,19 @@
               <div class="row">
                 <div class="lbl">Engine<small>Native (AVSpeech) or neural (Kokoro)</small></div>
                 <select class="sel" id="tts-provider">
-                  <option value="native">macOS built-in — fast, no download</option>
-                  <option value="kokoro">Kokoro — neural, higher quality (~310 MB)</option>
+                  <option value="native">macOS · native</option>
+                  <option value="kokoro">Kokoro · neural</option>
                 </select>
               </div>
               <div class="row"><div class="lbl">Voice</div><select class="sel" id="voice"></select></div>
-              <div class="row"><div class="lbl">Speed</div><select class="sel" id="speed"></select></div>
+              <div class="row"><div class="lbl">Speed</div><span class="seg" id="speed-seg"></span></div>
             </div>
 
             <div class="sec-label">Behavior</div>
             <div class="card">
               <div class="row">
-                <div class="lbl">When nothing's selected<small>Reads whatever's on the clipboard instead</small></div>
-                <span class="row-static">Clipboard fallback</span>
+                <div class="lbl">Fall back to clipboard<small>Read the clipboard when nothing's selected</small></div>
+                <button class="toggle" id="clip-fallback" type="button" role="switch" aria-checked="true" aria-label="Fall back to clipboard"></button>
               </div>
               <div class="row">
                 <div class="lbl">Read-aloud trigger<small>Rebind in <span class="ilink" data-goto="shortcuts">Shortcuts</span></small></div>

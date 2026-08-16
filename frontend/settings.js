@@ -151,6 +151,34 @@ async function saveEngines() {
 
 // --- Audio (apply immediately) ------------------------------------------------
 
+// Read-aloud speed is a segmented control (1× / 1.5× / 2×) — a small fixed set,
+// so it reads better than a dropdown and matches the design reference.
+function highlightSpeed(current) {
+  const seg = el("speed-seg");
+  if (!seg) return;
+  for (const b of seg.querySelectorAll("button")) {
+    b.classList.toggle("on", Math.abs(parseFloat(b.dataset.speed) - current) < 1e-6);
+  }
+}
+function renderSpeedSeg(speeds, current) {
+  const seg = el("speed-seg");
+  if (!seg) return;
+  seg.innerHTML = "";
+  for (const s of speeds) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = `${s}×`;
+    b.dataset.speed = String(s);
+    b.addEventListener("click", () => {
+      invoke?.(CMD.SET_SPEED, { speed: s });
+      if (currentConfig) currentConfig.tts_speed = s;
+      highlightSpeed(s);
+    });
+    seg.appendChild(b);
+  }
+  highlightSpeed(current);
+}
+
 function addOption(select, value, label) {
   const o = document.createElement("option");
   o.value = value;
@@ -191,10 +219,7 @@ async function loadOptions() {
     return;
   }
 
-  const speed = el("speed");
-  speed.innerHTML = "";
-  for (const s of opts.speeds) addOption(speed, String(s), `${s.toFixed(1)}×`);
-  speed.value = String(currentConfig.tts_speed);
+  renderSpeedSeg(opts.speeds, currentConfig.tts_speed);
 
   const voice = el("voice");
   voice.innerHTML = "";
@@ -204,9 +229,6 @@ async function loadOptions() {
   fillMics(opts.mics);
   const mic = el("mic");
 
-  speed.addEventListener("change", (e) =>
-    invoke(CMD.SET_SPEED, { speed: parseFloat(e.target.value) })
-  );
   voice.addEventListener("change", async (e) => {
     await invoke(CMD.SET_VOICE, { voiceId: e.target.value });
     // Preview the new voice: "Hey, my name is <Name>!". The option label is the
@@ -239,7 +261,7 @@ async function loadOptions() {
       currentConfig.hotkey_tts = cfg.hotkey_tts;
       currentConfig.dictation_trigger = cfg.dictation_trigger;
       currentConfig.refine_modifier = cfg.refine_modifier;
-      el("speed").value = String(cfg.tts_speed);
+      highlightSpeed(cfg.tts_speed);
       el("voice").value = cfg.tts_voice_id;
       el("mic").value = cfg.mic_name ?? "";
       syncTriggerRefs();
@@ -396,59 +418,33 @@ function initUsage() {
   });
 }
 
-// --- Insights -----------------------------------------------------------------
+// --- Home stats ---------------------------------------------------------------
 
 let insStats = null; // last history_stats { total, refined, words, first_ts, days[] }
 
-function fmtDuration(sec) {
+// Human "time saved" — a coarse estimate vs typing at ~40 wpm, floored at zero.
+function fmtSaved(sec) {
   sec = Math.round(sec || 0);
   if (sec < 60) return `${sec}s`;
-  const m = Math.round(sec / 60);
-  if (m < 60) return `${m} min`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+  const min = sec / 60;
+  if (min < 60) return `${Math.round(min)} min`;
+  return `${(min / 60).toFixed(1)} hrs`;
 }
 
 function renderInsights() {
   const u = localUsage || {};
   const s = insStats || { total: 0, refined: 0, words: 0, days: [] };
 
+  const words = s.words || 0;
+  const speakSec = u.stt_seconds || 0;
+  const wpm = speakSec > 0 ? Math.round(words / (speakSec / 60)) : 0;
+  // Time saved vs typing the same words at ~40 wpm.
+  const savedSec = Math.max(0, (words / 40) * 60 - speakSec);
+
+  setText("ins-wpm", wpm.toLocaleString());
+  setText("ins-words", words.toLocaleString());
   setText("ins-dictations", (u.stt_count || 0).toLocaleString());
-  setText("ins-words", (s.words || 0).toLocaleString());
-  setText("ins-time", fmtDuration(u.stt_seconds));
-  setText("ins-reads", (u.tts_count || 0).toLocaleString());
-
-  renderActivity(s);
-}
-
-function renderActivity(s) {
-  const host = el("ins-activity");
-  const note = el("ins-activity-note");
-  host.innerHTML = "";
-  const days = s.days || [];
-  const inWindow = days.reduce((a, d) => a + d.count, 0);
-
-  if (!days.length || inWindow === 0) {
-    // History off (lifetime dictations exist but nothing stored) vs simply quiet.
-    const off = (localUsage?.stt_count || 0) > 0 && (s.total || 0) === 0;
-    host.innerHTML = `<span class="act-empty">${
-      off ? "Turn on History recording to track activity." : "No dictations in the last 14 days."
-    }</span>`;
-    note.textContent = off ? "History off" : "Last 14 days";
-    return;
-  }
-
-  note.textContent = "Last 14 days";
-  const max = Math.max(...days.map((d) => d.count), 1);
-  days.forEach((d, i) => {
-    const col = document.createElement("div");
-    col.className = "act-col";
-    col.title = `${d.date}: ${d.count} dictation${d.count === 1 ? "" : "s"}`;
-    const bar = document.createElement("div");
-    bar.className = "act-bar" + (i === days.length - 1 ? " today" : "");
-    bar.style.height = `${Math.max(4, (d.count / max) * 100)}%`;
-    col.appendChild(bar);
-    host.appendChild(col);
-  });
+  setText("ins-saved", fmtSaved(savedSec));
 }
 
 async function loadInsights() {
@@ -612,6 +608,31 @@ function initSound() {
       await invoke(CMD.SAVE_CONFIG, { config: next });
       currentConfig = next;
       paintSoundCue();
+    } catch (e) {
+      setStatus(`Save failed: ${e}`, "error");
+    }
+  });
+}
+
+// Read-aloud: "fall back to the clipboard when nothing's selected" (default on).
+function paintClipFallback() {
+  const t = el("clip-fallback");
+  if (!t) return;
+  const on = currentConfig?.tts_clipboard_fallback ?? true;
+  t.classList.toggle("on", on);
+  t.setAttribute("aria-checked", String(on));
+}
+function initClipFallback() {
+  const t = el("clip-fallback");
+  if (!t) return;
+  paintClipFallback();
+  t.addEventListener("click", async () => {
+    if (!invoke || !currentConfig) return;
+    const on = !(currentConfig.tts_clipboard_fallback ?? true);
+    try {
+      await invoke(CMD.SAVE_CONFIG, { config: { ...currentConfig, tts_clipboard_fallback: on } });
+      currentConfig = { ...currentConfig, tts_clipboard_fallback: on };
+      paintClipFallback();
     } catch (e) {
       setStatus(`Save failed: ${e}`, "error");
     }
@@ -841,6 +862,7 @@ async function init() {
   await loadOptions();
   initHotkeys();
   initSound();
+  initClipFallback();
   initUsage();
   initHistory();
   initUpdate();
