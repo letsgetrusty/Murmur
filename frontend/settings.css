@@ -10,6 +10,7 @@ html,
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden; /* the window never scrolls; only .content does */
 }
 body {
   background: var(--bg);
@@ -38,6 +39,11 @@ body {
 .win.nav-collapsed .side {
   opacity: 0;
   pointer-events: none;
+}
+/* With the sidebar gone, the top bar fills the width — pad its left so the
+   toggle button clears the traffic lights (which stay top-left). */
+.win.nav-collapsed .topbar {
+  padding-left: 78px;
 }
 
 /* ---- Sidebar ---- */

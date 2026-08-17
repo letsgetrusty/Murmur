@@ -713,7 +713,12 @@ let uiZoom = parseFloat(localStorage.getItem(ZOOM_KEY)) || 1;
 
 function applyZoom() {
   uiZoom = Math.round(Math.min(Math.max(uiZoom, 0.6), 2.5) * 100) / 100;
-  document.documentElement.style.zoom = String(uiZoom);
+  // Zoom only the scrollable content — not the whole document — so the shell
+  // (sidebar + its footer, top bar) stays fixed and the window never scrolls.
+  const content = document.querySelector(".content");
+  if (content) content.style.zoom = String(uiZoom);
+  // Clear any stale document-level zoom from older builds.
+  document.documentElement.style.zoom = "";
   localStorage.setItem(ZOOM_KEY, String(uiZoom));
 }
 
