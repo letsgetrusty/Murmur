@@ -547,6 +547,15 @@ pub fn run() {
                 });
             }
 
+            // Dev screenshot tooling (scripts/ui-shot.mjs): when launched with
+            // MURMUR_UI_SHOT set, open the settings window straight away (a
+            // normal launch stays tray-only until Reopen) so the capture script
+            // doesn't need to synthesize a dock click. Debug builds only.
+            #[cfg(debug_assertions)]
+            if std::env::var_os("MURMUR_UI_SHOT").is_some() {
+                show_main_window(app.handle());
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -584,32 +593,46 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = win.set_focus();
         return;
     }
-    match WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
-        .title("Murmur")
-        // Unified-sidebar look (matches the design reference): a transparent
-        // overlay title bar so the native traffic lights float over the sidebar
-        // top with no title strip. The sidebar reserves top room for them.
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true)
-        // Center the traffic lights in the sidebar's 48px top zone (.side-top),
-        // so there's clean, even spacing above the first nav item.
-        .traffic_light_position(tauri::LogicalPosition::new(19.0, 19.0))
-        // No fullscreen/zoom for a settings window; the green button is also
-        // hidden below so the traffic lights read red + yellow (matches the ref).
-        .maximizable(false)
-        .inner_size(960.0, 680.0)
-        .min_inner_size(640.0, 460.0)
-        // Cap the width so the content column (max 820px, see settings.css .tab)
-        // always fills the pane — past this the window would just grow empty
-        // margins. 1060 = 180 sidebar + 64 padding + ~816 content. Height is left
-        // effectively unbounded.
-        .max_inner_size(1060.0, 10000.0)
-        .center()
-        // Paint the window + webview our dark UI background (tokens.css --bg
-        // #141210) from creation, so it doesn't flash white before the CSS loads.
-        .background_color(tauri::window::Color(20, 18, 16, 255))
-        .build()
+    let mut builder =
+        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
+            .title("Murmur")
+            // Unified-sidebar look (matches the design reference): a transparent
+            // overlay title bar so the native traffic lights float over the sidebar
+            // top with no title strip. The sidebar reserves top room for them.
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            // Center the traffic lights in the sidebar's 48px top zone (.side-top),
+            // so there's clean, even spacing above the first nav item.
+            .traffic_light_position(tauri::LogicalPosition::new(19.0, 19.0))
+            // No fullscreen/zoom for a settings window; the green button is also
+            // hidden below so the traffic lights read red + yellow (matches the ref).
+            .maximizable(false)
+            .inner_size(960.0, 680.0)
+            .min_inner_size(640.0, 460.0)
+            // Cap the width so the content column (max 820px, see settings.css .tab)
+            // always fills the pane — past this the window would just grow empty
+            // margins. 1060 = 180 sidebar + 64 padding + ~816 content. Height is left
+            // effectively unbounded.
+            .max_inner_size(1060.0, 10000.0)
+            .center()
+            // Paint the window + webview our dark UI background (tokens.css --bg
+            // #141210) from creation, so it doesn't flash white before the CSS loads.
+            .background_color(tauri::window::Color(20, 18, 16, 255));
+
+    // Dev screenshot tooling (scripts/ui-shot.mjs): deep-link straight to a pane
+    // so the live window can be captured per pane. `initialization_script` runs
+    // before settings.js, which reads `window.__LAUNCH_PANE` — no IPC command
+    // (keeps the JS/Rust contract test unchanged) and no event race. Debug
+    // builds only; compiled out of release.
+    #[cfg(debug_assertions)]
+    if let Some(pane) = std::env::var("MURMUR_UI_PANE")
+        .ok()
+        .filter(|p| !p.is_empty())
     {
+        builder = builder.initialization_script(format!("window.__LAUNCH_PANE={pane:?};"));
+    }
+
+    match builder.build() {
         Ok(win) => {
             // Hide the green zoom button so the traffic lights read red + yellow
             // only, matching the design reference.
@@ -629,9 +652,30 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
                     }
                 }
             }
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            write_ui_shot_windowid(&win);
             let _ = win.set_focus();
         }
         Err(e) => log::warn!("failed to create settings window: {e}"),
+    }
+}
+
+/// Dev screenshot tooling: write the settings window's CGWindowID to the file
+/// named by `MURMUR_UI_WINID_FILE`, so `scripts/ui-shot.mjs` can grab exactly
+/// that window with `screencapture -l`. No-op unless the env var is set.
+#[cfg(all(debug_assertions, target_os = "macos"))]
+fn write_ui_shot_windowid<R: Runtime>(win: &tauri::WebviewWindow<R>) {
+    let Some(path) = std::env::var_os("MURMUR_UI_WINID_FILE") else {
+        return;
+    };
+    if let Ok(ns_window) = win.ns_window() {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        // SAFETY: `ns_window` is the live NSWindow* Tauri just created;
+        // `-windowNumber` is a standard AppKit accessor returning its
+        // CGWindowID as an NSInteger. Runs on the main thread.
+        let num: isize = unsafe { msg_send![ns_window as *mut AnyObject, windowNumber] };
+        let _ = std::fs::write(path, num.to_string());
     }
 }
 

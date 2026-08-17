@@ -126,6 +126,17 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   bugs (leaked padding, wrong line-height) that eyeballing two screenshots
   misses. It measures **static** layout only (frontend JS is stripped), so
   JS-populated bits (history rows, live speed segments) need the live window.
+- Live-window screenshots: `npm run ui-shot` (or `node scripts/ui-shot.mjs
+  [pane…]`) captures the real settings **WKWebView** one PNG per pane into
+  `docs/design/shots/` (gitignored). Covers what `ui-diff` can't — WebKit-
+  specific rendering, the native traffic lights/window chrome, and everything
+  the frontend JS populates (history rows, mic label, live usage, speed
+  segments). It builds + signs the debug `.app` via `dev.sh --build-only`, then
+  launches it per pane with `MURMUR_UI_SHOT`/`MURMUR_UI_PANE` set — debug-only
+  hooks in `show_main_window` deep-link the pane (`window.__LAUNCH_PANE`, no IPC
+  command) and write the window's CGWindowID so `screencapture -l` grabs exactly
+  that window. Needs Screen Recording permission for the terminal. `--no-build`
+  reuses the current bundle.
 - Release: **cut every release with `./scripts/publish-release.sh`** — the one
   command for it. It auto-computes the next version from the highest release tag
   (`--minor` / `--major` / an explicit `X.Y.Z` to override; `--dry-run` to

@@ -38,6 +38,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# --build-only: build + sign the .app but skip the relaunch. Used by
+# scripts/ui-shot.mjs, which then launches the bundle itself (with env) per
+# pane. Keeps this script the single source of truth for how the dev .app is
+# built and signed.
+BUILD_ONLY=0
+for a in "$@"; do case "$a" in --build-only) BUILD_ONLY=1 ;; esac; done
+
 IDENTITY="murmur dev"
 BUNDLE_ID="dev.lgr.murmur"
 TARGET_DIR="src-tauri/target/debug"
@@ -109,6 +116,11 @@ codesign -dvvv "$APP/Contents/MacOS/murmur" 2>&1 | grep -qi "adhoc" \
   && die "murmur is still ad-hoc signed — signing did not take."
 # Fresh bundle at a reused path confuses LaunchServices; clear provenance.
 xattr -cr "$APP" 2>/dev/null || true
+
+if [ "$BUILD_ONLY" = 1 ]; then
+  say "Built + signed (--build-only): $APP"
+  exit 0
+fi
 
 # 5. Relaunch ----------------------------------------------------------------
 say "Relaunching…"

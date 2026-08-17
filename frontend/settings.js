@@ -939,11 +939,18 @@ async function init() {
   });
   window.addEventListener("focus", refreshMics);
 
-  // Populate whichever tab is active on launch (switchTab handles this on click,
-  // but the landing tab is set in markup and never goes through it).
-  const landing = document.querySelector(".nav-item.active")?.dataset.p;
-  if (landing === TABS.HISTORY) loadHistory();
-  else if (landing === TABS.HOME) loadInsights();
+  // Dev screenshot tooling: a debug build launched with MURMUR_UI_PANE sets
+  // window.__LAUNCH_PANE via an initialization script (see show_main_window), so
+  // scripts/ui-shot.mjs can capture any pane. Unset in normal use.
+  if (window.__LAUNCH_PANE) {
+    switchTab(window.__LAUNCH_PANE);
+  } else {
+    // Populate whichever tab is active on launch (switchTab handles this on
+    // click, but the landing tab is set in markup and never goes through it).
+    const landing = document.querySelector(".nav-item.active")?.dataset.p;
+    if (landing === TABS.HISTORY) loadHistory();
+    else if (landing === TABS.HOME) loadInsights();
+  }
 }
 
 if (document.readyState === "loading") {
