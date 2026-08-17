@@ -6,6 +6,12 @@
 * {
   box-sizing: border-box;
 }
+/* Self-contained: this window links only tokens.css + settings.css (no
+   components.css), so shared rules can't leak in. The `hidden` attribute must
+   win even over elements that set their own display (.engine-relaunch etc.). */
+[hidden] {
+  display: none !important;
+}
 html,
 body {
   margin: 0;
@@ -952,6 +958,60 @@ select.sel.invalid {
 .un-diff svg {
   width: 13px;
   height: 13px;
+}
+
+/* ---- Modal buttons (kept self-contained; were the only components.css deps) ---- */
+.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-control);
+  padding: var(--space-sm) 18px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent-press);
+}
+.primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.small-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.small-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.small-btn.danger:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+}
+/* Keyboard focus ring (mouse clicks don't leave a lingering ring). */
+.nav-item:focus-visible,
+.tgl:focus-visible,
+.btn:focus-visible,
+.rec:focus-visible,
+.primary:focus-visible,
+.small-btn:focus-visible,
+.toggle:focus-visible,
+select.sel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ---- Modal ---- */
