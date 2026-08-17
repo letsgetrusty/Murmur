@@ -117,26 +117,35 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   `constants.js` names match the Rust events/commands — keep them in sync).
 - Frontend tests (from repo root): `npm test` (Vitest — pure helpers + shared
   constants; `npm run test:watch` to iterate).
-- Settings-window layout check: `npm run ui-diff` (or `node scripts/ui-diff.mjs
-  [pane]`) renders the design reference (`docs/design/reference.html`) and the
-  real `frontend/settings.html` at identical size, extracts computed box metrics
-  (padding, size, radius, font, gap) for mapped elements from both, and prints a
-  mismatch table — exits non-zero on any diff beyond `--tol` (default 1.5px).
-  Run it after touching the settings CSS/HTML; it catches the "off by a few px"
-  bugs (leaked padding, wrong line-height) that eyeballing two screenshots
-  misses. It measures **static** layout only (frontend JS is stripped), so
-  JS-populated bits (history rows, live speed segments) need the live window.
+- UI layout check: `npm run ui-diff` (or `node scripts/ui-diff.mjs [section…]`,
+  `--target settings|onboarding`) renders the design reference
+  (`docs/design/reference.html`) and the real app HTML at identical size,
+  extracts computed box metrics (padding, size, radius, font, gap) for mapped
+  elements from both, and prints a mismatch table — exits non-zero on any diff
+  beyond `--tol` (default 1.5px). Covers **two targets**: the settings window (7
+  panes vs `#view-settings`) and the onboarding modal (6 steps vs
+  `#view-onboarding`); the reference's `ob-*2` class names are mapped to the
+  shipped `ob-*` ones. Run it after touching settings/onboarding CSS/HTML; it
+  catches the "off by a few px" bugs (leaked padding, wrong line-height) that
+  eyeballing two screenshots misses. It measures **static** layout only (frontend
+  JS is stripped), so JS-populated bits (history rows, speed segments, download
+  %, permission badges) need the live window.
 - Live-window screenshots: `npm run ui-shot` (or `node scripts/ui-shot.mjs
-  [pane…]`) captures the real settings **WKWebView** one PNG per pane into
-  `docs/design/shots/` (gitignored). Covers what `ui-diff` can't — WebKit-
-  specific rendering, the native traffic lights/window chrome, and everything
-  the frontend JS populates (history rows, mic label, live usage, speed
-  segments). It builds + signs the debug `.app` via `dev.sh --build-only`, then
-  launches it per pane with `MURMUR_UI_SHOT`/`MURMUR_UI_PANE` set — debug-only
-  hooks in `show_main_window` deep-link the pane (`window.__LAUNCH_PANE`, no IPC
-  command) and write the window's CGWindowID so `screencapture -l` grabs exactly
-  that window. Needs Screen Recording permission for the terminal. `--no-build`
-  reuses the current bundle.
+  [section…]`, `--target settings|onboarding`) captures the real **WKWebView**
+  into `docs/design/shots/` — one PNG per settings pane (`settings-<pane>.png`)
+  and per onboarding step (`onboarding-<step>.png`), gitignored. Covers what
+  `ui-diff` can't — WebKit-specific rendering, the native traffic lights/window
+  chrome, and everything the frontend JS populates (history rows, mic label,
+  live usage, download %, permission badges). It builds + signs the debug `.app`
+  via `dev.sh --build-only`, then launches it per section with `MURMUR_UI_SHOT` +
+  `MURMUR_UI_PANE` (settings) or `MURMUR_UI_STEP` (onboarding) — debug-only hooks
+  in `show_main_window`/`show_onboarding_window` deep-link the section
+  (`window.__LAUNCH_PANE`/`__LAUNCH_STEP`, no IPC command) and write the window's
+  CGWindowID so `screencapture -l` grabs exactly that window. Needs Screen
+  Recording permission for the terminal. `--no-build` reuses the current bundle.
+  Caveat: the onboarding "Try it" step's record box shows a "Fn turns on after
+  setup" note (the directly-launched binary has no live Fn tap), not the
+  reference's caret prompt — a harness artifact, not a layout bug.
 - Release: **cut every release with `./scripts/publish-release.sh`** — the one
   command for it. It auto-computes the next version from the highest release tag
   (`--minor` / `--major` / an explicit `X.Y.Z` to override; `--dry-run` to

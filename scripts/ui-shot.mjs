@@ -1,30 +1,35 @@
 #!/usr/bin/env node
-// ui-shot — capture the LIVE settings window (real WKWebView) per pane.
+// ui-shot — capture the LIVE app windows (real WKWebView), one PNG per section.
 //
 // The static ui-diff (scripts/ui-diff.mjs) renders in headless Chrome with the
 // frontend JS stripped, so it can't see WebKit-specific rendering or anything
-// the frontend JS populates (history rows, the speed segments, the mic label,
-// live usage numbers, the native traffic lights / window chrome). This captures
-// the actual app window instead, one PNG per pane, into docs/design/shots/.
+// the frontend JS populates (history rows, speed segments, download %, live
+// permission badges, the native traffic lights / window chrome). This captures
+// the actual app windows instead, into docs/design/shots/. Two targets:
+//   settings    — the 7 settings panes         → settings-<pane>.png
+//   onboarding  — the 6 onboarding steps        → onboarding-<step>.png
 //
 // Usage:
-//   node scripts/ui-shot.mjs                 # all panes
-//   node scripts/ui-shot.mjs dictation read  # just these
-//   node scripts/ui-shot.mjs --no-build      # skip the rebuild (reuse the bundle)
+//   node scripts/ui-shot.mjs                     # both windows, every section
+//   node scripts/ui-shot.mjs dictation read      # just these settings panes
+//   node scripts/ui-shot.mjs --target onboarding # all onboarding steps
+//   node scripts/ui-shot.mjs welcome done        # named onboarding steps
+//   node scripts/ui-shot.mjs --no-build          # reuse the current bundle
 //   node scripts/ui-shot.mjs --out some/dir
 //
 // How it works (macOS, no window-automation entitlements needed):
 //   1. `dev.sh --build-only` builds + signs the debug Murmur.app (the binary
 //      embeds ../dist at compile time, so a rebuild is required to pick up any
 //      frontend edit).
-//   2. For each pane it launches the binary directly with MURMUR_UI_SHOT +
-//      MURMUR_UI_PANE set. A debug build then opens the settings window straight
-//      to that pane and writes its CGWindowID to MURMUR_UI_WINID_FILE (see
-//      show_main_window in lib.rs).
+//   2. For each section it launches the binary with MURMUR_UI_SHOT + either
+//      MURMUR_UI_PANE (settings) or MURMUR_UI_STEP (onboarding). A debug build
+//      then opens the right window straight to that section and writes its
+//      CGWindowID to MURMUR_UI_WINID_FILE (see show_main_window /
+//      show_onboarding_window in lib.rs).
 //   3. `screencapture -l <windowid>` grabs exactly that window.
 //
-// Requires Screen Recording permission for the terminal (same as any
-// screencapture). Debug-only hooks — the env vars do nothing in a release build.
+// Requires Screen Recording permission for the terminal. Debug-only hooks — the
+// env vars do nothing in a release build.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -35,7 +40,19 @@ import { tmpdir } from "node:os";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "src-tauri/target/debug/Murmur.app");
 const BIN = join(APP, "Contents/MacOS/murmur");
-const ALL = ["home", "dictation", "read", "shortcuts", "sound", "history", "support"];
+
+// Each target: the sections to capture and the env that deep-links one.
+const TARGETS = {
+  settings: {
+    sections: ["home", "dictation", "read", "shortcuts", "sound", "history", "support"],
+    env: (pane) => ({ MURMUR_UI_PANE: pane }),
+  },
+  onboarding: {
+    // step key → data-step index (see onboarding.html / goTo()).
+    sections: ["welcome", "permissions", "download", "try", "read", "done"],
+    env: (step) => ({ MURMUR_UI_STEP: String(["welcome", "permissions", "download", "try", "read", "done"].indexOf(step)) }),
+  },
+};
 
 // ---- args -----------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -45,8 +62,13 @@ const flag = (name, def) => {
 };
 const noBuild = argv.includes("--no-build");
 const OUT = resolve(flag("--out", join(ROOT, "docs/design/shots")));
-const panes = argv.filter((a) => ALL.includes(a));
-const targets = panes.length ? panes : ALL;
+const onlyTarget = flag("--target", null);
+const positional = argv.filter((a, i) => !a.startsWith("--") && (i === 0 || !argv[i - 1].startsWith("--")));
+
+if (onlyTarget && !TARGETS[onlyTarget]) {
+  console.error(`unknown target "${onlyTarget}" — one of: ${Object.keys(TARGETS).join(", ")}`);
+  process.exit(2);
+}
 
 const C = { dim: "\x1b[2m", green: "\x1b[32m", red: "\x1b[31m", bold: "\x1b[1m", reset: "\x1b[0m" };
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", ...opts });
@@ -75,17 +97,18 @@ if (!noBuild) {
 
 mkdirSync(OUT, { recursive: true });
 
-// ---- capture one pane -----------------------------------------------------
-function capture(pane) {
+// ---- capture one section --------------------------------------------------
+function capture(targetName, section, extraEnv) {
   kill();
   sleep(600);
-  const widFile = join(tmpdir(), `murmur-ui-winid-${pane}`);
+  const tag = `${targetName}-${section}`;
+  const widFile = join(tmpdir(), `murmur-ui-winid-${tag}`);
   rmSync(widFile, { force: true });
 
   const child = spawn(BIN, [], {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, MURMUR_UI_SHOT: "1", MURMUR_UI_PANE: pane, MURMUR_UI_WINID_FILE: widFile },
+    env: { ...process.env, MURMUR_UI_SHOT: "1", MURMUR_UI_WINID_FILE: widFile, ...extraEnv },
   });
   child.unref();
 
@@ -106,7 +129,7 @@ function capture(pane) {
   // Let the webview paint (fonts, JS-populated content) before the grab.
   sleep(1200);
 
-  const out = join(OUT, `${pane}.png`);
+  const out = join(OUT, `${tag}.png`);
   // -l <id>: capture that window · -o: omit the drop shadow · -x: no sound.
   execFileSync("screencapture", ["-l", winid, "-o", "-x", out], { stdio: "inherit" });
   kill();
@@ -117,28 +140,41 @@ function capture(pane) {
   return out;
 }
 
-// ---- run ------------------------------------------------------------------
-console.log(`${C.dim}capturing ${targets.length} pane(s) → ${OUT.replace(ROOT + "/", "")}/${C.reset}\n`);
-let failed = 0;
-for (const pane of targets) {
-  process.stdout.write(`  ${C.bold}${pane}${C.reset} … `);
-  try {
-    const out = capture(pane);
-    const { width, height } = pngSize(out);
-    console.log(`${C.green}✓${C.reset} ${C.dim}${width}×${height}${C.reset}`);
-  } catch (e) {
-    console.log(`${C.red}✗ ${e.message}${C.reset}`);
-    failed++;
-  }
-}
-kill();
-console.log(
-  `\n${failed === 0 ? C.green + `✓ ${targets.length} shot(s) in ${OUT.replace(ROOT + "/", "")}/` : C.red + `✗ ${failed} failed`}${C.reset}`
-);
-process.exit(failed === 0 ? 0 : 1);
-
 // Read width/height from a PNG's IHDR (bytes 16–24) — avoids a dependency.
 function pngSize(path) {
   const b = readFileSync(path);
   return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
 }
+
+// ---- run ------------------------------------------------------------------
+const targetNames = onlyTarget ? [onlyTarget] : Object.keys(TARGETS);
+let failed = 0;
+let ran = 0;
+for (const tname of targetNames) {
+  let sections = TARGETS[tname].sections;
+  if (positional.length) sections = sections.filter((s) => positional.includes(s));
+  if (!sections.length) continue;
+  console.log(`\n${C.bold}${C.dim}━━ ${tname} → ${OUT.replace(ROOT + "/", "")}/ ━━${C.reset}`);
+  for (const section of sections) {
+    ran++;
+    process.stdout.write(`  ${C.bold}${section}${C.reset} … `);
+    try {
+      const out = capture(tname, section, TARGETS[tname].env(section));
+      const { width, height } = pngSize(out);
+      console.log(`${C.green}✓${C.reset} ${C.dim}${width}×${height}${C.reset}`);
+    } catch (e) {
+      console.log(`${C.red}✗ ${e.message}${C.reset}`);
+      failed++;
+    }
+  }
+}
+kill();
+
+if (ran === 0) {
+  console.error(`\n${C.red}no sections matched ${JSON.stringify(positional)}${C.reset}`);
+  process.exit(2);
+}
+console.log(
+  `\n${failed === 0 ? C.green + `✓ ${ran} shot(s) in ${OUT.replace(ROOT + "/", "")}/` : C.red + `✗ ${failed} of ${ran} failed`}${C.reset}`
+);
+process.exit(failed === 0 ? 0 : 1);

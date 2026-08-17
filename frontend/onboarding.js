@@ -514,6 +514,12 @@ function init() {
   // Permissions change in System Settings (outside the app), so poll.
   refreshStatus();
   setInterval(refreshStatus, 1500);
+
+  // Dev screenshot tooling: a debug build launched with MURMUR_UI_STEP jumps
+  // straight to that step via window.__LAUNCH_STEP (set by an initialization
+  // script — see show_onboarding_window), so scripts/ui-shot.mjs can capture
+  // each step. Unset in normal use.
+  if (window.__LAUNCH_STEP != null) goTo(Number(window.__LAUNCH_STEP));
 }
 
 if (document.readyState === "loading") {

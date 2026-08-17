@@ -548,12 +548,17 @@ pub fn run() {
             }
 
             // Dev screenshot tooling (scripts/ui-shot.mjs): when launched with
-            // MURMUR_UI_SHOT set, open the settings window straight away (a
-            // normal launch stays tray-only until Reopen) so the capture script
-            // doesn't need to synthesize a dock click. Debug builds only.
+            // MURMUR_UI_SHOT set, open a window straight away (a normal launch
+            // stays tray-only until Reopen) so the capture script doesn't need
+            // to synthesize a dock click — the onboarding window when a step is
+            // requested, otherwise the settings window. Debug builds only.
             #[cfg(debug_assertions)]
             if std::env::var_os("MURMUR_UI_SHOT").is_some() {
-                show_main_window(app.handle());
+                if std::env::var_os("MURMUR_UI_STEP").is_some() {
+                    show_onboarding_window(app.handle());
+                } else {
+                    show_main_window(app.handle());
+                }
             }
 
             Ok(())
@@ -689,21 +694,35 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = win.set_focus();
         return;
     }
-    match WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
-        .title("Welcome to Murmur")
-        .inner_size(560.0, 500.0)
-        .resizable(false)
-        .center()
-        // Chromeless, transparent window so the webview paints a self-contained
-        // rounded modal (progress bar to the very top edge, no macOS title bar) —
-        // the onboarding IS the modal. Transparency is already enabled app-wide
-        // (macOSPrivateApi) for the overlay; the rounded corners + drag region
-        // live in onboarding.css / .html.
-        .decorations(false)
-        .transparent(true)
-        .build()
+    let mut builder =
+        WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
+            .title("Welcome to Murmur")
+            .inner_size(560.0, 500.0)
+            .resizable(false)
+            .center()
+            // Chromeless, transparent window so the webview paints a self-contained
+            // rounded modal (progress bar to the very top edge, no macOS title bar) —
+            // the onboarding IS the modal. Transparency is already enabled app-wide
+            // (macOSPrivateApi) for the overlay; the rounded corners + drag region
+            // live in onboarding.css / .html.
+            .decorations(false)
+            .transparent(true);
+
+    // Dev screenshot tooling (scripts/ui-shot.mjs): deep-link straight to a step
+    // via window.__LAUNCH_STEP (read in onboarding.js) so each step can be
+    // captured. Same mechanism as show_main_window; debug builds only.
+    #[cfg(debug_assertions)]
+    if let Some(stepv) = std::env::var("MURMUR_UI_STEP")
+        .ok()
+        .filter(|s| !s.is_empty())
     {
+        builder = builder.initialization_script(format!("window.__LAUNCH_STEP={stepv:?};"));
+    }
+
+    match builder.build() {
         Ok(win) => {
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            write_ui_shot_windowid(&win);
             let _ = win.set_focus();
         }
         Err(e) => log::warn!("failed to create onboarding window: {e}"),
