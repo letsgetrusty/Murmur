@@ -23,6 +23,10 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
+  /* Match the design reference's base leading. Without it text-bearing controls
+     inherit `normal` (~1.2) and render ~10% shorter than the mockup — kbd pills,
+     buttons, and the sidebar footer all shrink. */
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -477,6 +481,8 @@ select.sel.invalid {
   border-radius: var(--radius-control);
   color: var(--text);
   cursor: pointer;
+  /* Same as .btn: a <button> won't inherit the body's 1.45 leading. */
+  line-height: 1.45;
 }
 .rec.recording {
   border-color: var(--accent);
@@ -508,6 +514,9 @@ select.sel.invalid {
   background: var(--bg-input);
   color: var(--text);
   cursor: pointer;
+  /* <button> defaults to line-height:normal and won't inherit the body's 1.45,
+     so it renders shorter than the reference (which uses a <span>). */
+  line-height: 1.45;
 }
 .btn:hover {
   border-color: var(--state-idle);

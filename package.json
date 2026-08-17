@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "ui-diff": "node scripts/ui-diff.mjs",
     "tauri": "tauri"
   },
   "devDependencies": {

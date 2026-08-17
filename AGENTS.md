@@ -117,6 +117,15 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   `constants.js` names match the Rust events/commands — keep them in sync).
 - Frontend tests (from repo root): `npm test` (Vitest — pure helpers + shared
   constants; `npm run test:watch` to iterate).
+- Settings-window layout check: `npm run ui-diff` (or `node scripts/ui-diff.mjs
+  [pane]`) renders the design reference (`docs/design/reference.html`) and the
+  real `frontend/settings.html` at identical size, extracts computed box metrics
+  (padding, size, radius, font, gap) for mapped elements from both, and prints a
+  mismatch table — exits non-zero on any diff beyond `--tol` (default 1.5px).
+  Run it after touching the settings CSS/HTML; it catches the "off by a few px"
+  bugs (leaked padding, wrong line-height) that eyeballing two screenshots
+  misses. It measures **static** layout only (frontend JS is stripped), so
+  JS-populated bits (history rows, live speed segments) need the live window.
 - Release: **cut every release with `./scripts/publish-release.sh`** — the one
   command for it. It auto-computes the next version from the highest release tag
   (`--minor` / `--major` / an explicit `X.Y.Z` to override; `--dry-run` to
