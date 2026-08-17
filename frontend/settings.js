@@ -186,16 +186,69 @@ function addOption(select, value, label) {
   select.appendChild(o);
 }
 
-// (Re)build the microphone dropdown from the current input-device list.
+// The mic is a custom button + menu (see initMicDropdown) — a native <select>
+// leaves a big gap between the label and its chevron in the top bar.
+const MIC_CHECK =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+let micList = [];
+
+// (Re)build the microphone menu from the current input-device list.
 function fillMics(mics) {
-  const mic = el("mic");
+  micList = mics;
+  const menu = el("micMenu");
+  const label = el("micLabel");
+  if (!menu || !label) return;
   const current = currentConfig?.mic_name ?? "";
-  mic.innerHTML = "";
-  addOption(mic, "", "System default");
-  for (const m of mics) addOption(mic, m, m);
-  // Keep the saved selection if the device is still present; otherwise show
-  // System default (the recorder falls back to the default the same way).
-  mic.value = mics.includes(current) ? current : "";
+  const present = mics.includes(current);
+  menu.querySelectorAll(".mic-opt").forEach((o) => o.remove());
+
+  const add = (value, text) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mic-opt";
+    b.dataset.value = value;
+    const name = document.createElement("span");
+    name.textContent = text;
+    const ck = document.createElement("span");
+    ck.className = "ck";
+    ck.innerHTML = MIC_CHECK;
+    b.append(name, ck);
+    // "on" is the saved device if present, else System default.
+    b.classList.toggle("on", value === "" ? !present : value === current);
+    b.addEventListener("click", () => selectMic(value, text));
+    menu.appendChild(b);
+  };
+  add("", "System default");
+  for (const m of mics) add(m, m);
+  label.textContent = present ? current : "System default";
+}
+
+function selectMic(value, text) {
+  invoke?.(CMD.SET_MIC, { name: value === "" ? null : value }).catch(() => {});
+  if (currentConfig) currentConfig.mic_name = value;
+  el("micLabel").textContent = text;
+  for (const o of el("micMenu").querySelectorAll(".mic-opt")) {
+    o.classList.toggle("on", o.dataset.value === value);
+  }
+  closeMicMenu();
+}
+
+function closeMicMenu() {
+  el("micMenu")?.setAttribute("hidden", "");
+  el("micBtn")?.setAttribute("aria-expanded", "false");
+}
+
+function initMicDropdown() {
+  const btn = el("micBtn");
+  const menu = el("micMenu");
+  if (!btn || !menu) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", closeMicMenu);
 }
 
 // Re-fetch just the input-device list. Called when the window is shown/refocused
@@ -227,7 +280,6 @@ async function loadOptions() {
   voice.value = currentConfig.tts_voice_id;
 
   fillMics(opts.mics);
-  const mic = el("mic");
 
   voice.addEventListener("change", async (e) => {
     await invoke(CMD.SET_VOICE, { voiceId: e.target.value });
@@ -236,10 +288,6 @@ async function loadOptions() {
     const label = e.target.selectedOptions[0]?.textContent ?? "";
     const name = label.split("(")[0].trim();
     invoke(CMD.PREVIEW_VOICE, { name });
-  });
-  mic.addEventListener("change", (e) => {
-    const v = e.target.value;
-    invoke(CMD.SET_MIC, { name: v === "" ? null : v });
   });
   el("overlay-position").addEventListener("change", (e) => {
     const position = e.target.value;
@@ -263,7 +311,7 @@ async function loadOptions() {
       currentConfig.refine_modifier = cfg.refine_modifier;
       highlightSpeed(cfg.tts_speed);
       el("voice").value = cfg.tts_voice_id;
-      el("mic").value = cfg.mic_name ?? "";
+      fillMics(micList); // re-render the mic menu label/highlight
       syncTriggerRefs();
     } catch (_) {
       /* transient */
@@ -849,6 +897,10 @@ async function init() {
   for (const b of document.querySelectorAll(".nav-item")) {
     b.addEventListener("click", () => switchTab(b.dataset.p));
   }
+  el("nav-toggle")?.addEventListener("click", () => {
+    document.querySelector(".win").classList.toggle("nav-collapsed");
+  });
+  initMicDropdown();
   // In-content links that jump to a tab (Home's "Customize shortcuts", the
   // "Rebind in Shortcuts" hints on Dictation/Read-aloud).
   for (const e of document.querySelectorAll("[data-goto]")) {
