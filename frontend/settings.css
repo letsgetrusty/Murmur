@@ -168,6 +168,13 @@ body {
   padding: 0 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: linear-gradient(#1a1613, #171310);
+  /* Animate the collapse padding-left in lockstep with the sidebar's
+     grid-template-columns transition (same 0.16s ease). Without this the
+     padding snaps instantly while the grid is still mid-slide, so on reopen the
+     toggle flashes at the far left (over the traffic lights) for one frame
+     before sliding into place. Keeping both in sync makes the toggle's position
+     (column width + padding) monotonic, so it never enters that zone. */
+  transition: padding-left 0.16s ease;
 }
 .tgl {
   display: inline-flex;
