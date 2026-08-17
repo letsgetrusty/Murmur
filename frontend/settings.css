@@ -55,9 +55,10 @@ body {
   padding: 0 10px 12px;
   min-height: 0;
 }
-/* Room for the native traffic lights floating in the overlay title bar. */
+/* Room for the native traffic lights floating in the overlay title bar (they're
+   centered in this zone via traffic_light_position in lib.rs). */
 .side-top {
-  height: 30px;
+  height: 48px;
   flex: 0 0 auto;
 }
 .nav {

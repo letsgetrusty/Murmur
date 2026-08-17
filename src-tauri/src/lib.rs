@@ -591,9 +591,9 @@ fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         // top with no title strip. The sidebar reserves top room for them.
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        // Inset the traffic lights so they sit comfortably in the sidebar top
-        // (the sidebar reserves 30px above the nav for them).
-        .traffic_light_position(tauri::LogicalPosition::new(16.0, 18.0))
+        // Center the traffic lights in the sidebar's 48px top zone (.side-top),
+        // so there's clean, even spacing above the first nav item.
+        .traffic_light_position(tauri::LogicalPosition::new(19.0, 19.0))
         // No fullscreen/zoom for a settings window; the green button is also
         // hidden below so the traffic lights read red + yellow (matches the ref).
         .maximizable(false)
