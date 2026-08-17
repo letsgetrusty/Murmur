@@ -1733,10 +1733,18 @@ fn spawn_dictation_worker<R: Runtime>(
                     let on_level: audio::LevelFn = Box::new(move |level: f32| {
                         let _ = app_for_level.emit(ipc::event::AUDIO_LEVEL, level);
                     });
+                    // Play the start cue *before* opening the mic. Opening the
+                    // input device makes macOS reconfigure the audio route, and
+                    // a system sound fired during that transition is swallowed
+                    // by coreaudiod — the "start sound sometimes doesn't play"
+                    // bug. Cueing first hits the stable route, and also keeps
+                    // the cue out of the recording and drops its latency to zero.
+                    // (The stop cue needs no such move: by then the route has
+                    // long settled.)
+                    play_dictation_cue(&app, true);
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
-                            play_dictation_cue(&app, true);
                             rec = Some(r);
                         }
                         Err(e) => {
