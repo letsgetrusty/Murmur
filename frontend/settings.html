@@ -9,39 +9,43 @@
   </head>
   <body>
     <div class="win">
-      <!-- SIDEBAR -->
-      <aside class="side">
+      <!-- SIDEBAR — draggable like the topbar (macOS convention: you can drag
+           the window by the sidebar chrome, as in System Settings/Finder). "deep"
+           makes the whole sidebar — the traffic-light strip, gaps, and the logo
+           footer — a drag surface; the nav buttons opt out with ="false" so they
+           still click. Same pattern the onboarding window uses. -->
+      <aside class="side" data-tauri-drag-region="deep">
         <!-- Reserves room for the native traffic lights floating in the overlay
              title bar (the window uses TitleBarStyle::Overlay). -->
         <div class="side-top"></div>
         <nav class="nav" id="nav">
-          <button class="nav-item active" data-p="home">
+          <button class="nav-item active" data-tauri-drag-region="false" data-p="home">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V9.5z"/></svg></span>
             <span class="t">Home</span>
           </button>
-          <button class="nav-item" data-p="dictation">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="dictation">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0M12 17v4"/></svg></span>
             <span class="t">Dictation</span>
           </button>
-          <button class="nav-item" data-p="read">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="read">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
             <span class="t">Read-aloud</span>
           </button>
           <div class="sep"></div>
-          <button class="nav-item" data-p="shortcuts">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="shortcuts">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span>
             <span class="t">Shortcuts</span>
           </button>
-          <button class="nav-item" data-p="sound">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="sound">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
             <span class="t">Sound</span>
           </button>
-          <button class="nav-item" data-p="history">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="history">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg></span>
             <span class="t">History</span>
           </button>
           <div class="sep"></div>
-          <button class="nav-item" data-p="support">
+          <button class="nav-item" data-tauri-drag-region="false" data-p="support">
             <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="m5 5 4 4M15 15l4 4M19 5l-4 4M9 15l-4 4"/></svg></span>
             <span class="t">Support</span>
           </button>
