@@ -522,7 +522,9 @@ pub fn run() {
             // stage it. Staging flips the tray item to "Restart to update (vX)"
             // and shows the settings banner — the user applies it when they
             // choose (no surprise relaunches). See `mark_update_staged`.
-            {
+            // Dev builds skip this entirely (see `AUTO_UPDATE`): a self-signed
+            // dev binary must not replace itself with a Developer-ID release.
+            if AUTO_UPDATE {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -545,6 +547,13 @@ pub fn run() {
                         tokio::time::sleep(CHECK_INTERVAL).await;
                     }
                 });
+            } else {
+                log::info!(
+                    "update: auto-update disabled in this dev build (release builds \
+                     check hourly). Pulling a Developer-ID release over a self-signed \
+                     dev build would swap signing identities under one bundle id and \
+                     invalidate the Accessibility grant — so dev never self-updates."
+                );
             }
 
             // Dev screenshot tooling (scripts/ui-shot.mjs): when launched with
@@ -1549,6 +1558,19 @@ fn build_tray_menu(
     ))
 }
 
+/// Whether this build checks for and applies auto-updates. Only a *distributed*
+/// release should: it's notarized and Developer-ID-signed, so replacing itself
+/// keeps the signing identity — and thus the TCC Designated Requirement — stable.
+/// A locally-built dev binary is signed with the self-signed `murmur dev` cert;
+/// if it pulled a release over itself, the same bundle id (`dev.lgr.murmur`)
+/// would suddenly be Developer-ID-signed, its Designated Requirement would no
+/// longer match the one the Accessibility grant is pinned to, and macOS would
+/// silently drop that grant — wedging the Fn tap and re-prompting. So dev builds
+/// never self-update. `debug_assertions` is the discriminator: `scripts/dev.sh`
+/// builds the debug profile, CI release builds `--release`. See
+/// docs/macos-signing-and-permissions.md.
+const AUTO_UPDATE: bool = !cfg!(debug_assertions);
+
 fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     let id = event.id.as_ref();
     match id {
@@ -1575,6 +1597,13 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                 // Settings, and surface the result — an "up to date" modal, or
                 // the install banner when an update was staged.
                 show_main_window(&app);
+                if !AUTO_UPDATE {
+                    // Dev build: no distribution channel to pull from. Report
+                    // up-to-date so Settings' "checking…" state resolves, and
+                    // never replace the self-signed dev build with a release.
+                    let _ = app.emit(ipc::event::UPDATE_NONE, ());
+                    return;
+                }
                 match update::check_and_download(&app).await {
                     Some(u) => {
                         let info = u.info();

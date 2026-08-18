@@ -52,6 +52,30 @@ shell-launched binary) so it is its own TCC "responsible process". A bare binary
 launched from a terminal gets its grants attributed to the *terminal*, not
 Murmur.
 
+## Why dev builds never auto-update (and must not)
+
+The dev build and a distributed release share the bundle id `dev.lgr.murmur`
+but are signed by **different certs**: the dev build by the self-signed
+`murmur dev` cert, a release by Apple **Developer ID**. Their designated
+requirements therefore differ, and an Accessibility grant is pinned to whichever
+one was authorized. So if a running dev build auto-updated — the updater
+downloads the release DMG and **installs it in place over the running app** —
+the same bundle id would flip from `murmur dev`-signed to Developer-ID-signed,
+its DR would stop matching the granted one, and macOS would **silently drop the
+Accessibility grant**: the Fn tap wedges off and the app re-prompts. The next
+`./scripts/dev.sh` overwrites it back to a dev signature, so you ping-pong.
+
+Fix: **the auto-updater is compiled out of dev builds.** `lib.rs` gates every
+update path (the hourly background check *and* the tray "Check for Updates…") on
+`const AUTO_UPDATE: bool = !cfg!(debug_assertions)` — false in the debug profile
+`scripts/dev.sh` builds, true only in CI's `--release` build. A dev build never
+sees the upgrade banner and never replaces itself, so its grant is never
+invalidated. Do not re-enable updates in debug builds.
+
+If you already hit this once (grant shows "on" but `AXIsProcessTrusted()` is
+false), clear the poisoned entry and re-grant:
+`tccutil reset Accessibility dev.lgr.murmur && ./scripts/dev.sh`.
+
 ## The setup
 
 > **New machine?** `./scripts/setup.sh` automates §1 and §2 below (it creates the
