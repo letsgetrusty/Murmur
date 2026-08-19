@@ -399,7 +399,7 @@ impl KokoroSpeaker {
                 if path.exists() {
                     continue;
                 }
-                if let Some(wav) = synth_chunk_wav(&tts, &text, id).await {
+                if let Some(wav) = synth_chunk_wav(&tts, &text, id, 0).await {
                     write_cache_file(&path, &wav);
                 }
             }
@@ -501,24 +501,32 @@ fn normalize_for_tts(text: &str) -> String {
     out
 }
 
-/// Split read-aloud text into chunks, breaking **only at natural pauses** so a
-/// chunk boundary never lands mid-phrase. Kokoro synthesizes each chunk as an
-/// independent utterance (its own prosody + edge silence), so a break mid-clause
-/// sounds like an unnatural pause. Rules:
-/// - Break at sentence ends (`. ! ? ; :` or newline) past `MIN`, so each chunk is
-///   a whole sentence. Commas and other in-sentence pauses are left *inside* the
-///   chunk, where Kokoro voices them naturally.
-/// - Only a sentence longer than `CAP` is broken further, at the last **comma**
-///   before the cap (a natural pause), falling back to the last word boundary if
-///   there's no comma. This is rare; most sentences stay whole.
+/// Inter-chunk gaps appended after trimming Kokoro's (uneven, ~630ms total) edge
+/// padding, so a read keeps natural spacing without the dead air we measured.
+const SENTENCE_GAP_MS: u32 = 140; // after a full sentence — a natural breath
+const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — just flows
+
+/// Split read-aloud text into `(chunk, hard_break)` pairs, breaking **only at
+/// natural pauses** so a boundary never lands mid-phrase (Kokoro synthesizes each
+/// chunk as an independent utterance with its own prosody, so a mid-clause seam
+/// sounds like an unnatural pause). Rules:
+/// - Break at sentence ends (`. ! ? ; :` or newline) past `MIN` → a whole
+///   sentence, `hard = true` (a natural breath follows it).
+/// - **First chunk only:** also break at the earliest comma within `FIRST_MAX`
+///   → a small opening chunk so the first word plays sooner. It's a *real* pause
+///   (a comma), marked `hard = false` so it flows into the rest of the sentence.
+/// - Only a sentence longer than `CAP` is broken further, at the last comma
+///   before the cap (else the last word boundary). Rare; most sentences stay whole.
 ///
-/// (Time-to-first-word still stays low: synth runs well above real time, so the
-/// player's small `PREBUFFER_SECS` clears after the first sentence.)
-fn split_for_tts(text: &str) -> Vec<String> {
+/// The `hard` flag drives how much silence we append after the chunk (see
+/// `SENTENCE_GAP_MS` / `SOFT_GAP_MS`); trimming makes seams gapless so these small
+/// controlled gaps are the *only* spacing between chunks.
+fn split_for_tts(text: &str) -> Vec<(String, bool)> {
     let text = text.trim();
     const MIN: usize = 16; // keep tiny fragments merged into the next clause
+    const FIRST_MAX: usize = 100; // first chunk may break at an *early* comma only
     const CAP: usize = 220; // only a long sentence is broken further, at a comma
-    let mut chunks = Vec::new();
+    let mut chunks: Vec<(String, bool)> = Vec::new();
     let mut cur = String::new();
     let mut last_comma = 0usize; // byte index just past the most recent comma
     let mut last_space = 0usize; // byte index just past the most recent space
@@ -529,9 +537,17 @@ fn split_for_tts(text: &str) -> Vec<String> {
             ' ' => last_space = cur.len(),
             _ => {}
         }
-        let boundary = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
-        if boundary && cur.trim_end().len() >= MIN {
-            push_chunk(&mut chunks, &cur);
+        let first = chunks.is_empty();
+        let sentence_end = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
+        if sentence_end && cur.trim_end().len() >= MIN {
+            push_chunk(&mut chunks, &cur, true);
+            cur.clear();
+            last_comma = 0;
+            last_space = 0;
+        } else if first && ch == ',' && cur.trim_end().len() >= MIN && cur.len() <= FIRST_MAX {
+            // Fast first word: end the opening chunk at the first comma (a real
+            // pause). Soft break — flows into the rest of the sentence.
+            push_chunk(&mut chunks, &cur, false);
             cur.clear();
             last_comma = 0;
             last_space = 0;
@@ -545,55 +561,91 @@ fn split_for_tts(text: &str) -> Vec<String> {
             };
             if at > MIN && at < cur.len() {
                 let carry = cur.split_off(at);
-                push_chunk(&mut chunks, &cur);
+                push_chunk(&mut chunks, &cur, false);
                 cur = carry;
             } else {
-                push_chunk(&mut chunks, &cur);
+                push_chunk(&mut chunks, &cur, false);
                 cur.clear();
             }
             last_comma = 0;
             last_space = 0;
         }
     }
-    push_chunk(&mut chunks, &cur);
+    push_chunk(&mut chunks, &cur, true);
     if chunks.is_empty() {
-        chunks.push(text.to_string());
+        chunks.push((text.to_string(), true));
     }
     chunks
 }
 
-/// Push `s` (trimmed) onto `chunks` unless it's empty.
-fn push_chunk(chunks: &mut Vec<String>, s: &str) {
+/// Push `s` (trimmed) onto `chunks` with its break kind unless it's empty.
+/// `hard` = ended at a sentence terminator (a natural pause follows); `false` =
+/// a soft comma/clause break that should flow into the next chunk.
+fn push_chunk(chunks: &mut Vec<(String, bool)>, s: &str, hard: bool) {
     let t = s.trim();
     if !t.is_empty() {
-        chunks.push(t.to_string());
+        chunks.push((t.to_string(), hard));
     }
 }
 
 /// Synthesize one chunk to a 16-bit WAV buffer; `None` on synth error.
-async fn synth_chunk_wav(tts: &KokoroTts, text: &str, voice: &str) -> Option<Vec<u8>> {
+async fn synth_chunk_wav(
+    tts: &KokoroTts,
+    text: &str,
+    voice: &str,
+    tail_gap_ms: u32,
+) -> Option<Vec<u8>> {
     let t0 = std::time::Instant::now();
     match tts.synth(text, voice).await {
         Ok((samples, _)) => {
+            // Kokoro pads every chunk with edge silence (~220ms lead, ~430ms tail
+            // measured). Trim it so chunks play gapless — the leading trim comes
+            // straight off time-to-first-word — then append a short, controlled
+            // gap so chunks don't slam together (0 = seamless, for the last chunk).
+            let voiced = trim_silence(&samples);
+            let gap = tail_gap_ms as usize * KOKORO_SAMPLE_RATE as usize / 1000;
+            let mut out = Vec::with_capacity(voiced.len() + gap);
+            out.extend_from_slice(voiced);
+            out.resize(out.len() + gap, 0.0);
             // Synth-vs-realtime ratio: >~2x means the ONNX session is really on
             // the ANE/GPU (CoreML), ~1x or slower means it fell back to CPU. At
             // `debug` (per-chunk, ~20 lines/read) — set RUST_LOG=debug to see it
             // when diagnosing synth speed; time-to-first-word below stays `info`.
             let synth_secs = t0.elapsed().as_secs_f32();
-            let audio_secs = samples.len() as f32 / KOKORO_SAMPLE_RATE as f32;
+            let audio_secs = out.len() as f32 / KOKORO_SAMPLE_RATE as f32;
             log::debug!(
-                "tts/kokoro: synth {} chars → {:.2}s audio in {:.0}ms ({:.1}x realtime)",
+                "tts/kokoro: synth {} chars → {:.2}s audio in {:.0}ms ({:.1}x realtime) [trimmed {:.0}ms pad]",
                 text.chars().count(),
                 audio_secs,
                 synth_secs * 1000.0,
                 audio_secs / synth_secs.max(1e-3),
+                samples.len().saturating_sub(voiced.len()) as f32 / KOKORO_SAMPLE_RATE as f32 * 1000.0,
             );
-            Some(pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE))
+            Some(pcm_f32_to_wav(&out, KOKORO_SAMPLE_RATE))
         }
         Err(e) => {
             log::warn!("tts/kokoro: synth chunk failed: {e}");
             None
         }
+    }
+}
+
+/// Trim the near-silent padding Kokoro adds to each synthesized chunk, returning
+/// the voiced middle. Keeps a ~10ms guard each side so a soft onset/tail is never
+/// clipped. Returns the input unchanged if the whole clip is below threshold.
+fn trim_silence(samples: &[f32]) -> &[f32] {
+    const THRESH: f32 = 0.005;
+    const GUARD: usize = KOKORO_SAMPLE_RATE as usize / 100; // 10ms each side
+    match (
+        samples.iter().position(|s| s.abs() >= THRESH),
+        samples.iter().rposition(|s| s.abs() >= THRESH),
+    ) {
+        (Some(a), Some(b)) => {
+            let start = a.saturating_sub(GUARD);
+            let end = (b + 1 + GUARD).min(samples.len());
+            &samples[start..end]
+        }
+        _ => samples,
     }
 }
 
@@ -712,7 +764,7 @@ impl Speaker for KokoroSpeaker {
             let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
                 return;
             };
-            if let Some(wav) = synth_chunk_wav(&tts, &text, &voice).await {
+            if let Some(wav) = synth_chunk_wav(&tts, &text, &voice, 0).await {
                 if write_cache_file(&path, &wav) {
                     play_preview_file(&slot, &path, speed);
                 }
@@ -819,7 +871,7 @@ impl Speaker for KokoroSpeaker {
             });
 
             let chunk_chars: Arc<Vec<f32>> =
-                Arc::new(chunks.iter().map(|c| c.chars().count() as f32).collect());
+                Arc::new(chunks.iter().map(|(c, _)| c.chars().count() as f32).collect());
             let total_chars = chunk_chars.iter().sum::<f32>().max(1.0);
             let durations: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
             let all_enqueued = Arc::new(AtomicBool::new(false));
@@ -918,9 +970,9 @@ impl Speaker for KokoroSpeaker {
             // Hold playback until this many seconds of audio are buffered, then
             // start. Kept small: synth measured ~2–4.5× real time on the ANE (well
             // above 1×), so the lead only *grows* once playing and low prebuffer
-            // won't stall — it just sets how soon the first word plays. Chunks are
-            // whole sentences (split_for_tts), so playback begins right after the
-            // first sentence synthesizes.
+            // won't stall — it just sets how soon the first word plays. The first
+            // chunk is a small opening clause when the sentence has an early comma
+            // (split_for_tts), so playback begins as soon as that synthesizes.
             const PREBUFFER_SECS: f32 = 0.6;
             let mut playing = false;
             let mut buffered = 0f32;
@@ -929,14 +981,23 @@ impl Speaker for KokoroSpeaker {
             // get the session). Reported in the "first audio" line below.
             let mut synth_ms = 0f32;
             let chunk_count = chunks.len();
-            for (i, chunk) in chunks.iter().enumerate() {
+            for (i, (chunk, hard)) in chunks.iter().enumerate() {
                 // Bail if we were stopped or a newer read superseded us (a
                 // re-trigger resets `active`, so also check our generation).
                 if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
                 }
+                // Gap after this chunk: a natural breath after a sentence, a short
+                // flow after a soft (comma) break, and nothing after the last one.
+                let tail_gap_ms = if i + 1 == chunk_count {
+                    0
+                } else if *hard {
+                    SENTENCE_GAP_MS
+                } else {
+                    SOFT_GAP_MS
+                };
                 let t_synth = std::time::Instant::now();
-                let wav = match synth_chunk_wav(&tts, chunk, voice.as_str()).await {
+                let wav = match synth_chunk_wav(&tts, chunk, voice.as_str(), tail_gap_ms).await {
                     Some(w) => w,
                     None => break,
                 };
@@ -1137,10 +1198,11 @@ mod tests {
             chunks.len() >= 2,
             "expected multiple chunks, got {chunks:?}"
         );
-        assert_eq!(
-            chunks.join(" ").split_whitespace().count(),
-            text.split_whitespace().count()
-        );
+        let words: usize = chunks
+            .iter()
+            .map(|(c, _)| c.split_whitespace().count())
+            .sum();
+        assert_eq!(words, text.split_whitespace().count());
     }
 
     /// Authoring helper for dev_terms.tab: phonemize a real English word/phrase
@@ -1210,11 +1272,28 @@ mod tests {
     fn short_text_is_one_chunk() {
         // Text shorter than the first-chunk cap stays whole — nothing to gain by
         // splitting a clip that's already tiny.
-        assert_eq!(split_for_tts("Hi there."), vec!["Hi there.".to_string()]);
+        assert_eq!(split_for_tts("Hi there."), vec![("Hi there.".to_string(), true)]);
         assert_eq!(
             split_for_tts("read this aloud"),
-            vec!["read this aloud".to_string()]
+            vec![("read this aloud".to_string(), true)]
         );
+    }
+
+    #[test]
+    fn first_chunk_breaks_at_early_comma() {
+        // For a fast first word, the opening chunk ends at the first comma — a
+        // real pause — marked soft (false) so it flows into the rest. Later
+        // chunks stay whole sentences. Words are preserved.
+        let chunks =
+            split_for_tts("Local dictation should feel instant, and read aloud starts right away.");
+        assert!(chunks.len() >= 2, "expected an early split, got {chunks:?}");
+        assert_eq!(chunks[0].0, "Local dictation should feel instant,");
+        assert!(!chunks[0].1, "opening comma chunk should be a soft break");
+        let words: usize = chunks
+            .iter()
+            .map(|(c, _)| c.split_whitespace().count())
+            .sum();
+        assert_eq!(words, 11);
     }
 
     #[test]
@@ -1230,16 +1309,20 @@ mod tests {
             chunks.len() >= 2,
             "expected multiple chunks, got {chunks:?}"
         );
-        for c in &chunks {
+        // This text has no early comma, so every chunk is a whole sentence (the
+        // first-chunk comma exception is covered separately).
+        for (c, hard) in &chunks {
+            assert!(hard, "sentence-only text should yield hard breaks: {c:?}");
             assert!(
                 matches!(c.chars().last(), Some('.' | '!' | '?' | ';' | ':')),
                 "chunk should end at a sentence boundary, not mid-phrase: {c:?}"
             );
         }
-        assert_eq!(
-            chunks.join(" ").split_whitespace().count(),
-            text.split_whitespace().count()
-        );
+        let words: usize = chunks
+            .iter()
+            .map(|(c, _)| c.split_whitespace().count())
+            .sum();
+        assert_eq!(words, text.split_whitespace().count());
     }
 
     #[test]
