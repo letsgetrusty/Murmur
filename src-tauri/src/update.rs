@@ -81,6 +81,13 @@ pub async fn check_and_download<R: Runtime>(app: &AppHandle<R>) -> Option<Staged
 
 /// Install a previously-staged (already-verified) update, then relaunch. Errors
 /// as a display string if the update is no longer offered or the install fails.
+///
+/// The staged bytes were fetched in the background and can go stale: if newer
+/// releases shipped since (e.g. vX+1 *and* vX+2 landed while the user sat on the
+/// banner), installing the staged vX+1 would drop them on an intermediate version
+/// and immediately re-prompt — stepping release-by-release. So we re-check the
+/// endpoint and, when it now offers a newer version than we staged, download that
+/// instead. Result: the user always jumps straight to the latest in one hop.
 pub async fn install_staged<R: Runtime>(
     app: &AppHandle<R>,
     staged: StagedUpdate,
@@ -93,10 +100,23 @@ pub async fn install_staged<R: Runtime>(
         .await
         .map_err(|e| format!("update check failed: {e}"))?
         .ok_or_else(|| "update is no longer available".to_string())?;
+    let bytes = if update.version == staged.version {
+        staged.bytes
+    } else {
+        log::info!(
+            "update: staged v{} superseded by v{} — fetching the latest so we upgrade in one hop",
+            staged.version,
+            update.version
+        );
+        update
+            .download(|_, _| {}, || {})
+            .await
+            .map_err(|e| format!("re-download failed: {e}"))?
+    };
     update
-        .install(&staged.bytes)
+        .install(&bytes)
         .map_err(|e| format!("install failed: {e}"))?;
-    log::info!("update: installed v{} — relaunching", staged.version);
+    log::info!("update: installed v{} — relaunching", update.version);
     crate::relaunch(app);
     Ok(())
 }
