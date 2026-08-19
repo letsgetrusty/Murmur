@@ -870,8 +870,12 @@ impl Speaker for KokoroSpeaker {
                 temps: Vec::new(),
             });
 
-            let chunk_chars: Arc<Vec<f32>> =
-                Arc::new(chunks.iter().map(|(c, _)| c.chars().count() as f32).collect());
+            let chunk_chars: Arc<Vec<f32>> = Arc::new(
+                chunks
+                    .iter()
+                    .map(|(c, _)| c.chars().count() as f32)
+                    .collect(),
+            );
             let total_chars = chunk_chars.iter().sum::<f32>().max(1.0);
             let durations: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
             let all_enqueued = Arc::new(AtomicBool::new(false));
@@ -1272,7 +1276,10 @@ mod tests {
     fn short_text_is_one_chunk() {
         // Text shorter than the first-chunk cap stays whole — nothing to gain by
         // splitting a clip that's already tiny.
-        assert_eq!(split_for_tts("Hi there."), vec![("Hi there.".to_string(), true)]);
+        assert_eq!(
+            split_for_tts("Hi there."),
+            vec![("Hi there.".to_string(), true)]
+        );
         assert_eq!(
             split_for_tts("read this aloud"),
             vec![("read this aloud".to_string(), true)]
