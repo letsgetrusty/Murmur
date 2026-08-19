@@ -383,16 +383,19 @@ async function finish() {
   // Read-aloud defaults to Kokoro (already the config default); it's changed in
   // Settings, not here. The model keeps downloading via the startup prefetch
   // after the relaunch/close below.
+  // Only relaunch when Accessibility was granted *this session* — that's the one
+  // case the startup-installed Fn tap needs a restart to pick up. Otherwise just
+  // close the onboarding window (no jarring, pointless relaunch).
+  const relaunch = needsRelaunch();
   try {
-    await invoke(CMD.FINISH_ONBOARDING);
+    // finish_onboarding lands us in the settings window; when we're about to
+    // relaunch it defers that to the restarted app (via a one-shot marker).
+    await invoke(CMD.FINISH_ONBOARDING, { willRelaunch: relaunch });
   } catch (e) {
     btn.disabled = false;
     return;
   }
-  // Only relaunch when Accessibility was granted *this session* — that's the one
-  // case the startup-installed Fn tap needs a restart to pick up. Otherwise just
-  // close the onboarding window (no jarring, pointless relaunch).
-  if (needsRelaunch()) {
+  if (relaunch) {
     await invoke(CMD.RELAUNCH_APP);
   } else {
     await invoke(CMD.CLOSE_ONBOARDING);

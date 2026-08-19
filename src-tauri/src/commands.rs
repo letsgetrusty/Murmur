@@ -398,11 +398,19 @@ pub async fn request_microphone() -> i64 {
         .unwrap_or_else(|_| crate::permissions::microphone_status())
 }
 
-/// Mark onboarding complete and persist it. The caller (onboarding JS) then
-/// either relaunches — to activate the Fn tap once Accessibility is granted —
-/// or closes the window, so we don't tear the webview down mid-call here.
+/// Mark onboarding complete, persist it, and land the user in the desktop UI.
+/// The caller (onboarding JS) then either relaunches — to activate the Fn tap
+/// once Accessibility is granted — or closes the window, so we don't tear the
+/// webview down mid-call here. `will_relaunch` mirrors that choice: when a
+/// relaunch follows, a settings window shown now would just be torn down, so we
+/// drop a one-shot marker the restarted app reads instead; otherwise we open it
+/// immediately.
 #[tauri::command]
-pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
+pub fn finish_onboarding(
+    app: AppHandle,
+    state: State<AppState>,
+    will_relaunch: bool,
+) -> Result<(), String> {
     let snapshot = {
         let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
         cfg.onboarding_done = true;
@@ -410,6 +418,11 @@ pub fn finish_onboarding(state: State<AppState>) -> Result<(), String> {
     };
     crate::config::save(&snapshot).map_err(|e| e.to_string())?;
     log::info!("onboarding: complete");
+    if will_relaunch {
+        crate::set_reveal_main_on_launch();
+    } else {
+        crate::show_main_window(&app);
+    }
     Ok(())
 }
 

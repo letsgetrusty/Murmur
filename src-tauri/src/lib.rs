@@ -511,10 +511,23 @@ pub fn run() {
             // the chord still works.
             fn_key::install(app.handle().clone())?;
 
+            // Log the microphone authorization at startup (symmetric to the
+            // Accessibility line above) — makes permission-state bugs diagnosable
+            // from the log without instrumenting the onboarding poll.
+            log::info!(
+                "mic: authorization status at startup = {} [0=notDetermined,1=restricted,2=denied,3=authorized]",
+                permissions::microphone_status()
+            );
+
             // First run: walk the user through Accessibility, microphone, and
             // the model downloads. Shown until they finish onboarding.
             if !cfg.onboarding_done {
                 show_onboarding_window(app.handle());
+            } else if take_reveal_main_on_launch() {
+                // Onboarding just finished and relaunched to activate the Fn tap
+                // (see `finish_onboarding`). The user completed setup, so land
+                // them in the settings window instead of tray-only.
+                show_main_window(app.handle());
             }
 
             // Background auto-update: check on launch and hourly, and when a
@@ -586,8 +599,21 @@ pub fn run() {
                 }
             }
             // macOS: clicking the dock icon (with no visible windows) fires
-            // Reopen — bring the settings window up.
-            RunEvent::Reopen { .. } => show_main_window(app),
+            // Reopen. During first-run onboarding a dock click means "come back
+            // to the flow" — the user just granted Accessibility in System
+            // Settings and clicked our icon to return — so re-focus the
+            // onboarding window instead of popping Settings over it. Once
+            // onboarding finishes its window is gone, so this falls through to
+            // the normal "bring the settings window up" behavior.
+            RunEvent::Reopen { .. } => {
+                if let Some(win) = app.get_webview_window("onboarding") {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.set_focus();
+                } else {
+                    show_main_window(app);
+                }
+            }
             _ => {}
         });
 }
@@ -600,7 +626,32 @@ pub fn run() {
 /// Murmur keeps no WebKit content process for a window that's rarely opened.
 /// It self-populates from the backend on load (`settings.js` `init`), so a
 /// fresh instance needs no restored state.
-fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+/// One-shot marker (a temp file) that tells the *next* launch to open the
+/// settings window. Set by `finish_onboarding` when it relaunches to activate the
+/// Fn tap, so the restarted app lands the user in the desktop UI rather than
+/// tray-only. Consumed (deleted) by `take_reveal_main_on_launch` at startup.
+fn reveal_main_marker() -> std::path::PathBuf {
+    std::env::temp_dir().join("murmur-reveal-main-on-launch")
+}
+
+/// Record that the next launch should open the settings window.
+pub(crate) fn set_reveal_main_on_launch() {
+    let _ = std::fs::write(reveal_main_marker(), b"1");
+}
+
+/// Whether this launch should open the settings window (and clear the marker so
+/// it only fires once).
+fn take_reveal_main_on_launch() -> bool {
+    let p = reveal_main_marker();
+    if p.exists() {
+        let _ = std::fs::remove_file(&p);
+        true
+    } else {
+        false
+    }
+}
+
+pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
@@ -709,6 +760,13 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
             .inner_size(560.0, 500.0)
             .resizable(false)
             .center()
+            // Accept the first click even when the window isn't key. Onboarding
+            // bounces the user to System Settings to grant Accessibility, so the
+            // window is inactive when they come back — without this, macOS eats
+            // their first click just to activate it (acceptsFirstMouse defaults to
+            // NO), and the next permission button ("Enable microphone") needs two
+            // clicks to fire. See the onboarding permissions step.
+            .accept_first_mouse(true)
             // Chromeless, transparent window so the webview paints a self-contained
             // rounded modal (progress bar to the very top edge, no macOS title bar) —
             // the onboarding IS the modal. Transparency is already enabled app-wide
