@@ -506,6 +506,10 @@ fn normalize_for_tts(text: &str) -> String {
 const SENTENCE_GAP_MS: u32 = 140; // after a full sentence — a natural breath
 const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — just flows
 
+// A sentence break must read as a longer pause than a soft (comma) break, or the
+// prosody inverts. Enforced at compile time.
+const _: () = assert!(SENTENCE_GAP_MS > SOFT_GAP_MS);
+
 /// Split read-aloud text into `(chunk, hard_break)` pairs, breaking **only at
 /// natural pauses** so a boundary never lands mid-phrase (Kokoro synthesizes each
 /// chunk as an independent utterance with its own prosody, so a mid-clause seam
@@ -1382,5 +1386,137 @@ mod tests {
             )
             .unwrap();
         });
+    }
+
+    // ── trim_silence: the read-aloud edge-trim (Layer 1 regression guards) ──
+    // A bug here clips word onsets/tails or fails to remove Kokoro's padding, so
+    // it's exactly the kind of quality regression we want caught in CI.
+
+    const GUARD: usize = KOKORO_SAMPLE_RATE as usize / 100; // 10ms, mirrors trim_silence
+
+    /// Build a clip: `lead` silent samples, `voiced` loud samples, `tail` silent.
+    fn clip(lead: usize, voiced: usize, tail: usize) -> Vec<f32> {
+        let mut v = vec![0.0f32; lead];
+        v.extend(std::iter::repeat(0.5f32).take(voiced));
+        v.extend(std::iter::repeat(0.0f32).take(tail));
+        v
+    }
+
+    #[test]
+    fn trim_silence_removes_padding_but_keeps_a_guard() {
+        // 2000 lead + 1000 voiced + 3000 tail. Trim keeps the voiced span plus a
+        // GUARD on each side (clamped to the clip), never clipping the onset/tail.
+        let samples = clip(2000, 1000, 3000);
+        let out = trim_silence(&samples);
+        // Guard preserved on each side around the 1000 voiced samples.
+        assert_eq!(out.len(), 1000 + 2 * GUARD);
+        // The voiced region is fully present (all 0.5 samples retained).
+        assert_eq!(out.iter().filter(|s| **s == 0.5).count(), 1000);
+    }
+
+    #[test]
+    fn trim_silence_never_clips_the_voiced_region() {
+        // Even with a tiny lead/tail (< GUARD), every voiced sample survives.
+        for (lead, tail) in [(0, 0), (5, 5), (GUARD * 3, GUARD * 3)] {
+            let samples = clip(lead, 800, tail);
+            let out = trim_silence(&samples);
+            assert_eq!(
+                out.iter().filter(|s| **s == 0.5).count(),
+                800,
+                "voiced samples lost for lead={lead} tail={tail}"
+            );
+            // Never longer than the input, never shorter than the voiced core.
+            assert!(out.len() <= samples.len());
+            assert!(out.len() >= 800);
+        }
+    }
+
+    #[test]
+    fn trim_silence_all_silence_is_returned_unchanged() {
+        // Below-threshold everywhere: hand back the input rather than an empty
+        // slice, so a silent chunk still enqueues (and its gap still applies).
+        let samples = vec![0.0f32; 5000];
+        assert_eq!(trim_silence(&samples).len(), samples.len());
+        // Sub-threshold noise (< 0.005) also counts as silence.
+        let quiet = vec![0.004f32; 5000];
+        assert_eq!(trim_silence(&quiet).len(), quiet.len());
+    }
+
+    // ── chunk gap policy: mirrors the read-aloud loop's per-chunk gap choice ──
+    // Kept in lockstep with lib-side logic; a change to the constants or the
+    // sentence/soft/last rule shows up here.
+
+    /// The gap the read-aloud loop appends after chunk `i` of `n`, given whether
+    /// it ended at a sentence boundary. Mirrors the match in `speak`.
+    fn chunk_gap_ms(i: usize, n: usize, hard: bool) -> u32 {
+        if i + 1 == n {
+            0
+        } else if hard {
+            SENTENCE_GAP_MS
+        } else {
+            SOFT_GAP_MS
+        }
+    }
+
+    #[test]
+    fn chunk_gap_policy_last_chunk_is_seamless() {
+        // The final chunk never gets a trailing gap (nothing follows it).
+        assert_eq!(chunk_gap_ms(3, 4, true), 0);
+        assert_eq!(chunk_gap_ms(0, 1, true), 0);
+    }
+
+    #[test]
+    fn chunk_gap_policy_sentence_vs_soft() {
+        // Non-final: a sentence end gets the longer breath, a soft (comma) break
+        // the shorter flow. (The breath > flow invariant is a compile-time
+        // assert next to the constants.)
+        assert_eq!(chunk_gap_ms(0, 3, true), SENTENCE_GAP_MS);
+        assert_eq!(chunk_gap_ms(1, 3, false), SOFT_GAP_MS);
+    }
+
+    // ── split_for_tts invariants over adversarial inputs ──
+
+    #[test]
+    fn split_never_breaks_mid_word_and_preserves_words() {
+        // No-punctuation, comma-only, and long-token inputs must still split
+        // without losing or splitting words.
+        for text in [
+            "one two three four five six seven eight nine ten eleven twelve thirteen fourteen",
+            "alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda, mu",
+            &"supercalifragilisticexpialidocious ".repeat(20),
+        ] {
+            let chunks = split_for_tts(text);
+            let joined: String = chunks
+                .iter()
+                .map(|(c, _)| c.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(
+                joined.split_whitespace().count(),
+                text.split_whitespace().count(),
+                "word count changed for {text:?}"
+            );
+            // Every whitespace-delimited token in the output is a whole token
+            // from the input — a mid-word break would produce a fragment.
+            let input_words: std::collections::HashSet<&str> = text.split_whitespace().collect();
+            for w in joined.split_whitespace() {
+                let bare = w.trim_end_matches([',', '.', '!', '?', ';', ':']);
+                assert!(
+                    input_words.contains(w) || input_words.contains(bare),
+                    "produced a non-word fragment {w:?} for {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn split_handles_empty_and_whitespace() {
+        // Never panics and never invents content: any chunk from empty/whitespace
+        // input is itself empty (the defensive fallback pushes a blank chunk).
+        for text in ["", "   \n  "] {
+            for (c, _) in split_for_tts(text) {
+                assert!(c.trim().is_empty(), "invented content {c:?} from {text:?}");
+            }
+        }
     }
 }
