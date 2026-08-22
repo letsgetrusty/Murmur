@@ -1820,19 +1820,24 @@ fn spawn_dictation_worker<R: Runtime>(
                     let on_level: audio::LevelFn = Box::new(move |level: f32| {
                         let _ = app_for_level.emit(ipc::event::AUDIO_LEVEL, level);
                     });
-                    // Play the start cue *before* opening the mic. Opening the
-                    // input device makes macOS reconfigure the audio route, and
-                    // a system sound fired during that transition is swallowed
-                    // by coreaudiod — the "start sound sometimes doesn't play"
-                    // bug. Cueing first hits the stable route, and also keeps
-                    // the cue out of the recording and drops its latency to zero.
-                    // (The stop cue needs no such move: by then the route has
-                    // long settled.)
-                    play_dictation_cue(&app, true);
+                    // Open the mic FIRST, then cue. The start cue plays through
+                    // AVAudioPlayer (sound.rs), whose first `play()` synchronously
+                    // wakes the output device — up to ~0.5s when the speakers have
+                    // idled to sleep. Cueing before `Recorder::start` (as we did
+                    // to dodge a cue-swallow during input-route setup) put that
+                    // cold-wake directly in front of the mic open, so the user's
+                    // first word or two were dropped — the "snappiness regressed"
+                    // report. The mic itself opens in ~70ms and delivers audio
+                    // almost immediately (measured), so we start it right away and
+                    // fire the cue on a detached thread: its output-wake no longer
+                    // blocks capture, and playing it once the input route has
+                    // settled avoids the swallow the old ordering guarded against.
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
                             rec = Some(r);
+                            let app_cue = app.clone();
+                            std::thread::spawn(move || play_dictation_cue(&app_cue, true));
                         }
                         Err(e) => {
                             log::warn!("dictation: failed to start recording: {e}");
