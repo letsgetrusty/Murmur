@@ -22,7 +22,12 @@
 #   ./scripts/publish-release.sh --major      # major bump  (0.1.3 → 1.0.0)
 #   ./scripts/publish-release.sh --dry-run    # print the next version + mode, no changes
 #   ./scripts/publish-release.sh --self-signed  # deliberate self-signed release (no notarization)
+#   ./scripts/publish-release.sh --skip-bench   # skip the perf gate (no models/hardware)
 #   ./scripts/publish-release.sh 1.2.3        # pin an explicit version (escape hatch)
+#
+# Before tagging it runs scripts/bench.sh — the core-experience performance gate
+# (STT/TTS/dictation-start latency) — and ABORTS on a regression. See
+# docs/testing.md.
 # The first release (no tags yet) ships the current manifest version.
 #
 # Prereqs: gh (authenticated) + a clean working tree on main. --self-signed also
@@ -41,7 +46,7 @@ die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # --- Parse args ---------------------------------------------------------------
 # No hand-typed number by default: bump keyword (patch|minor|major) or an
 # explicit X.Y.Z escape hatch, plus an optional --dry-run.
-BUMP="patch"; EXPLICIT=""; DRYRUN=0; FORCE_SELFSIGN=0
+BUMP="patch"; EXPLICIT=""; DRYRUN=0; FORCE_SELFSIGN=0; SKIP_BENCH=0
 for a in "$@"; do
   case "$a" in
     --major|major) BUMP="major" ;;
@@ -49,10 +54,11 @@ for a in "$@"; do
     --patch|patch) BUMP="patch" ;;
     --dry-run|-n)  DRYRUN=1 ;;
     --self-signed) FORCE_SELFSIGN=1 ;;
+    --skip-bench)  SKIP_BENCH=1 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed -E 's/^# ?//'; exit 0 ;;
     v[0-9]*.[0-9]*.[0-9]* | [0-9]*.[0-9]*.[0-9]*) EXPLICIT="${a#v}" ;;
-    *) die "unknown arg '$a' — use [--major|--minor|--patch] [--self-signed] [--dry-run] [X.Y.Z]" ;;
+    *) die "unknown arg '$a' — use [--major|--minor|--patch] [--self-signed] [--skip-bench] [--dry-run] [X.Y.Z]" ;;
   esac
 done
 
@@ -134,6 +140,19 @@ fi
 BRANCH="$(git branch --show-current)"
 [ "$BRANCH" = "main" ] || warn "not on main (on '$BRANCH') — the release tag will point at this branch."
 git diff --quiet && git diff --cached --quiet || die "working tree not clean — commit or stash first."
+
+# --- Core-experience performance gate (Layer 2) -------------------------------
+# Fail closed on a latency/throughput regression before it reaches auto-updating
+# users. Runs the STT/TTS/dictation-start benches against thresholds; a missing
+# model/hardware SKIPS (not a regression), a real breach ABORTS the release.
+# Bypass with --skip-bench (e.g. on a machine without the models). See
+# docs/testing.md.
+if [ "$SKIP_BENCH" -eq 1 ]; then
+  warn "skipping the performance gate (--skip-bench) — core latency is unverified."
+else
+  say "Running the core-experience performance gate (scripts/bench.sh)…"
+  "$REPO_ROOT/scripts/bench.sh" || die "performance gate failed — a core path regressed. Fix it, or re-run with --skip-bench to override."
+fi
 
 # --- 1. Set the version in all three manifests --------------------------------
 say "Setting version → $VERSION"

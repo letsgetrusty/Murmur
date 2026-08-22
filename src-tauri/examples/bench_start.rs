@@ -55,15 +55,18 @@ fn time_cue_play(player: NonNull<AnyObject>, label: &str) {
     );
 }
 
-fn time_mic_open(label: &str) {
+/// Returns the mic-capture-ready latency (build + time-to-first-real-audio) in
+/// ms, or None if no device. This is the whole cost of getting the mic live —
+/// the cue is NOT part of it (it runs on a detached thread), which is the point.
+fn time_mic_open(label: &str) -> Option<f32> {
     let host = cpal::default_host();
     let Some(device) = host.default_input_device() else {
         println!("  mic open [{label}]: no input device");
-        return;
+        return None;
     };
     let Ok(supported) = device.default_input_config() else {
         println!("  mic open [{label}]: config query failed");
-        return;
+        return None;
     };
     let config: cpal::StreamConfig = supported.clone().into();
     // Micros-since-play for: first callback, and first callback carrying real
@@ -119,6 +122,10 @@ fn time_mic_open(label: &str) {
         device.name().ok()
     );
     drop(stream);
+    // Ready = stream built + first real audio delivered. If the mic never
+    // delivered audio (fau==0, e.g. no permission), fall back to build time so
+    // the gate reflects at least the open cost.
+    Some(build_ms + if fau > 0.0 { fau } else { 0.0 })
 }
 
 fn main() {
@@ -138,8 +145,28 @@ fn main() {
 
     // WARM: repeat presses while hardware is awake.
     println!("-- warm (repeat presses) --");
+    let mut best_mic = f32::MAX;
     for i in 0..3 {
         time_cue_play(player, &format!("warm{i}"));
-        time_mic_open(&format!("warm{i}"));
+        if let Some(ms) = time_mic_open(&format!("warm{i}")) {
+            best_mic = best_mic.min(ms);
+        }
+    }
+
+    // Release gate (threshold from scripts/bench.sh): the mic must go live
+    // quickly on its own — the fix that recovered the dropped first words keeps
+    // the cue off this path (detached thread), so a regression here means the
+    // mic open itself got slow, or something was put back in front of it.
+    if let Ok(max) = std::env::var("MURMUR_GATE_MAX_MIC_MS") {
+        let max: f32 = max.parse().unwrap_or(f32::MAX);
+        if best_mic.is_finite() && best_mic > max {
+            eprintln!("GATE FAIL: mic-ready {best_mic:.0}ms > {max:.0}ms (first words at risk)");
+            std::process::exit(1);
+        }
+        if best_mic.is_finite() {
+            println!("GATE OK: mic-ready {best_mic:.0}ms ≤ {max:.0}ms");
+        } else {
+            eprintln!("GATE SKIP: no input device / mic audio (permission?)");
+        }
     }
 }

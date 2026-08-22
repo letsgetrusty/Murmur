@@ -106,11 +106,23 @@ fn main() {
         );
     }
     let avg = sum / iters as f32;
+    let avg_rt = audio_secs / (avg / 1000.0);
     println!(
-        "WARM avg: {:.0}ms ({:.1}x realtime) | best: {:.0}ms ({:.1}x realtime)",
+        "WARM avg: {:.0}ms ({avg_rt:.1}x realtime) | best: {:.0}ms ({:.1}x realtime)",
         avg,
-        audio_secs / (avg / 1000.0),
         best,
         audio_secs / (best / 1000.0)
     );
+
+    // Release gate: fail if warm throughput fell below the floor (set by
+    // scripts/bench.sh). Catches a model-throttle or slow-decode regression —
+    // e.g. medium.en dropping to ~2.7x avg where small.en holds ~26x.
+    if let Ok(min) = std::env::var("MURMUR_GATE_MIN_REALTIME") {
+        let min: f32 = min.parse().unwrap_or(0.0);
+        if avg_rt < min {
+            eprintln!("GATE FAIL: STT {avg_rt:.1}x realtime < required {min:.1}x");
+            std::process::exit(1);
+        }
+        println!("GATE OK: STT {avg_rt:.1}x realtime ≥ {min:.1}x");
+    }
 }

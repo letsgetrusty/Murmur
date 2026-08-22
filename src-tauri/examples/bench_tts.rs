@@ -16,11 +16,13 @@ fn models_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(home).join("Library/Application Support/murmur/models")
 }
 
-async fn synth_once(tts: &KokoroTts, text: &str, voice: &str, label: &str) {
+/// Returns `(realtime_factor, max_edge_ms)` for gating in main.
+async fn synth_once(tts: &KokoroTts, text: &str, voice: &str, label: &str) -> (f32, f32) {
     let t = Instant::now();
     let (samples, _) = tts.synth(text, voice).await.expect("synth");
     let ms = t.elapsed().as_secs_f32() * 1000.0;
     let audio = samples.len() as f32 / SR;
+    let realtime = audio / (ms / 1000.0);
     // Edge silence: samples below ~-50 dBFS at head/tail. If Kokoro pads each
     // chunk, trimming it makes small-chunk seams gapless.
     const THRESH: f32 = 0.003;
@@ -30,14 +32,13 @@ async fn synth_once(tts: &KokoroTts, text: &str, voice: &str, label: &str) {
         .rev()
         .take_while(|s| s.abs() < THRESH)
         .count();
+    let lead_ms = lead as f32 / SR * 1000.0;
+    let tail_ms = tail as f32 / SR * 1000.0;
     println!(
-        "  {label}: {:.0}ms → {:.2}s audio ({:.1}x realtime) [edge silence: lead {:.0}ms, tail {:.0}ms]",
-        ms,
-        audio,
-        audio / (ms / 1000.0),
-        lead as f32 / SR * 1000.0,
-        tail as f32 / SR * 1000.0,
+        "  {label}: {:.0}ms → {:.2}s audio ({realtime:.1}x realtime) [edge silence: lead {lead_ms:.0}ms, tail {tail_ms:.0}ms]",
+        ms, audio,
     );
+    (realtime, lead_ms.max(tail_ms))
 }
 
 fn main() {
@@ -83,13 +84,31 @@ fn main() {
         synth_once(&tts, sentence, voice, "cold sentence (graph compile)").await;
 
         println!("-- warm: full first sentence (= current time-to-first-word) --");
+        let mut min_rt = f32::MAX;
+        let mut max_edge = 0f32;
         for i in 0..iters {
-            synth_once(&tts, sentence, voice, &format!("iter {i}")).await;
+            let (rt, edge) = synth_once(&tts, sentence, voice, &format!("iter {i}")).await;
+            min_rt = min_rt.min(rt);
+            max_edge = max_edge.max(edge);
         }
 
         println!("-- warm: tiny opening fragment (= fast-first-chunk cost) --");
         for i in 0..3 {
             synth_once(&tts, tiny, voice, &format!("tiny {i}")).await;
+        }
+
+        let _ = max_edge; // measured for the log; the trim itself is unit-tested.
+
+        // Release gate (threshold from scripts/bench.sh). Catches a synth-speed
+        // regression — e.g. CoreML falling back to CPU, or a model swap that
+        // drops read-aloud below real time so playback stalls mid-sentence.
+        if let Ok(min) = std::env::var("MURMUR_GATE_MIN_REALTIME") {
+            let min: f32 = min.parse().unwrap_or(0.0);
+            if min_rt < min {
+                eprintln!("GATE FAIL: TTS synth {min_rt:.1}x realtime < required {min:.1}x");
+                std::process::exit(1);
+            }
+            println!("GATE OK: TTS synth {min_rt:.1}x realtime ≥ {min:.1}x");
         }
     });
 }
