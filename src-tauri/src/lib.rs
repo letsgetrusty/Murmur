@@ -50,9 +50,11 @@ pub enum DictationMode {
 
 pub enum DictationCmd {
     Start,
-    /// Commit the in-flight recording and process it per `mode`.
+    /// Commit the in-flight recording and process it per `mode`, transcribing
+    /// it as `lang` (a whisper language code — which trigger fired decides it).
     Stop {
         mode: DictationMode,
+        lang: String,
     },
     /// User pressed Esc — drop the in-flight recorder and don't transcribe.
     Cancel,
@@ -1852,7 +1854,7 @@ fn spawn_dictation_worker<R: Runtime>(
                     emit_state(&app, OverlayState::Idle);
                     continue;
                 }
-                DictationCmd::Stop { mode } => {
+                DictationCmd::Stop { mode, lang } => {
                     let Some(r) = rec.take() else {
                         log::debug!("dictation: Stop without active recording");
                         // Esc was registered on press but no recording is in
@@ -1875,6 +1877,7 @@ fn spawn_dictation_worker<R: Runtime>(
                                 chat.clone(),
                                 recording,
                                 mode,
+                                lang,
                             );
                         }
                         Err(e) => {
@@ -2010,6 +2013,7 @@ fn handle_recording<R: Runtime>(
     chat: Arc<dyn llm::LlmChat>,
     recording: audio::Recording,
     mode: DictationMode,
+    lang: String,
 ) {
     // Onboarding "Try it": no overlay, paste, refine, or history — just
     // transcribe (unless the clip was silent or too short) and report the text
@@ -2021,7 +2025,7 @@ fn handle_recording<R: Runtime>(
             emit_test_state(&app, "transcribing", String::new(), heard);
             let text = if heard && recording.duration_ms >= 200 {
                 transcriber
-                    .transcribe(&recording.wav)
+                    .transcribe(&recording.wav, &lang)
                     .await
                     .unwrap_or_default()
             } else {
@@ -2076,7 +2080,7 @@ fn handle_recording<R: Runtime>(
     let pipeline_t0 = std::time::Instant::now();
     tauri::async_runtime::spawn(async move {
         let secs = recording.duration_ms as f64 / 1000.0;
-        let transcribe_result = transcriber.transcribe(&recording.wav).await;
+        let transcribe_result = transcriber.transcribe(&recording.wav, &lang).await;
         // Esc pressed while Whisper was running: abandon the transcript (the
         // native call already finished — we just drop its output), don't paste.
         if dictation_cancelled(&app, gen) {

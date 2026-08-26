@@ -155,7 +155,9 @@ ok "Build OK"
 # ── Local Whisper model ──────────────────────────────────────────────────────
 # Dictation defaults to on-device Whisper (whisper-rs). Fetch the default model
 # now so the first dictation works offline instead of waiting on the download.
-MODEL_NAME="small.en"
+# Multilingual build (not "small.en"): the .en models can't transcribe the
+# alternate dictation language at all. See config.rs DEFAULT_STT_MODEL.
+MODEL_NAME="small"
 MODELS_DIR="$HOME/Library/Application Support/murmur/models"
 MODEL_FILE="$MODELS_DIR/ggml-$MODEL_NAME.bin"
 if [ -f "$MODEL_FILE" ]; then

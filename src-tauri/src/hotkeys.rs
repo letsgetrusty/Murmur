@@ -12,6 +12,8 @@ use crate::{
 #[derive(Clone, Copy)]
 pub enum HotkeyAction {
     Dictate,
+    /// Same as `Dictate` but transcribed as `stt_language_alt`.
+    DictateAlt,
     TtsToggle,
     TtsSpeed,
 }
@@ -20,10 +22,29 @@ impl HotkeyAction {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "dictate" => Some(Self::Dictate),
+            "dictate_alt" => Some(Self::DictateAlt),
             "tts_toggle" => Some(Self::TtsToggle),
             "tts_speed" => Some(Self::TtsSpeed),
             _ => None,
         }
+    }
+}
+
+/// The configured language a dictation trigger transcribes as. Non-dictation
+/// actions never reach `on_release`, so they fall back to the primary language.
+pub fn language_for(action: HotkeyAction, cfg: &Config) -> String {
+    match action {
+        HotkeyAction::DictateAlt => cfg.stt_language_alt.clone(),
+        _ => cfg.stt_language.clone(),
+    }
+}
+
+/// [`language_for`] against live config, so a language edited in Settings takes
+/// effect without a restart. Falls back to the defaults if the lock is poisoned.
+pub fn language_for_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) -> String {
+    match app.state::<AppState>().config.lock() {
+        Ok(cfg) => language_for(action, &cfg),
+        Err(_) => language_for(action, &Config::default()),
     }
 }
 
@@ -44,7 +65,23 @@ fn register_action<R: Runtime>(
             move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
                 // The chord is always plain dictation; refined is Fn+Ctrl.
                 ShortcutState::Pressed => on_press(app),
-                ShortcutState::Released => on_release(app, DictationMode::Plain),
+                ShortcutState::Released => {
+                    let lang = language_for_action(app, HotkeyAction::Dictate);
+                    on_release(app, DictationMode::Plain, lang)
+                }
+            },
+        )?,
+        // Deliberately plain-only: the refine LLM (a 1.7B Qwen with an English
+        // prompt) is weakest outside English and tends to quietly translate, so
+        // the alternate language pastes the raw transcript.
+        HotkeyAction::DictateAlt => gs.on_shortcut(
+            sc,
+            move |app: &AppHandle<R>, _sc: &Shortcut, event: ShortcutEvent| match event.state() {
+                ShortcutState::Pressed => on_press(app),
+                ShortcutState::Released => {
+                    let lang = language_for_action(app, HotkeyAction::DictateAlt);
+                    on_release(app, DictationMode::Plain, lang)
+                }
             },
         )?,
         HotkeyAction::TtsToggle => gs.on_shortcut(
@@ -72,6 +109,7 @@ fn register_action<R: Runtime>(
 pub fn register<R: Runtime>(app: &AppHandle<R>, cfg: &Config) -> anyhow::Result<()> {
     for (action, sc) in [
         (HotkeyAction::Dictate, &cfg.hotkey_dictate),
+        (HotkeyAction::DictateAlt, &cfg.hotkey_dictate_alt),
         (HotkeyAction::TtsToggle, &cfg.hotkey_tts),
         (HotkeyAction::TtsSpeed, &cfg.hotkey_tts_speed),
     ] {
@@ -178,8 +216,9 @@ pub fn on_press<R: Runtime>(app: &AppHandle<R>) {
 
 /// Commit a dictation. Keep the overlay visible — the router flips it to
 /// Done/Error and schedules the idle render once transcribe + inject return.
-/// `mode` selects plain / refined / command handling of the transcript.
-pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
+/// `mode` selects plain / refined / command handling of the transcript, and
+/// `lang` the whisper language it's transcribed as.
+pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode, lang: String) {
     // Onboarding "Try it": commit the throwaway clip as a Test, which reports the
     // transcript to the onboarding window instead of pasting. No overlay/Esc were
     // set up on press, so skip the recording_armed accounting below.
@@ -190,6 +229,7 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
     {
         if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop {
             mode: DictationMode::Test,
+            lang,
         }) {
             log::warn!("hotkey: dictation worker unreachable: {e}");
         }
@@ -208,9 +248,13 @@ pub fn on_release<R: Runtime>(app: &AppHandle<R>, mode: DictationMode) {
     {
         return;
     }
-    log::info!("hotkey: release (mode={mode:?})");
+    log::info!("hotkey: release (mode={mode:?}, lang={lang})");
     emit_state(app, OverlayState::Transcribing);
-    if let Err(e) = app.state::<AppState>().tx.send(DictationCmd::Stop { mode }) {
+    if let Err(e) = app
+        .state::<AppState>()
+        .tx
+        .send(DictationCmd::Stop { mode, lang })
+    {
         log::warn!("hotkey: dictation worker unreachable: {e}");
     }
 }
@@ -338,6 +382,7 @@ pub fn unregister_tts_escape<R: Runtime>(app: &AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::HotkeyAction;
+    use crate::config::Config;
 
     // These action strings are a contract: they're the `set_hotkey` command's
     // `action` arg and the frontend's `data-action` / HOTKEY_FIELD keys.
@@ -346,6 +391,10 @@ mod tests {
         assert!(matches!(
             HotkeyAction::parse("dictate"),
             Some(HotkeyAction::Dictate)
+        ));
+        assert!(matches!(
+            HotkeyAction::parse("dictate_alt"),
+            Some(HotkeyAction::DictateAlt)
         ));
         assert!(matches!(
             HotkeyAction::parse("tts_toggle"),
@@ -375,5 +424,31 @@ mod tests {
         assert!(!super::is_reserved_shortcut("CmdOrCtrl+Shift+R"));
         assert!(!super::is_reserved_shortcut("CmdOrCtrl+Shift+D"));
         assert!(!super::is_reserved_shortcut("Cmd+Ctrl+S"));
+        assert!(!super::is_reserved_shortcut(
+            crate::config::DEFAULT_HOTKEY_DICTATE_ALT
+        ));
+    }
+
+    #[test]
+    fn dictate_actions_map_to_their_configured_languages() {
+        let cfg = Config {
+            stt_language: "en".into(),
+            stt_language_alt: "nl".into(),
+            ..Config::default()
+        };
+        assert_eq!(super::language_for(HotkeyAction::Dictate, &cfg), "en");
+        assert_eq!(super::language_for(HotkeyAction::DictateAlt, &cfg), "nl");
+    }
+
+    #[test]
+    fn language_for_follows_config_rather_than_hardcoding_dutch() {
+        // The alt slot is a configurable language code, not a Dutch special case.
+        let cfg = Config {
+            stt_language: "nl".into(),
+            stt_language_alt: "de".into(),
+            ..Config::default()
+        };
+        assert_eq!(super::language_for(HotkeyAction::Dictate, &cfg), "nl");
+        assert_eq!(super::language_for(HotkeyAction::DictateAlt, &cfg), "de");
     }
 }

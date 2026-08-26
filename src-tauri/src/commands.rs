@@ -98,12 +98,20 @@ pub struct VoiceOption {
     name: String,
 }
 
-/// The choices the Settings dropdowns render (speeds, TTS voices, mics).
+#[derive(Serialize)]
+pub struct LanguageOption {
+    code: String,
+    name: String,
+}
+
+/// The choices the Settings dropdowns render (speeds, TTS voices, mics,
+/// dictation languages).
 #[derive(Serialize)]
 pub struct Options {
     speeds: Vec<f32>,
     voices: Vec<VoiceOption>,
     mics: Vec<String>,
+    languages: Vec<LanguageOption>,
 }
 
 #[tauri::command]
@@ -128,6 +136,14 @@ pub fn get_options(state: State<AppState>) -> Options {
         // window where early CoreAudio enumeration crashes the release build —
         // the recorder already enumerates on demand the same way (`audio.rs`).
         mics: crate::audio::list_input_devices(),
+        // Straight from the linked whisper build — see `stt::languages`.
+        languages: crate::stt::languages()
+            .into_iter()
+            .map(|(code, name)| LanguageOption {
+                code: code.to_string(),
+                name: name.to_string(),
+            })
+            .collect(),
     }
 }
 
@@ -175,6 +191,7 @@ pub fn set_hotkey(
         let cfg = state.config.lock().map_err(|e| e.to_string())?;
         match action.as_str() {
             "dictate" => cfg.hotkey_dictate.clone(),
+            "dictate_alt" => cfg.hotkey_dictate_alt.clone(),
             "tts_toggle" => cfg.hotkey_tts.clone(),
             "tts_speed" => cfg.hotkey_tts_speed.clone(),
             _ => return Err(format!("unknown hotkey action: {action}")),
@@ -187,6 +204,7 @@ pub fn set_hotkey(
         let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
         match action.as_str() {
             "dictate" => cfg.hotkey_dictate = shortcut.clone(),
+            "dictate_alt" => cfg.hotkey_dictate_alt = shortcut.clone(),
             "tts_toggle" => cfg.hotkey_tts = shortcut.clone(),
             "tts_speed" => cfg.hotkey_tts_speed = shortcut.clone(),
             _ => {}
@@ -210,16 +228,17 @@ pub fn reset_hotkeys(
     state: State<AppState>,
 ) -> Result<crate::config::Config, String> {
     use crate::config::{
-        DEFAULT_DICTATION_TRIGGER, DEFAULT_HOTKEY_DICTATE, DEFAULT_HOTKEY_TTS,
-        DEFAULT_HOTKEY_TTS_SPEED, DEFAULT_REFINE_MODIFIER,
+        DEFAULT_DICTATION_TRIGGER, DEFAULT_HOTKEY_DICTATE, DEFAULT_HOTKEY_DICTATE_ALT,
+        DEFAULT_HOTKEY_TTS, DEFAULT_HOTKEY_TTS_SPEED, DEFAULT_REFINE_MODIFIER,
     };
     use crate::hotkeys::HotkeyAction;
 
     // Current chords, so each can be unregistered before rebinding to its default.
-    let (old_dictate, old_tts, old_speed) = {
+    let (old_dictate, old_dictate_alt, old_tts, old_speed) = {
         let cfg = state.config.lock().map_err(|e| e.to_string())?;
         (
             cfg.hotkey_dictate.clone(),
+            cfg.hotkey_dictate_alt.clone(),
             cfg.hotkey_tts.clone(),
             cfg.hotkey_tts_speed.clone(),
         )
@@ -229,6 +248,11 @@ pub fn reset_hotkeys(
     // the new one fails, so a chord never ends up unbound.
     for (action, old, default) in [
         (HotkeyAction::Dictate, &old_dictate, DEFAULT_HOTKEY_DICTATE),
+        (
+            HotkeyAction::DictateAlt,
+            &old_dictate_alt,
+            DEFAULT_HOTKEY_DICTATE_ALT,
+        ),
         (HotkeyAction::TtsToggle, &old_tts, DEFAULT_HOTKEY_TTS),
         (HotkeyAction::TtsSpeed, &old_speed, DEFAULT_HOTKEY_TTS_SPEED),
     ] {
@@ -240,6 +264,7 @@ pub fn reset_hotkeys(
     let snapshot = {
         let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
         cfg.hotkey_dictate = DEFAULT_HOTKEY_DICTATE.to_string();
+        cfg.hotkey_dictate_alt = DEFAULT_HOTKEY_DICTATE_ALT.to_string();
         cfg.hotkey_tts = DEFAULT_HOTKEY_TTS.to_string();
         cfg.hotkey_tts_speed = DEFAULT_HOTKEY_TTS_SPEED.to_string();
         cfg.dictation_trigger = DEFAULT_DICTATION_TRIGGER.to_string();

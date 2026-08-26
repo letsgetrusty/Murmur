@@ -13,7 +13,10 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 pub type TranscribeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
 
 pub trait Transcriber: Send + Sync {
-    fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a>;
+    /// `lang` is a whisper language code ("en", "nl", …). It is always pinned
+    /// by the caller rather than auto-detected: on a mismatch whisper doesn't
+    /// fail, it emits confident text shaped like the language you asked for.
+    fn transcribe<'a>(&'a self, wav: &'a [u8], lang: &'a str) -> TranscribeFuture<'a>;
 
     /// Preload the model off the calling thread so the first `transcribe`
     /// doesn't pay the load. Default no-op; safe to call repeatedly (it's a
@@ -25,13 +28,43 @@ pub trait Transcriber: Send + Sync {
 // Local, on-device Whisper via whisper-rs (whisper.cpp, Metal on Apple Silicon).
 // -----------------------------------------------------------------------------
 
+/// The language code meaning "let whisper detect it" (whisper.cpp treats this
+/// value specially — see `whisper_full_with_state`).
+pub const AUTO_LANGUAGE: &str = "auto";
+
+/// A language whisper can transcribe: `("nl", "dutch")`.
+pub type Language = (&'static str, &'static str);
+
+/// Every language the linked whisper build supports, sorted by name. Read from
+/// the library itself rather than a hardcoded list, so it can't drift from what
+/// the model actually accepts.
+pub fn languages() -> Vec<Language> {
+    let mut out: Vec<Language> = (0..=whisper_rs::get_lang_max_id())
+        .filter_map(|id| {
+            Some((
+                whisper_rs::get_lang_str(id)?,
+                whisper_rs::get_lang_str_full(id)?,
+            ))
+        })
+        .collect();
+    out.sort_by_key(|(_, name)| *name);
+    out
+}
+
+/// True if whisper accepts `lang` — a known code, or `auto` for detection.
+/// Guards hand-edited config: an unknown code would otherwise reach whisper and
+/// produce nonsense rather than an error.
+pub fn is_valid_language(lang: &str) -> bool {
+    lang == AUTO_LANGUAGE || whisper_rs::get_lang_id(lang).is_some()
+}
+
 /// Directory holding downloaded whisper.cpp GGML models.
 pub fn models_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME env var unset")?;
     Ok(PathBuf::from(home).join("Library/Application Support/murmur/models"))
 }
 
-/// Local path for a whisper.cpp GGML model by short name (e.g. "small.en").
+/// Local path for a whisper.cpp GGML model by short name (e.g. "small").
 pub fn model_path(name: &str) -> Result<PathBuf> {
     Ok(models_dir()?.join(format!("ggml-{name}.bin")))
 }
@@ -117,13 +150,13 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
 }
 
 /// The whisper decode params shared by warm-up and real transcription, kept in
-/// one place so the two can't drift. Pin to English (matches the cloud path); a
-/// dictation clip is one self-contained utterance, so don't seed the decoder with
-/// prior-window text, and pin a single temperature so a hard clip can't trip
-/// whisper's temperature-fallback retries (which re-decode and spike latency).
-/// Give it the machine's cores, and silence whisper's stdout chatter.
-fn set_dictation_params(params: &mut FullParams) {
-    params.set_language(Some("en"));
+/// one place so the two can't drift. Pin the caller's language (which hotkey
+/// fired); a dictation clip is one self-contained utterance, so don't seed the
+/// decoder with prior-window text, and pin a single temperature so a hard clip
+/// can't trip whisper's temperature-fallback retries (which re-decode and spike
+/// latency). Give it the machine's cores, and silence whisper's stdout chatter.
+fn set_dictation_params<'a>(params: &mut FullParams<'a, '_>, lang: &'a str) {
+    params.set_language(Some(lang));
     params.set_translate(false);
     params.set_no_context(true);
     params.set_temperature(0.0);
@@ -144,7 +177,10 @@ fn warm_infer(ctx: &WhisperContext) -> Result<()> {
         .create_state()
         .map_err(|e| anyhow!("whisper warm state: {e}"))?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    set_dictation_params(&mut params);
+    // Any valid code works here: this decodes silence and throws the result
+    // away, and what we're forcing (Metal graph compile + state alloc) doesn't
+    // depend on the language token.
+    set_dictation_params(&mut params, crate::config::DEFAULT_STT_LANGUAGE);
     let silence = vec![0f32; 16_000 / 2];
     state
         .full(params, &silence)
@@ -221,7 +257,7 @@ fn strip_nonspeech(text: &str) -> String {
 }
 
 impl Transcriber for WhisperStt {
-    fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
+    fn transcribe<'a>(&'a self, wav: &'a [u8], lang: &'a str) -> TranscribeFuture<'a> {
         Box::pin(async move {
             // Instrumentation: split the pre-inference setup so an intermittent
             // slow transcribe can be pinned to a layer — ctx acquire (model-lock
@@ -235,6 +271,8 @@ impl Transcriber for WhisperStt {
             let samples = wav_to_mono_f32(wav)?;
             let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
             let audio_secs = samples.len() as f32 / 16_000.0;
+            // Owned: the blocking closure below outlives this borrow.
+            let lang = lang.to_string();
             // whisper.cpp is a blocking CPU/GPU job — keep it off the async
             // runtime's worker threads.
             let t_spawn = std::time::Instant::now();
@@ -250,7 +288,7 @@ impl Transcriber for WhisperStt {
                         .map_err(|e| anyhow!("whisper state: {e}"))?;
                     let state_ms = t_state.elapsed().as_secs_f32() * 1000.0;
                     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-                    set_dictation_params(&mut params);
+                    set_dictation_params(&mut params, &lang);
                     let t0 = std::time::Instant::now();
                     state
                         .full(params, &samples)
@@ -426,21 +464,54 @@ mod tests {
         );
     }
 
+    #[test]
+    fn languages_come_from_the_whisper_build() {
+        let langs = languages();
+        assert!(!langs.is_empty(), "whisper reports no languages");
+        // The two Murmur defaults must be among them.
+        assert!(langs.iter().any(|(c, _)| *c == "en"));
+        assert!(langs.iter().any(|(c, _)| *c == "nl"));
+        // Sorted by display name so the Settings dropdown reads sensibly.
+        let names: Vec<&str> = langs.iter().map(|(_, n)| *n).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn validates_language_codes_including_auto() {
+        assert!(is_valid_language("en"));
+        assert!(is_valid_language("nl"));
+        assert!(is_valid_language(AUTO_LANGUAGE));
+        // whisper_lang_id also accepts the full English name, not just the
+        // code (whisper.cpp:3987 falls back to a name match), so this is valid.
+        assert!(is_valid_language("dutch"));
+        // A plausible typo must not sail through into whisper.
+        assert!(!is_valid_language("nk"));
+        assert!(!is_valid_language(""));
+        assert!(!is_valid_language("nederlands"));
+    }
+
     /// End-to-end local transcription against a real WAV fixture + model.
     /// Ignored by default (needs the ~0.5 GB model on disk). Run manually:
     ///   MURMUR_TEST_WAV=/path/to/jfk.wav \
     ///     cargo test --no-default-features -- --ignored --nocapture transcribes_fixture
+    /// `MURMUR_TEST_MODEL` / `MURMUR_TEST_LANG` override the model and language,
+    /// which is also how you A/B two models over the same clip.
     #[test]
     #[ignore = "needs a local Whisper model + a 16 kHz WAV fixture (MURMUR_TEST_WAV)"]
     fn transcribes_fixture() {
         let wav_path = std::env::var("MURMUR_TEST_WAV").expect("set MURMUR_TEST_WAV");
-        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
+        let model = std::env::var("MURMUR_TEST_MODEL")
+            .unwrap_or_else(|_| crate::config::DEFAULT_STT_MODEL.into());
+        let lang = std::env::var("MURMUR_TEST_LANG")
+            .unwrap_or_else(|_| crate::config::DEFAULT_STT_LANGUAGE.into());
         let wav = std::fs::read(&wav_path).unwrap();
         let stt = WhisperStt::new(model);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let text = rt.block_on(stt.transcribe(&wav)).unwrap();
+        let text = rt.block_on(stt.transcribe(&wav, &lang)).unwrap();
         eprintln!("TRANSCRIPT: {text}");
         assert!(!text.is_empty(), "transcript should not be empty");
     }
