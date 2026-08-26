@@ -96,13 +96,23 @@ CNF
 
   openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
     -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/req.cnf" >/dev/null 2>&1
+  # macOS's `security import` rejects OpenSSL 3's PKCS#12 defaults (SHA-256 MAC,
+  # PBES2/AES-256-CBC) *and* rejects an empty password — both surface as the same
+  # misleading "MAC verification failed ... (wrong password?)". Fixing only one
+  # still fails (the message just changes to "Unknown format in import"), so
+  # write a PKCS#12-era SHA-1/3DES bundle under a throwaway password. 3DES rather
+  # than `-legacy`'s RC2-40: RC2 needs OpenSSL's legacy provider, 3DES doesn't,
+  # so this also works under the system LibreSSL at /usr/bin/openssl.
+  # The password protects nothing — the .p12 lives in $TMP, scrubbed on exit.
+  P12PW="murmur-dev-import"
   openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -name "$IDENTITY" -out "$TMP/cert.p12" -passout pass: >/dev/null 2>&1
+    -name "$IDENTITY" -out "$TMP/cert.p12" -passout "pass:$P12PW" \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 >/dev/null 2>&1
 
   # -T /usr/bin/codesign lets codesign use the key; the partition list below
   # removes the per-signing "codesign wants to use key" prompt (needs the
   # login-keychain password).
-  security import "$TMP/cert.p12" -k "$LOGIN_KEYCHAIN" -P "" \
+  security import "$TMP/cert.p12" -k "$LOGIN_KEYCHAIN" -P "$P12PW" \
     -T /usr/bin/codesign -T /usr/bin/security >/dev/null
   ok "Cert imported into $LOGIN_KEYCHAIN"
 
