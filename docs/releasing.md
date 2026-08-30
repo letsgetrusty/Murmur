@@ -87,6 +87,34 @@ explicitly pass `--self-signed` (see
 > *does* publish via CI, since Apple signing is configured — but let the script
 > drive it so the manifests and tag can't drift.)
 
+### `--local`: build on your Mac instead of CI (save the macOS minutes)
+
+The CI build runs on a `macos-14` runner, which bills at **10× the minute rate**
+— a release is ~440s of compile + notarize ≈ **~73 billed minutes**. If that's
+eating your Actions budget, cut the release with `--local` to build + notarize on
+*your* machine (free, and it reuses your warm cache so the C++ deps don't
+recompile):
+
+```bash
+# Export your Developer ID + notarization creds first (or source a gitignored
+# .env — same vars as scripts/release.sh, see "Releasing locally" below).
+./scripts/publish-release.sh --local
+```
+
+It runs the same version bump + perf gate, then builds/signs/notarizes via
+`scripts/release.sh`, uploads all artifacts (DMG, updater `.app.tar.gz` + `.sig`,
+`latest.json`), and creates the GitHub release. The bump commit is tagged
+`[skip ci]` and a cheap Ubuntu **guard job** in `release.yml` skips the CI build
+when it sees the artifacts already uploaded — so a `--local` release never *also*
+triggers a redundant CI build.
+
+Preflight fails fast if `APPLE_SIGNING_IDENTITY`, a notarization credential, or
+the updater key is missing — before it bumps or pushes anything. Trade-off: the
+build depends on your Mac + local creds rather than CI's clean room, and ties up
+your machine for ~8 min (unbilled). Everything CI does — compile *and*
+notarization — runs fine locally; the only thing you give up is hands-off,
+machine-independent releases.
+
 ## Releasing via CI (signed + notarized)
 
 The Apple signing secrets **are configured**, so `.github/workflows/release.yml`

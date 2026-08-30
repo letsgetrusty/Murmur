@@ -17,7 +17,52 @@ permissions:
   contents: write # create the GitHub Release and upload assets
 
 jobs:
+  # A --local release (scripts/publish-release.sh --local) builds + notarizes on
+  # the maintainer's Mac and uploads the artifacts itself, then creates the tag —
+  # which can still trigger this workflow. This cheap Ubuntu guard skips the
+  # expensive macOS build when the release already carries Murmur.dmg, so a local
+  # release never also pays for a CI build. A normal tag release has no assets yet
+  # → skip=false → the build runs. Polls briefly to avoid racing the asset upload.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A normal CI release has NO release object yet — tauri-action creates it
+          # at the end of the build — so if none exists, this is a CI release:
+          # proceed to build immediately (no wasted wait). A --local release, by
+          # contrast, creates the release (and this tag) up front, then uploads the
+          # DMG; so if a release already exists, wait for Murmur.dmg to finish
+          # uploading and skip the CI build.
+          if ! gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No release for ${GITHUB_REF_NAME} yet — normal CI release; building."
+            exit 0
+          fi
+          echo "Release ${GITHUB_REF_NAME} already exists (a --local publish) — waiting for its Murmur.dmg upload…"
+          for attempt in $(seq 1 30); do
+            if gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+                 --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "Murmur.dmg"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Murmur.dmg present (built locally) — skipping the CI build."
+              exit 0
+            fi
+            echo "  Murmur.dmg not uploaded yet (attempt ${attempt}/30); waiting…"
+            sleep 5
+          done
+          # Release exists but no DMG after ~150s — unusual; build to be safe.
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::Release exists but Murmur.dmg never appeared — building in CI as a fallback."
+
   release:
+    needs: guard
+    # Skip the whole macOS build when a --local release already published the
+    # artifacts (guard above). Normal tag releases still build here.
+    if: needs.guard.outputs.skip != 'true'
     # Apple Silicon runner → builds an aarch64 (darwin-aarch64) app, matching
     # the updater manifest's platform key.
     runs-on: macos-14

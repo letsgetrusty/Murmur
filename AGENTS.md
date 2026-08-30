@@ -156,6 +156,13 @@ shipped work: `docs/voice-tool-architecture.md` §7.
     it now is): the script just pushes the `vX.Y.Z` tag and the CI `release.yml`
     workflow builds the **signed + notarized** DMG + updater artifacts and creates
     the GitHub release. Building locally would race CI, so it doesn't.
+  - **`--local`** builds + notarizes on your Mac instead of CI (via
+    `scripts/release.sh`, needs the Apple creds in env), then uploads the
+    artifacts and creates the release. Saves the whole `macos-14` CI build (10×
+    billed ≈ ~73 min/release) and reuses your warm cache. The bump commit is
+    tagged `[skip ci]` and a guard job in `release.yml` skips the CI build when
+    the artifacts are already uploaded, so `--local` never also triggers a CI
+    build. See `docs/releasing.md`.
   - **Fails closed:** if it can't confirm Apple signing, it **aborts** rather than
     silently self-signing. A self-signed release only happens when you *explicitly*
     pass `--self-signed` (kept as an escape hatch for a lapsed account / a fork) —

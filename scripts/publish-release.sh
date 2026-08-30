@@ -22,8 +22,18 @@
 #   ./scripts/publish-release.sh --major      # major bump  (0.1.3 → 1.0.0)
 #   ./scripts/publish-release.sh --dry-run    # print the next version + mode, no changes
 #   ./scripts/publish-release.sh --self-signed  # deliberate self-signed release (no notarization)
+#   ./scripts/publish-release.sh --local      # build + notarize on THIS Mac (0 CI minutes)
 #   ./scripts/publish-release.sh --skip-bench   # skip the perf gate (no models/hardware)
 #   ./scripts/publish-release.sh 1.2.3        # pin an explicit version (escape hatch)
+#
+# --local: build + sign + notarize the Developer ID release HERE (via
+# scripts/release.sh) and upload the artifacts, instead of on GitHub's macOS
+# runner. Saves the whole ~440s CI build (~73 billed min at the 10x macOS rate)
+# and reuses your warm cache, at the cost of tying up your Mac + holding the
+# Apple creds locally (export them or source a gitignored .env — see
+# docs/releasing.md). The bump commit is tagged `[skip ci]` and a guard job in
+# release.yml skips the CI build when the artifacts are already uploaded, so a
+# --local release never also triggers a redundant CI build.
 #
 # Before tagging it runs scripts/bench.sh — the core-experience performance gate
 # (STT/TTS/dictation-start latency) — and ABORTS on a regression. See
@@ -46,7 +56,7 @@ die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # --- Parse args ---------------------------------------------------------------
 # No hand-typed number by default: bump keyword (patch|minor|major) or an
 # explicit X.Y.Z escape hatch, plus an optional --dry-run.
-BUMP="patch"; EXPLICIT=""; DRYRUN=0; FORCE_SELFSIGN=0; SKIP_BENCH=0
+BUMP="patch"; EXPLICIT=""; DRYRUN=0; FORCE_SELFSIGN=0; SKIP_BENCH=0; LOCAL=0
 for a in "$@"; do
   case "$a" in
     --major|major) BUMP="major" ;;
@@ -55,12 +65,14 @@ for a in "$@"; do
     --dry-run|-n)  DRYRUN=1 ;;
     --self-signed) FORCE_SELFSIGN=1 ;;
     --skip-bench)  SKIP_BENCH=1 ;;
+    --local)       LOCAL=1 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed -E 's/^# ?//'; exit 0 ;;
     v[0-9]*.[0-9]*.[0-9]* | [0-9]*.[0-9]*.[0-9]*) EXPLICIT="${a#v}" ;;
-    *) die "unknown arg '$a' — use [--major|--minor|--patch] [--self-signed] [--skip-bench] [--dry-run] [X.Y.Z]" ;;
+    *) die "unknown arg '$a' — use [--major|--minor|--patch] [--self-signed|--local] [--skip-bench] [--dry-run] [X.Y.Z]" ;;
   esac
 done
+[ "$LOCAL" -eq 1 ] && [ "$FORCE_SELFSIGN" -eq 1 ] && die "--local and --self-signed are mutually exclusive."
 
 [ "$(uname)" = "Darwin" ] || die "macOS only."
 command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not found — https://cli.github.com"
@@ -108,7 +120,9 @@ git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1 && die "tag $TAG 
 gh release view "$TAG" >/dev/null 2>&1 && die "a GitHub release $TAG already exists."
 
 if [ "$DRYRUN" -eq 1 ]; then
-  if [ "$FORCE_SELFSIGN" -eq 1 ]; then
+  if [ "$LOCAL" -eq 1 ]; then
+    ok "[dry run] would build + notarize $TAG LOCALLY (Developer ID) and upload the artifacts — CI build skipped. No changes made."
+  elif [ "$FORCE_SELFSIGN" -eq 1 ]; then
     ok "[dry run] would build a SELF-SIGNED release and publish $TAG (--self-signed) — no changes made."
   elif [ "$APPLE_CI" -eq 1 ]; then
     ok "[dry run] would tag $TAG and let CI build the signed + notarized release — no changes made."
@@ -118,11 +132,32 @@ if [ "$DRYRUN" -eq 1 ]; then
   exit 0
 fi
 
+# --- --local preflight: verify Developer ID + notarization creds NOW ----------
+# We build locally with scripts/release.sh, so we don't need the CI signing
+# secret — but we DO need the local Developer ID cert, notarization creds, and
+# the updater key. Check them before mutating anything, so a missing credential
+# aborts up front rather than after the version bump + push.
+if [ "$LOCAL" -eq 1 ]; then
+  [ -n "${APPLE_SIGNING_IDENTITY:-}" ] \
+    || die "--local needs APPLE_SIGNING_IDENTITY (e.g. 'Developer ID Application: … (TEAMID)'). Export it or source your gitignored .env — see docs/releasing.md."
+  security find-identity -v -p codesigning 2>/dev/null | grep -qF "$APPLE_SIGNING_IDENTITY" \
+    || die "signing identity '$APPLE_SIGNING_IDENTITY' not found in your keychain — import your Developer ID cert (docs/releasing.md)."
+  if ! { [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; } \
+     && ! { [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; }; then
+    die "--local needs notarization creds — either the App Store Connect API key (APPLE_API_ISSUER/APPLE_API_KEY/APPLE_API_KEY_PATH) or Apple ID + app-specific password (APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID). Without them users get Gatekeeper warnings. See docs/releasing.md."
+  fi
+  [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] || [ -f "$HOME/.murmur/updater.key" ] \
+    || die "--local needs the minisign updater key — set \$TAURI_SIGNING_PRIVATE_KEY or create $HOME/.murmur/updater.key (docs/releasing.md)."
+  ok "Local Developer ID + notarization creds present — building on this Mac."
+fi
+
 # --- Fail closed: never ship a self-signed release by accident ----------------
 # Default path is notarized-via-CI. If we can't confirm Apple signing (no
 # APPLE_CERTIFICATE secret, or `gh secret list` couldn't run), abort rather than
 # silently self-signing. A self-signed release must be an explicit choice.
-if [ "$APPLE_CI" -eq 0 ] && [ "$FORCE_SELFSIGN" -eq 0 ]; then
+# (--local signs locally with the Developer ID cert checked above, so it doesn't
+# need the CI secret and is exempt.)
+if [ "$LOCAL" -eq 0 ] && [ "$APPLE_CI" -eq 0 ] && [ "$FORCE_SELFSIGN" -eq 0 ]; then
   die "Apple signing not detected (no APPLE_CERTIFICATE secret, or 'gh secret list' failed) — refusing to cut a self-signed release.
 Releases are notarized via CI. Debug with: gh auth status && gh secret list
 To build a self-signed release on purpose, re-run with --self-signed."
@@ -131,8 +166,9 @@ fi
 
 # --- Remaining preconditions (mutating steps follow) --------------------------
 # The "murmur dev" cert is only needed for the local self-signed build; the CI
-# path signs with the Developer ID cert stored in GitHub secrets.
-if [ "$APPLE_CI" -eq 0 ]; then
+# path signs with the Developer ID cert stored in GitHub secrets. (--local uses
+# the Developer ID cert, verified in its preflight above.)
+if [ "$APPLE_CI" -eq 0 ] && [ "$LOCAL" -eq 0 ]; then
   security find-identity -v -p codesigning 2>/dev/null | grep -qF "murmur dev" \
     || die "self-signed 'murmur dev' cert not found — run ./scripts/setup.sh first."
 fi
@@ -173,13 +209,56 @@ cg=$(grep -m1 '^version = ' src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 ok "package.json / tauri.conf.json / Cargo.toml → $VERSION"
 
 # --- 2. Commit + push the bump ------------------------------------------------
+# For --local the build happens here, not in CI, so tag the bump commit
+# `[skip ci]` — that skips the redundant CI check on the branch push AND the
+# tag-triggered release build (the guard job in release.yml is the backstop).
+COMMIT_MSG="release: $TAG"
+[ "$LOCAL" -eq 1 ] && COMMIT_MSG="release: $TAG [skip ci]"
 if ! git diff --quiet; then
   git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-  git commit -q -m "release: $TAG"
+  git commit -q -m "$COMMIT_MSG"
   ok "committed release: $TAG"
 fi
 say "Pushing main…"
 git push -q origin "$BRANCH"
+
+# --- 3-local. Build + notarize on this Mac, then publish ----------------------
+# scripts/release.sh compiles (reusing the warm local cache), signs with the
+# Developer ID cert, notarizes + staples via Apple, and writes latest.json. We
+# then create the GitHub release with all the artifacts. No CI build is spent.
+if [ "$LOCAL" -eq 1 ]; then
+  say "Building + notarizing $TAG locally (Developer ID) — on this Mac, 0 CI minutes."
+  ./scripts/release.sh
+
+  DMG="$(ls -t src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)"
+  TARGZ="$(ls -t src-tauri/target/release/bundle/macos/*.app.tar.gz 2>/dev/null | head -1 || true)"
+  SIG="$(ls -t src-tauri/target/release/bundle/macos/*.app.tar.gz.sig 2>/dev/null | head -1 || true)"
+  LATEST="src-tauri/target/release/bundle/latest.json"
+  [ -f "$DMG" ]    || die "no .dmg produced — see the build output above."
+  [ -f "$TARGZ" ]  || die "no updater .app.tar.gz produced."
+  [ -f "$SIG" ]    || die "no updater signature (.sig) produced."
+  [ -f "$LATEST" ] || die "no latest.json produced (needed for auto-update)."
+
+  # Stable-named copy so the landing page's fixed download URL always resolves.
+  STABLE_DMG="$(dirname "$DMG")/Murmur.dmg"
+  cp -f "$DMG" "$STABLE_DMG"
+
+  say "Creating GitHub release ${TAG} + uploading artifacts…"
+  # Creates the tag (at the pushed bump commit) and the release together. The
+  # tag may trigger release.yml, but its guard job sees Murmur.dmg already
+  # present and skips the build.
+  gh release create "$TAG" \
+    --target "$BRANCH" \
+    --title "Murmur $VERSION" \
+    --notes "Download **Murmur.dmg** below to install (macOS 11+, Apple Silicon). Existing installs update automatically." \
+    "$STABLE_DMG" "$DMG" "$TARGZ" "$SIG" "$LATEST"
+
+  echo
+  ok "Published $TAG (built + notarized locally — no CI build)."
+  printf '   Release:  %s\n' "$(gh release view "$TAG" --json url --jq .url)"
+  printf '   Download: https://github.com/letsgetrusty/Murmur/releases/latest/download/Murmur.dmg\n'
+  exit 0
+fi
 
 # --- 3. Cut the release ------------------------------------------------------
 # Apple configured: tag it and let CI build the signed + notarized release. The
