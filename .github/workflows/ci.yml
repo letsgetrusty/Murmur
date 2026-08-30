@@ -5,8 +5,23 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # Skip the (10x-billed) macOS build for changes that can't affect it —
+    # docs, markdown, images, licence. A run only skips when EVERY changed file
+    # matches, so a mixed code+docs commit still runs.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - "**/*.png"
+      - ".gitignore"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - "**/*.png"
+      - ".gitignore"
 
 concurrency:
   # One run per branch/PR — cancel superseded runs to save the macOS minutes.
