@@ -3,6 +3,7 @@
 mod audio;
 mod commands;
 mod config;
+mod diagnostics;
 mod download;
 mod fn_key;
 mod focus;
@@ -302,6 +303,7 @@ pub fn run() {
             commands::resume_shortcuts,
             commands::pending_update_version,
             commands::install_staged_update,
+            commands::report_bug,
         ])
         .setup(move |app| {
             // Install the dev-term pronunciation lexicon before any Kokoro synth
@@ -2263,12 +2265,22 @@ async fn run_dictation<R: Runtime>(
     match paste_result {
         Ok(()) => (OverlayState::Done { chars }, 600),
         Err(e) => {
-            log::warn!("dictation: paste failed: {e}");
+            // Log the FULL cause chain (`{e:#}`), not just the outermost context —
+            // a bare `{e}` collapses e.g. "paste failed → synthesize Cmd+V →
+            // init enigo (Accessibility permission?)" down to "synthesize Cmd+V",
+            // which is exactly the useless message that made a real report
+            // undiagnosable.
+            log::warn!("dictation: paste failed: {e:#}");
+            // Cause-aware overlay text: classify from the live permission /
+            // secure-input state (both read-only checks — no prompts) so the user
+            // sees "grant Accessibility" instead of the truncated "synthesize
+            // Cmd+V". The one-click diagnostics report lives in Settings ▸ Support.
+            let cause = crate::diagnostics::classify_paste_failure(&format!("{e:#}"));
             (
                 OverlayState::Error {
-                    message: format!("paste failed: {e}"),
+                    message: cause.overlay_message().to_string(),
                 },
-                2500,
+                3000,
             )
         }
     }

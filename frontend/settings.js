@@ -620,7 +620,6 @@ function initHistory() {
 // --- Support ------------------------------------------------------------------
 
 const REPO_URL = "https://github.com/letsgetrusty/Murmur";
-const ISSUES_URL = `${REPO_URL}/issues`;
 
 async function loadSupport() {
   if (!invoke) return;
@@ -635,8 +634,24 @@ async function loadSupport() {
 
 function initSupport() {
   const open = (url) => invoke?.(CMD.OPEN_URL, { url }).catch(() => {});
-  el("report-issue")?.addEventListener("click", () => open(ISSUES_URL));
+  el("report-issue")?.addEventListener("click", reportBug);
   el("view-github")?.addEventListener("click", () => open(REPO_URL));
+}
+
+// Gather diagnostics, copy the full report to the clipboard, and open a
+// prefilled GitHub issue. The command does the work; we just confirm.
+async function reportBug() {
+  if (!invoke) return;
+  try {
+    const summary = await invoke(CMD.REPORT_BUG);
+    showModal({
+      message:
+        "A prefilled GitHub issue just opened in your browser. Your diagnostics and recent log were copied to the clipboard — paste them into the issue body.\n\n" +
+        (summary || ""),
+    });
+  } catch (e) {
+    showModal({ message: `Couldn't gather diagnostics: ${e}` });
+  }
 }
 
 // --- Sound (dictation start/stop cue) ----------------------------------------
