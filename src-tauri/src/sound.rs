@@ -7,14 +7,21 @@
 // dropped rather than waited on — which showed up as "the first couple of
 // dictation start cues after idle are silent, then it works". An AVAudioPlayer
 // is a real audio client: play() acquires and wakes the output device and
-// renders the buffer, so the cue plays even from a cold device. An idle,
-// not-yet-played player holds no hardware, so this keeps idle cost at zero.
+// renders the buffer, so the cue plays even from a cold device.
 //
-// The players are retained ObjC objects (not the old plain `u32` sound ids), so
-// `Cues` owns them behind a Send/Sync wrapper — mirroring tts.rs's KokoroQueue.
+// Each cue builds a **fresh** player at play time (see `Cues`), not one reused
+// from startup: on Bluetooth (AirPods) the output route changes underneath a
+// long-lived player and silently kills it. Two hard-won gotchas, both from the
+// A2DP→SCO switch AirPods make when the mic opens:
+//   * The START cue is played by the caller BEFORE opening the mic — once the
+//     switch begins, A2DP output is torn down and any cue played after it is
+//     inaudible; playing first sends it out the still-live A2DP link.
+//   * A cue is retained in a slot after play() so Drop's `stop` can't cut it off
+//     mid-blip.
 // Playback is gated on the `dictation_sound` config flag by the caller.
 
 use std::ptr::NonNull;
+use std::sync::Mutex;
 
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
@@ -54,44 +61,57 @@ impl Drop for Player {
     }
 }
 
-/// Preloaded players for the start/stop cues. Owns two retained ObjC objects, so
-/// it is not `Copy` — it lives by value in `AppState` and is only borrowed.
+/// Plays the dictation start/stop cues.
+///
+/// A **fresh** `AVAudioPlayer` is built at each play, not reused from startup.
+/// Reusing one preloaded player fails silently on Bluetooth: opening the mic
+/// switches AirPods from A2DP to the SCO/HFP voice profile, and that route
+/// change invalidates a player built under the old route — `play()` still
+/// returns true and reports the right output device, but renders into a dead
+/// audio graph, so the cue is inaudible during dictation (yet audible in
+/// isolation, where no route change happens). Building the player after the
+/// route settles attaches it to the live output. The just-played player is
+/// retained in a slot so it isn't dropped (which would `stop` it) mid-cue.
 #[derive(Default)]
 pub struct Cues {
-    start: Option<Player>,
-    stop: Option<Player>,
+    start_live: Mutex<Option<Player>>,
+    stop_live: Mutex<Option<Player>>,
 }
 
 impl Cues {
-    /// Load the start/stop sounds. A missing/unreadable file yields `None`, so
-    /// that cue silently no-ops rather than failing.
+    /// No-op constructor kept for the `AppState` call site; players are built
+    /// lazily at play time now (see the struct doc).
     pub fn load() -> Self {
-        Cues {
-            start: make_player(START_SOUND),
-            stop: make_player(STOP_SOUND),
-        }
+        Cues::default()
     }
 
     pub fn play_start(&self) {
-        play(self.start.as_ref());
+        play_fresh(START_SOUND, &self.start_live);
     }
 
     pub fn play_stop(&self) {
-        play(self.stop.as_ref());
+        play_fresh(STOP_SOUND, &self.stop_live);
     }
 }
 
-fn play(player: Option<&Player>) {
-    if let Some(p) = player {
-        // SAFETY: `p.0` is a live retained AVAudioPlayer. Rewind to the start so
-        // a repeated cue replays from the top, then play — play() wakes/acquires
-        // the output device and renders the buffer, so it is not dropped when
-        // the device is cold.
-        unsafe {
-            let player = p.0.as_ptr();
-            let _: () = msg_send![player, setCurrentTime: 0.0f64];
-            let _: bool = msg_send![player, play];
+/// Build a fresh player for `path`, play it, and park it in `slot` so it stays
+/// alive for the duration (dropping the previous occupant, which stops any
+/// still-ringing prior cue — harmless, they're short).
+fn play_fresh(path: &str, slot: &Mutex<Option<Player>>) {
+    let Some(p) = make_player(path) else {
+        log::warn!("sound: play() skipped — cue {path} failed to load");
+        return;
+    };
+    // SAFETY: `p.0` is a freshly-built, live retained AVAudioPlayer.
+    unsafe {
+        let ok: bool = msg_send![p.0.as_ptr(), play];
+        if !ok {
+            log::warn!("sound: play() returned false for cue {path}");
         }
+    }
+    // Retain until the next cue replaces it, so Drop's `stop` doesn't cut it off.
+    if let Ok(mut g) = slot.lock() {
+        *g = Some(p);
     }
 }
 
@@ -111,7 +131,12 @@ fn make_player(path: &str) -> Option<Player> {
         let err: *mut *mut AnyObject = std::ptr::null_mut();
         let player: *mut AnyObject = msg_send![alloc, initWithContentsOfURL: url, error: err];
         match NonNull::new(player) {
-            Some(p) => Some(Player(p)),
+            Some(p) => {
+                // Preload buffers so the first cue doesn't pay the lazy
+                // hardware-acquire lag on its first `play()`.
+                let _: bool = msg_send![p.as_ptr(), prepareToPlay];
+                Some(Player(p))
+            }
             None => {
                 log::warn!("sound: failed to load cue {path}");
                 None

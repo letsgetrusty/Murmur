@@ -14,7 +14,7 @@ mod llm;
 mod local_llm;
 mod permissions;
 mod selection;
-mod sound;
+pub mod sound;
 mod stt;
 mod tts;
 mod update;
@@ -1820,24 +1820,23 @@ fn spawn_dictation_worker<R: Runtime>(
                     let on_level: audio::LevelFn = Box::new(move |level: f32| {
                         let _ = app_for_level.emit(ipc::event::AUDIO_LEVEL, level);
                     });
-                    // Open the mic FIRST, then cue. The start cue plays through
-                    // AVAudioPlayer (sound.rs), whose first `play()` synchronously
-                    // wakes the output device — up to ~0.5s when the speakers have
-                    // idled to sleep. Cueing before `Recorder::start` (as we did
-                    // to dodge a cue-swallow during input-route setup) put that
-                    // cold-wake directly in front of the mic open, so the user's
-                    // first word or two were dropped — the "snappiness regressed"
-                    // report. The mic itself opens in ~70ms and delivers audio
-                    // almost immediately (measured), so we start it right away and
-                    // fire the cue on a detached thread: its output-wake no longer
-                    // blocks capture, and playing it once the input route has
-                    // settled avoids the swallow the old ordering guarded against.
+                    // Cue BEFORE opening the mic. On Bluetooth (AirPods) opening
+                    // the mic switches the headset from A2DP to the SCO/HFP voice
+                    // profile, which tears down the A2DP output almost immediately.
+                    // A cue played *after* the mic opens therefore lands in that
+                    // dead output window and is silent (the "start sound doesn't
+                    // play"); waiting for SCO to fully settle instead makes it play
+                    // ~2s late. Playing it first sends it out the still-live A2DP
+                    // link, so it's instant and audible. Capture is unaffected —
+                    // measured on-device, speech spoken immediately still lands even
+                    // across the SCO switch. The cue runs on a detached thread so
+                    // its output-device wake never blocks the mic open.
+                    let app_cue = app.clone();
+                    std::thread::spawn(move || play_dictation_cue(&app_cue, true));
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
                             rec = Some(r);
-                            let app_cue = app.clone();
-                            std::thread::spawn(move || play_dictation_cue(&app_cue, true));
                         }
                         Err(e) => {
                             log::warn!("dictation: failed to start recording: {e}");
