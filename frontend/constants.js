@@ -55,6 +55,7 @@ export const CMD = {
   REQUEST_MICROPHONE: "request_microphone",
   OPEN_ACCESSIBILITY_SETTINGS: "open_accessibility_settings",
   OPEN_MICROPHONE_SETTINGS: "open_microphone_settings",
+  REPORT_BUG: "report_bug",
 };
 
 // Settings-window tabs: the value is both the nav `data-tab` and the

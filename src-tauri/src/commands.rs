@@ -546,3 +546,24 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
+
+/// Gather on-device diagnostics (version, macOS, permission + secure-input
+/// state, config summary, recent log tail), copy the full report to the
+/// clipboard, and open a prefilled GitHub "new issue" page. Returns a short
+/// confirmation summary for the UI. The log rides the clipboard (too big for a
+/// URL); the URL body carries only the environment block.
+#[tauri::command]
+pub fn report_bug(app: AppHandle) -> Result<String, String> {
+    let report = crate::diagnostics::gather(&app);
+    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(report.full.clone())) {
+        // Non-fatal: the prefilled issue still opens with the environment block.
+        log::warn!("report_bug: clipboard copy failed: {e}");
+    }
+    let url = crate::diagnostics::issue_url(&report);
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())?;
+    Ok(report.summary)
+}
