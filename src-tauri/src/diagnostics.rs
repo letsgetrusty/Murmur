@@ -8,7 +8,9 @@
 //! log tail is safe to ship in a report. We still cap it to the current session
 //! (the log is truncated each launch) and last N lines.
 
+use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::io::{BufRead, BufReader};
 
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -125,7 +127,12 @@ pub fn gather<R: Runtime>(app: &AppHandle<R>) -> BugReport {
                 c.refine_modifier.clone(),
             )
         })
-        .unwrap_or_default();
+        // On lock poison, fall back to explicit "unknown" rather than empty
+        // strings, so the report never shows a blank "STT model: " line.
+        .unwrap_or_else(|_| {
+            let u = || "unknown".to_string();
+            (u(), u(), u(), u(), u(), u(), u(), u())
+        });
 
     let whisper_ready = crate::stt::model_path(&stt_model)
         .map(|p| p.exists())
@@ -238,14 +245,25 @@ fn log_tail(max_lines: usize) -> String {
     };
     let mut path = std::path::PathBuf::from(home);
     path.push("Library/Logs/murmur.log");
-    match std::fs::read_to_string(&path) {
-        Ok(s) => {
-            let lines: Vec<&str> = s.lines().collect();
-            let start = lines.len().saturating_sub(max_lines);
-            lines[start..].join("\n")
+    let file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) => return format!("(could not read {}: {e})", path.display()),
+    };
+    // Stream the file, keeping only the last `max_lines` in a ring buffer, so a
+    // long-running session's log can't blow up memory when filing a report.
+    let mut ring: VecDeque<String> = VecDeque::with_capacity(max_lines + 1);
+    for line in BufReader::new(file).lines() {
+        match line {
+            Ok(l) => {
+                if ring.len() == max_lines {
+                    ring.pop_front();
+                }
+                ring.push_back(l);
+            }
+            Err(e) => return format!("(error reading {}: {e})", path.display()),
         }
-        Err(e) => format!("(could not read {}: {e})", path.display()),
     }
+    Vec::from(ring).join("\n")
 }
 
 /// Percent-encode for a URL query component (RFC 3986 unreserved set kept).
