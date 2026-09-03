@@ -5,8 +5,8 @@
 
    Load order: tokens.css → components.css → <page>.css. */
 
-/* The `hidden` attribute must always win, even over components that set their
-   own `display` (e.g. `.field { display: block }`). */
+/* The `hidden` attribute must always win, even over a component that sets its
+   own `display`. */
 [hidden] {
   display: none !important;
 }
@@ -17,52 +17,6 @@
   font-size: var(--fs-xs);
   line-height: var(--lh-snug);
   margin: var(--space-2xs) 0 0;
-}
-.status {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-}
-.status.ok {
-  color: var(--ok);
-}
-.status.error {
-  color: var(--error);
-}
-
-/* Keycap — a physical-key label used in onboarding cards and Settings hints. */
-kbd {
-  font-family: var(--font-sans);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  min-width: 26px;
-  text-align: center;
-  padding: 3px 7px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: var(--radius-control);
-  color: var(--text);
-}
-
-/* Card ------------------------------------------------------------------- */
-.card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-3xl);
-  box-shadow: var(--shadow-card), var(--hairline);
-}
-.card h2 {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
-  letter-spacing: -0.01em;
-  margin: 0 0 var(--space-xs);
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-.card + .card {
-  margin-top: var(--space-2xl);
 }
 
 /* Buttons ---------------------------------------------------------------- */
@@ -126,35 +80,14 @@ kbd {
 
 /* Keyboard focus — scoped to :focus-visible so a mouse click doesn't leave a
    lingering ring. Inputs/selects get their ring via :focus below. */
-.nav-item:focus-visible,
 .primary:focus-visible,
 .small-btn:focus-visible,
-.recorder:focus-visible,
-.toggle input:focus-visible {
+.recorder:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 /* Form controls ---------------------------------------------------------- */
-textarea,
-input[type="text"],
-input[type="password"],
-input:not([type]) {
-  width: 100%;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: var(--input-pad-y) var(--input-pad-x);
-  font-size: var(--fs-sm);
-  font-family: inherit;
-  line-height: var(--lh-normal);
-  resize: vertical;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-textarea {
-  min-height: 120px;
-}
 select {
   min-width: 200px;
   /* The native macOS popup button has a fixed ~21px height and ignores our
@@ -178,73 +111,10 @@ select {
   font-family: inherit;
   cursor: pointer;
 }
-.search {
-  width: 200px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  padding: var(--input-pad-y) var(--input-pad-x);
-  font-size: var(--fs-sm);
-  font-family: inherit;
-}
-textarea:focus,
-input:focus,
-select:focus,
-.search:focus {
+select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
-}
-
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.toggle input {
-  accent-color: var(--accent);
-}
-
-/* Nav item --------------------------------------------------------------- */
-.nav-item {
-  position: relative; /* anchors the active accent bar (::before) */
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-nav);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.nav-item:hover {
-  background: var(--overlay-hover);
-  color: var(--text);
-}
-/* Active — a quiet rust tint + accent text + a flush left accent bar, rather
-   than a loud solid fill. Reads as "you are here" without shouting. */
-.nav-item.active {
-  background: var(--accent-soft-bg);
-  color: var(--accent);
-  font-weight: var(--fw-semibold);
-}
-.nav-item.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  height: 15px;
-  width: 3px;
-  transform: translateY(-50%);
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
 }
 
 /* Shortcut recorder ------------------------------------------------------ */
@@ -281,16 +151,4 @@ select.invalid {
   background: var(--bg-input);
   letter-spacing: normal;
   font-weight: var(--fw-medium);
-}
-
-/* Empty state ------------------------------------------------------------ */
-.empty {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-6xl) var(--space-4xl);
-  text-align: center;
-  color: var(--text-dim);
-}
-.empty p {
-  margin: var(--space-2xs) 0;
 }
