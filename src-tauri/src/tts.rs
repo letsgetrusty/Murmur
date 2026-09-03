@@ -188,8 +188,9 @@ fn pcm_f32_to_wav(samples: &[f32], rate: u32) -> Vec<u8> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Kokoro backend — local neural TTS (kokoro-en: ONNX via `ort` + bundled
-// espeak-ng, CoreML-accelerated). Fully on-device; no API key.
+// Kokoro backend — local neural TTS (kokoro-en: ONNX via `ort`, CoreML-
+// accelerated; cmudict G2P, no espeak — see THIRD-PARTY-NOTICES.md). Fully
+// on-device; no API key.
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Curated subset of Kokoro's voices we ship. `(id, friendly name)`; `af_*`/`am_*`
@@ -832,20 +833,10 @@ impl Speaker for KokoroSpeaker {
             // actually starts. This is model-load (warm) + synth of the lead
             // chunks + prebuffer — the latency the user feels after pressing.
             let speak_t0 = std::time::Instant::now();
-            // Load + cache the model on first use.
-            let tts = {
-                let mut guard = tts_cell.lock().await;
-                if guard.is_none() {
-                    match KokoroTts::new(&model_path, &voices_path).await {
-                        Ok(t) => *guard = Some(Arc::new(t)),
-                        Err(e) => {
-                            log::warn!("tts/kokoro: load model failed: {e}");
-                            active.store(false, Ordering::Release);
-                            return;
-                        }
-                    }
-                }
-                guard.as_ref().expect("just loaded").clone()
+            // Load + cache the model on first use (shared with preview/warm).
+            let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
+                active.store(false, Ordering::Release);
+                return;
             };
             // Time to get the session: ~0 when warm; seconds means it reloaded or
             // waited on the shared session lock (another synth/preview in flight).

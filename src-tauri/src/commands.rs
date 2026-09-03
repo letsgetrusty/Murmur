@@ -304,14 +304,6 @@ pub fn set_dictation_trigger(state: State<AppState>, trigger: String) -> Result<
     Ok(())
 }
 
-/// Kick off the Kokoro model + voice download from onboarding so its progress bar
-/// fills alongside Whisper/Qwen. Idempotent + guarded (no-op if already on disk or
-/// already downloading). Progress is emitted on `model-download` with id `kokoro`.
-#[tauri::command]
-pub fn download_neural_voice(app: AppHandle) {
-    crate::spawn_download(&app, crate::ipc::download::KOKORO);
-}
-
 /// Retry (or start) a model download after a failure — powers the onboarding
 /// "Retry" buttons and any in-app retry. `id` is "whisper" | "llm" | "kokoro".
 /// Guarded, so a click while a download is running is a harmless no-op.

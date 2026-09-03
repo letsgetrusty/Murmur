@@ -18,13 +18,6 @@
   line-height: var(--lh-snug);
   margin: var(--space-2xs) 0 0;
 }
-.hint.ok {
-  color: var(--ok);
-}
-.hint.error {
-  color: var(--error);
-}
-
 .status {
   font-size: var(--fs-xs);
   color: var(--text-dim);
@@ -130,10 +123,6 @@ kbd {
   opacity: 0.4;
   cursor: default;
 }
-.small-btn.danger:hover:not(:disabled) {
-  border-color: var(--error);
-  color: var(--error);
-}
 
 /* Keyboard focus — scoped to :focus-visible so a mouse click doesn't leave a
    lingering ring. Inputs/selects get their ring via :focus below. */
@@ -208,18 +197,6 @@ select:focus,
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.field {
-  display: block;
-  margin-top: var(--space-2xl);
-}
-.field-label {
-  display: block;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  color: var(--text-dim);
-  margin-bottom: var(--space-xs);
-}
-
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -231,17 +208,6 @@ select:focus,
 }
 .toggle input {
   accent-color: var(--accent);
-}
-
-/* Chip / pill label ------------------------------------------------------ */
-.chip {
-  font-size: var(--fs-2xs);
-  font-weight: var(--fw-semibold);
-  color: var(--accent);
-  background: var(--accent-soft-bg);
-  border: 1px solid var(--accent-soft-border);
-  padding: var(--space-3xs) 7px;
-  border-radius: var(--radius-pill);
 }
 
 /* Nav item --------------------------------------------------------------- */
@@ -315,50 +281,6 @@ select.invalid {
   background: var(--bg-input);
   letter-spacing: normal;
   font-weight: var(--fw-medium);
-}
-
-/* Stat tile -------------------------------------------------------------- */
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-lg);
-  margin-bottom: var(--space-2xl);
-}
-@media (min-width: 720px) {
-  .stat-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-.stat {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-xl) var(--space-2xl);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  box-shadow: var(--shadow-card), var(--hairline);
-}
-.stat-label {
-  font-size: var(--fs-2xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-.stat-value {
-  font-size: var(--fs-3xl);
-  font-weight: var(--fw-bold);
-  letter-spacing: -0.02em;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--lh-tight);
-}
-.stat-sub {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Empty state ------------------------------------------------------------ */

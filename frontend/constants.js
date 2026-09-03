@@ -31,7 +31,6 @@ export const CMD = {
   RESET_HOTKEYS: "reset_hotkeys",
   SET_REFINE_MODIFIER: "set_refine_modifier",
   SET_DICTATION_TRIGGER: "set_dictation_trigger",
-  DOWNLOAD_NEURAL_VOICE: "download_neural_voice",
   RETRY_DOWNLOAD: "retry_download",
   GET_USAGE: "get_usage",
   HISTORY_STATS: "history_stats",
@@ -58,7 +57,7 @@ export const CMD = {
   REPORT_BUG: "report_bug",
 };
 
-// Settings-window tabs: the value is both the nav `data-tab` and the
+// Settings-window tabs: the value is both the nav `data-p` and the
 // `#tab-<value>` section id.
 export const TABS = {
   HOME: "home",
@@ -71,7 +70,7 @@ export const TABS = {
 };
 
 // Model-download ids, carried in the MODEL_DOWNLOAD payload's `id` field.
-// Keep in sync with emit_download_progress(...) in src-tauri/src/lib.rs.
+// Keep in sync with emit_download(...) in src-tauri/src/lib.rs.
 export const DOWNLOAD = {
   WHISPER: "whisper",
   LLM: "llm",

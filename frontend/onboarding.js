@@ -4,7 +4,7 @@
 
 import { EVENTS, CMD, DOWNLOAD } from "./constants.js";
 import { bindRecorder } from "./recorder.js";
-import { prettyShortcut } from "./shortcuts.js";
+import { prettyShortcut, TRIGGER_LABEL } from "./shortcuts.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
@@ -17,17 +17,6 @@ let step = 0;
 let dictationTrigger = "Fn";
 let ttsHotkey = "CmdOrCtrl+Shift+R";
 let ttsRecorder = null;
-
-// kbd label for each dictate trigger (matches Settings' badge map).
-const TRIGGER_KBD = {
-  Fn: "Fn",
-  RightCtrl: "Right ⌃",
-  RightAlt: "Right ⌥",
-  RightCmd: "Right ⌘",
-  Ctrl: "⌃",
-  Alt: "⌥",
-  Cmd: "⌘",
-};
 
 // True once we observe Accessibility currently granted (sticky).
 let accessibilityGranted = false;
@@ -179,15 +168,15 @@ let neuralStarted = false;
 function startNeural() {
   if (neuralStarted || !invoke) return;
   neuralStarted = true;
-  invoke(CMD.DOWNLOAD_NEURAL_VOICE).catch(() => {
+  invoke(CMD.RETRY_DOWNLOAD, { id: DOWNLOAD.KOKORO }).catch(() => {
     neuralStarted = false; // let a later attempt retry
   });
 }
 
-// Whisper's live progress, used only to word the "Try it" card ("Preparing the
-// speech model…") until it's on disk. All three models gate the download step's
-// Continue (see updateCta); this object just tracks Whisper for that message.
-const whisper = { ready: false, failed: false, downloaded: 0, total: 0 };
+// Whether Whisper is on disk yet, used only to word the "Try it" card
+// ("Preparing the speech model…"). All three models gate the download step's
+// Continue (see updateCta / dlDone); this just tracks Whisper for that message.
+let whisperReady = false;
 
 // Show/hide a row's Retry button (shown only when its download has failed).
 function setRetry(id, show) {
@@ -199,8 +188,7 @@ function setRetry(id, show) {
 function markDownloadDone(id) {
   dlDone[id] = true;
   if (id === DOWNLOAD.WHISPER) {
-    whisper.ready = true;
-    whisper.failed = false;
+    whisperReady = true;
     updateCta();
     updateTryCard(); // Whisper just landed — the "Try it" prompt can go live
   }
@@ -220,13 +208,6 @@ function markDownloadDone(id) {
 function renderDownload({ id, downloaded, total, failed }) {
   const row = $(`#${DL_EL[id]}`);
   if (!row) return;
-  // Keep the Finish gate in sync with Whisper's live progress.
-  if (id === DOWNLOAD.WHISPER) {
-    whisper.downloaded = downloaded;
-    whisper.total = total;
-    whisper.failed = failed;
-    updateCta();
-  }
   const fill = $("[data-fill]", row);
   const pct = $("[data-pct]", row);
   pct.classList.remove("done"); // re-download: drop any prior "✓ Ready"
@@ -287,11 +268,11 @@ function setCard(headline, status, { caret = false, cls = "" } = {}) {
 // dictate (tap live + model ready), wait for the model, or finish-to-activate Fn.
 function updateTryCard() {
   const keyEl = $("#try-key");
-  if (keyEl) keyEl.textContent = TRIGGER_KBD[dictationTrigger] ?? "Fn";
+  if (keyEl) keyEl.textContent = TRIGGER_LABEL[dictationTrigger] ?? "Fn";
   if (tryPhase !== "idle" || !$("#try-card")) return;
   if (invoke && !fnTapActive) {
     setCard("Fn turns on after setup — finish and Murmur restarts to activate it.", null);
-  } else if (invoke && !whisper.ready) {
+  } else if (invoke && !whisperReady) {
     setCard("Preparing the speech model… it downloads once, then runs offline.", null);
   } else {
     setCard("Say “This is my first dictation with Murmur”", null, { caret: true });

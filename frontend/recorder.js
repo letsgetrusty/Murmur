@@ -107,5 +107,5 @@ export function bindRecorder(button, { getCurrent, onCapture, onOpen, onClose })
   });
 
   render();
-  return { render, cancel };
+  return { render };
 }
