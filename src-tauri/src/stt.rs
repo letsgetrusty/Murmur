@@ -116,16 +116,12 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
     Ok(Arc::new(ctx))
 }
 
-/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
-/// graph compile + state allocation up front, so the first real dictation hits a
-/// fully-warm engine rather than paying that one-time cost. Uses the same
-/// no-fallback params as `transcribe` so it stays fast and deterministic.
-// The whisper decode params shared by warm-up and real transcription, kept in
-// one place so the two can't drift. Pin to English (matches the cloud path); a
-// dictation clip is one self-contained utterance, so don't seed the decoder with
-// prior-window text, and pin a single temperature so a hard clip can't trip
-// whisper's temperature-fallback retries (which re-decode and spike latency).
-// Give it the machine's cores, and silence whisper's stdout chatter.
+/// The whisper decode params shared by warm-up and real transcription, kept in
+/// one place so the two can't drift. Pin to English (matches the cloud path); a
+/// dictation clip is one self-contained utterance, so don't seed the decoder with
+/// prior-window text, and pin a single temperature so a hard clip can't trip
+/// whisper's temperature-fallback retries (which re-decode and spike latency).
+/// Give it the machine's cores, and silence whisper's stdout chatter.
 fn set_dictation_params(params: &mut FullParams) {
     params.set_language(Some("en"));
     params.set_translate(false);
@@ -139,6 +135,10 @@ fn set_dictation_params(params: &mut FullParams) {
     params.set_print_timestamps(false);
 }
 
+/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
+/// graph compile + state allocation up front, so the first real dictation hits a
+/// fully-warm engine rather than paying that one-time cost. Uses the same
+/// no-fallback params as `transcribe` so it stays fast and deterministic.
 fn warm_infer(ctx: &WhisperContext) -> Result<()> {
     let mut state = ctx
         .create_state()
