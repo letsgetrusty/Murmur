@@ -8,9 +8,8 @@ export default defineConfig({
   root,
   clearScreen: false,
   test: {
-    // Frontend unit tests (pure helpers + shared constants). jsdom gives a DOM
-    // for future component-level tests; the current suite is dependency-free.
-    environment: "jsdom",
+    // Frontend unit tests (pure helpers + shared constants). Node env — the
+    // suite is dependency-free and touches no DOM.
     include: ["**/*.test.js"],
   },
   server: {

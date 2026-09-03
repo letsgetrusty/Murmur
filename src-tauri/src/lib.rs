@@ -97,7 +97,7 @@ pub struct AppState {
     /// relabeled when the read-aloud chord is rebound in Settings — the tray
     /// menu is built once at startup, so this is the only live handle to it.
     pub read_item: tauri::menu::MenuItem<Wry>,
-    /// Latest per-model download progress, mirrored from `emit_download_progress`
+    /// Latest per-model download progress, mirrored from `emit_download`
     /// so the overlay can show a live bar when the user tries to dictate before
     /// the speech model has finished downloading.
     pub downloads: Arc<Mutex<Downloads>>,
@@ -164,7 +164,7 @@ pub struct DlProgress {
 }
 
 /// Latest download progress per model, for the overlay's pre-download dictation
-/// message. Updated by `emit_download_progress` / `emit_download_error`.
+/// message. Updated by `emit_download`.
 #[derive(Default)]
 pub struct Downloads {
     pub whisper: DlProgress,
@@ -279,7 +279,6 @@ pub fn run() {
             commands::reset_hotkeys,
             commands::set_refine_modifier,
             commands::set_dictation_trigger,
-            commands::download_neural_voice,
             commands::retry_download,
             commands::get_usage,
             commands::list_history,
@@ -318,7 +317,6 @@ pub fn run() {
             // settings window edits it via IPC, so changes apply without a restart.
             let config_state = Arc::new(Mutex::new(cfg.clone()));
 
-            // Speech-to-text: local on-device Whisper (whisper-rs).
             // Speech-to-text: local on-device Whisper (whisper-rs). The model is
             // fetched in the background after AppState is managed (see the
             // spawn_download calls below), so the first dictation isn't blocked on
@@ -334,8 +332,6 @@ pub fn run() {
             // Dictation history database.
             let history_state = Arc::new(Mutex::new(history::open()));
 
-            // LLM for the Fn+Ctrl refine pass: the embedded llama.cpp engine
-            // (Qwen3), loaded on first use.
             // LLM for the Fn+Ctrl refine pass (Qwen3 via embedded llama.cpp),
             // loaded on first use. The ~1 GB model is fetched in the background
             // after AppState is managed (spawn_download below).
@@ -552,11 +548,7 @@ pub fn run() {
                             .unwrap_or(true);
                         if !staged {
                             if let Some(update) = update::check_and_download(&app).await {
-                                let info = update.info();
-                                if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
-                                    *g = Some(update);
-                                }
-                                mark_update_staged(&app, info);
+                                stage_downloaded_update(&app, update);
                             }
                         }
                         tokio::time::sleep(CHECK_INTERVAL).await;
@@ -913,6 +905,17 @@ fn mark_update_staged<R: Runtime>(app: &AppHandle<R>, info: update::UpdateInfo) 
     log::info!("update: staged v{version} — 'Restart to update' offered");
 }
 
+/// Store a downloaded + verified update as pending and surface it (tray item +
+/// Settings banner). Shared by the startup/hourly check and the tray "Check for
+/// Updates…" handler.
+fn stage_downloaded_update<R: Runtime>(app: &AppHandle<R>, update: update::StagedUpdate) {
+    let info = update.info();
+    if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
+        *g = Some(update);
+    }
+    mark_update_staged(app, info);
+}
+
 /// Progress payload for the onboarding download bars. `total` is 0 when the
 /// server didn't send a Content-Length. `failed` marks a download that errored.
 #[derive(Clone, Serialize)]
@@ -956,33 +959,23 @@ fn track_download<R: Runtime>(
     }
 }
 
-pub(crate) fn emit_download_progress<R: Runtime>(
+// Mirror a download's state into AppState and emit it to the webviews. `failed`
+// carries the terminal error (with downloaded/total 0); otherwise it's progress.
+pub(crate) fn emit_download<R: Runtime>(
     app: &AppHandle<R>,
     id: &'static str,
     downloaded: u64,
     total: u64,
+    failed: bool,
 ) {
-    track_download(app, id, downloaded, total, false);
+    track_download(app, id, downloaded, total, failed);
     let _ = app.emit(
         ipc::event::MODEL_DOWNLOAD,
         DownloadProgress {
             id,
             downloaded,
             total,
-            failed: false,
-        },
-    );
-}
-
-pub(crate) fn emit_download_error<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
-    track_download(app, id, 0, 0, true);
-    let _ = app.emit(
-        ipc::event::MODEL_DOWNLOAD,
-        DownloadProgress {
-            id,
-            downloaded: 0,
-            total: 0,
-            failed: true,
+            failed,
         },
     );
 }
@@ -1021,7 +1014,7 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
         .unwrap_or_default();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let emit = |downloaded, total| emit_download_progress(&app, id, downloaded, total);
+        let emit = |downloaded, total| emit_download(&app, id, downloaded, total, false);
         // Was the asset already on disk before this task? `ensure_*` returns Ok
         // instantly for a present model, so warming unconditionally in the Ok
         // branch below would fire on EVERY launch — loading the model + compiling
@@ -1046,7 +1039,7 @@ pub(crate) fn spawn_download<R: Runtime>(app: &AppHandle<R>, id: &'static str) {
         match res {
             Err(e) => {
                 log::warn!("download: {id} failed: {e}");
-                emit_download_error(&app, id);
+                emit_download(&app, id, 0, 0, true);
             }
             Ok(()) => {
                 // Freshly downloaded → warm it now (load + graph compile) so the
@@ -1665,13 +1658,7 @@ fn handle_tray_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
                     return;
                 }
                 match update::check_and_download(&app).await {
-                    Some(u) => {
-                        let info = u.info();
-                        if let Ok(mut g) = app.state::<AppState>().pending_update.lock() {
-                            *g = Some(u);
-                        }
-                        mark_update_staged(&app, info);
-                    }
+                    Some(u) => stage_downloaded_update(&app, u),
                     None => {
                         let _ = app.emit(ipc::event::UPDATE_NONE, ());
                     }

@@ -3,7 +3,7 @@
 
 import { EVENTS, CMD, TABS } from "./constants.js";
 import { bindRecorder, cancelActiveRecorder } from "./recorder.js";
-import { prettyShortcut } from "./shortcuts.js";
+import { prettyShortcut, TRIGGER_LABEL } from "./shortcuts.js";
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -16,15 +16,11 @@ const setText = (id, text) => {
   if (e) e.textContent = text;
 };
 
-// Short glyphs for the read-only "trigger" references shown on Dictation /
-// Read-aloud / Home (the real bindings are edited on Shortcuts). TRIGGER_BADGE
-// (defined below) maps the hold-to-talk trigger; these map the refine modifier.
-const MOD_LABEL = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", Cmd: "⌘" };
-
-// Repaint every read-only trigger chip from the live config.
+// Repaint every read-only trigger chip from the live config. TRIGGER_LABEL maps
+// the hold-to-talk trigger; the refine modifier reuses prettyShortcut.
 function syncTriggerRefs() {
-  const trig = TRIGGER_BADGE[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
-  const mod = MOD_LABEL[currentConfig?.refine_modifier ?? "Ctrl"] ?? "⌃";
+  const trig = TRIGGER_LABEL[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
+  const mod = prettyShortcut(currentConfig?.refine_modifier ?? "Ctrl");
   const read = prettyShortcut(currentConfig?.hotkey_tts ?? "CmdOrCtrl+Shift+R");
   setText("dict-trigger-kbd", trig);
   setText("refine-trigger-kbd", trig);
@@ -327,20 +323,9 @@ const HOTKEY_FIELD = {
   tts_speed: "hotkey_tts_speed",
 };
 
-// Short label for the "Dictate & refine" combo's leading key — mirrors the
-// chosen hold-to-talk trigger so the refine hint stays accurate.
-const TRIGGER_BADGE = {
-  Fn: "Fn",
-  RightCtrl: "Right ⌃",
-  RightAlt: "Right ⌥",
-  RightCmd: "Right ⌘",
-  Ctrl: "⌃",
-  Alt: "⌥",
-  Cmd: "⌘",
-};
 function syncTriggerBadge() {
   const badge = el("refine-trigger-badge");
-  if (badge) badge.textContent = TRIGGER_BADGE[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
+  if (badge) badge.textContent = TRIGGER_LABEL[currentConfig?.dictation_trigger ?? "Fn"] ?? "Fn";
 }
 
 // The recorder relies on the control itself for confirmation — the button
@@ -503,7 +488,6 @@ async function loadInsights() {
     insStats = null;
   }
   await loadUsage(); // refreshes the local usage counts, then re-renders
-  renderInsights();
 }
 
 // --- History ------------------------------------------------------------------

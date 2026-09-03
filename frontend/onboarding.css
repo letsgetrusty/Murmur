@@ -125,7 +125,6 @@ body {
 }
 
 /* Inline key pill (mockup's .sc-pill / keycaps) — accent-tinted. */
-.ob kbd,
 .ob .sc-pill {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -215,12 +214,6 @@ body {
   border-color: rgba(97, 197, 84, 0.4);
   background: rgba(97, 197, 84, 0.12);
 }
-.perm-badge.warn {
-  color: var(--error);
-  border-color: rgba(240, 86, 75, 0.4);
-  background: rgba(240, 86, 75, 0.1);
-}
-
 /* Download rows ----------------------------------------------------------- */
 .dl-row {
   margin-top: 16px;

@@ -151,14 +151,6 @@ type CGEventTapCallBack = unsafe extern "C" fn(
     user_info: *mut c_void,
 ) -> CGEventRef;
 
-// Accessibility trust. On macOS 26 an app trusted for Accessibility also
-// satisfies Input Monitoring's IOHIDCheckAccess, so Accessibility is the one
-// permission that matters. We log it to see the real state.
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-}
-
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventTapCreate(
@@ -296,7 +288,7 @@ pub fn install<R: Runtime>(app: AppHandle<R>) -> anyhow::Result<()> {
         // born disabled and never delivers events, so trigger the system
         // prompt (which also adds `murmur` to the Input Monitoring list). The
         // grant only takes effect on the next launch.
-        let ax_trusted = AXIsProcessTrusted();
+        let ax_trusted = crate::permissions::accessibility_granted();
         let access = IOHIDCheckAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
         log::info!("Fn-key: Accessibility(AXIsProcessTrusted)={ax_trusted}  InputMonitoring(IOHIDCheckAccess)={access} [0=granted,1=denied,2=unknown]");
         // Accessibility is the ONE permission Murmur needs: it's required for

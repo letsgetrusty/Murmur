@@ -116,15 +116,13 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
     Ok(Arc::new(ctx))
 }
 
-/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
-/// graph compile + state allocation up front, so the first real dictation hits a
-/// fully-warm engine rather than paying that one-time cost. Uses the same
-/// no-fallback params as `transcribe` so it stays fast and deterministic.
-fn warm_infer(ctx: &WhisperContext) -> Result<()> {
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| anyhow!("whisper warm state: {e}"))?;
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+/// The whisper decode params shared by warm-up and real transcription, kept in
+/// one place so the two can't drift. Pin to English (matches the cloud path); a
+/// dictation clip is one self-contained utterance, so don't seed the decoder with
+/// prior-window text, and pin a single temperature so a hard clip can't trip
+/// whisper's temperature-fallback retries (which re-decode and spike latency).
+/// Give it the machine's cores, and silence whisper's stdout chatter.
+fn set_dictation_params(params: &mut FullParams) {
     params.set_language(Some("en"));
     params.set_translate(false);
     params.set_no_context(true);
@@ -135,6 +133,18 @@ fn warm_infer(ctx: &WhisperContext) -> Result<()> {
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+}
+
+/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
+/// graph compile + state allocation up front, so the first real dictation hits a
+/// fully-warm engine rather than paying that one-time cost. Uses the same
+/// no-fallback params as `transcribe` so it stays fast and deterministic.
+fn warm_infer(ctx: &WhisperContext) -> Result<()> {
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| anyhow!("whisper warm state: {e}"))?;
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    set_dictation_params(&mut params);
     let silence = vec![0f32; 16_000 / 2];
     state
         .full(params, &silence)
@@ -240,23 +250,7 @@ impl Transcriber for WhisperStt {
                         .map_err(|e| anyhow!("whisper state: {e}"))?;
                     let state_ms = t_state.elapsed().as_secs_f32() * 1000.0;
                     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-                    // Pin to English (matches the cloud path) and silence whisper's
-                    // stdout chatter.
-                    params.set_language(Some("en"));
-                    params.set_translate(false);
-                    // A dictation clip is one self-contained utterance: don't seed
-                    // the decoder with prior-window text, and pin a single
-                    // temperature so a hard clip can't trip whisper's
-                    // temperature-fallback retries (which re-decode and spike
-                    // latency). Give it the machine's cores while we're at it.
-                    params.set_no_context(true);
-                    params.set_temperature(0.0);
-                    params.set_temperature_inc(0.0);
-                    params.set_n_threads(transcribe_threads());
-                    params.set_print_special(false);
-                    params.set_print_progress(false);
-                    params.set_print_realtime(false);
-                    params.set_print_timestamps(false);
+                    set_dictation_params(&mut params);
                     let t0 = std::time::Instant::now();
                     state
                         .full(params, &samples)

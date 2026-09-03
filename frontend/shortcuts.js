@@ -28,6 +28,18 @@ export function prettyShortcut(s) {
     .join("");
 }
 
+// Short label (mac glyphs) for each hold-to-talk dictate trigger. Shared by the
+// Settings refine hint and the onboarding kbd label so they can't drift.
+export const TRIGGER_LABEL = {
+  Fn: "Fn",
+  RightCtrl: "Right ⌃",
+  RightAlt: "Right ⌥",
+  RightCmd: "Right ⌘",
+  Ctrl: "⌃",
+  Alt: "⌥",
+  Cmd: "⌘",
+};
+
 // Map a KeyboardEvent.code to the accelerator key token Tauri expects, or null
 // for pure-modifier / unsupported codes (so the recorder keeps waiting).
 export function codeToKey(code) {
