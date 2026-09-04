@@ -223,15 +223,24 @@ fn migrate(cfg: &mut Config) {
     }
     // A hand-edited language typo would otherwise reach whisper and come back as
     // confident nonsense instead of an error, so fall back loudly.
-    for (field, value, default) in [
-        ("stt_language", &mut cfg.stt_language, DEFAULT_STT_LANGUAGE),
+    // Only the primary trigger may auto-detect: the alternate chord exists to
+    // pin a second language, and the Settings alt dropdown has no "auto" entry.
+    for (field, value, default, allow_auto) in [
+        (
+            "stt_language",
+            &mut cfg.stt_language,
+            DEFAULT_STT_LANGUAGE,
+            true,
+        ),
         (
             "stt_language_alt",
             &mut cfg.stt_language_alt,
             DEFAULT_STT_LANGUAGE_ALT,
+            false,
         ),
     ] {
-        if !crate::stt::is_valid_language(value) {
+        let auto = value.as_str() == crate::stt::AUTO_LANGUAGE;
+        if !crate::stt::is_valid_language(value) || (auto && !allow_auto) {
             log::warn!(
                 "config: {field} '{value}' is not a language whisper knows; using '{default}'"
             );
@@ -372,6 +381,17 @@ mod tests {
         migrate(&mut c);
         assert_eq!(c.stt_language, crate::stt::AUTO_LANGUAGE);
         assert_eq!(c.stt_language_alt, "de");
+    }
+
+    #[test]
+    fn migrate_rejects_auto_for_the_alternate_language() {
+        // The alt chord pins a second language; auto-detect is primary-only.
+        let mut c = Config {
+            stt_language_alt: crate::stt::AUTO_LANGUAGE.into(),
+            ..Config::default()
+        };
+        migrate(&mut c);
+        assert_eq!(c.stt_language_alt, DEFAULT_STT_LANGUAGE_ALT);
     }
 
     #[test]
