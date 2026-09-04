@@ -115,7 +115,7 @@ async function loadConfig() {
   try {
     currentConfig = await invoke(CMD.GET_CONFIG);
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
-    el("stt-model").value = currentConfig.stt_model ?? "small.en";
+    el("stt-model").value = currentConfig.stt_model ?? "small";
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
     el("overlay-position").value = currentConfig.overlay_position ?? "bottom-center";
@@ -126,6 +126,44 @@ async function loadConfig() {
 }
 
 // Engine (STT model / TTS backend) selections save immediately and prompt a
+// Dictation languages. The list comes from the linked whisper build
+// (`stt::languages`), so it never drifts from what the model accepts. Only the
+// primary trigger offers auto-detect: an explicit second chord that guesses the
+// language would defeat its own purpose.
+function fillLanguages(languages = []) {
+  const primary = el("stt-language");
+  const alt = el("stt-language-alt");
+  primary.innerHTML = "";
+  alt.innerHTML = "";
+  addOption(primary, "auto", "Auto-detect");
+  for (const l of languages) {
+    addOption(primary, l.code, l.name);
+    addOption(alt, l.code, l.name);
+  }
+  primary.value = currentConfig.stt_language ?? "en";
+  alt.value = currentConfig.stt_language_alt ?? "nl";
+  primary.addEventListener("change", saveLanguages);
+  alt.addEventListener("change", saveLanguages);
+}
+
+// Unlike the engine dropdowns below, this needs no relaunch: the hotkey handler
+// reads the language from live config on every release (`language_for_action`),
+// so the change applies to the very next dictation.
+async function saveLanguages() {
+  if (!invoke || !currentConfig) return;
+  const next = {
+    ...currentConfig,
+    stt_language: el("stt-language").value,
+    stt_language_alt: el("stt-language-alt").value,
+  };
+  try {
+    await invoke(CMD.SAVE_CONFIG, { config: next });
+    currentConfig = next;
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+  }
+}
+
 // relaunch, since the backends are built once at startup — a plain config save
 // wouldn't swap them.
 async function saveEngines() {
@@ -276,6 +314,7 @@ async function loadOptions() {
   voice.value = currentConfig.tts_voice_id;
 
   fillMics(opts.mics);
+  fillLanguages(opts.languages);
 
   voice.addEventListener("change", async (e) => {
     await invoke(CMD.SET_VOICE, { voiceId: e.target.value });
@@ -319,6 +358,7 @@ async function loadOptions() {
 
 const HOTKEY_FIELD = {
   dictate: "hotkey_dictate",
+  dictate_alt: "hotkey_dictate_alt",
   tts_toggle: "hotkey_tts",
   tts_speed: "hotkey_tts_speed",
 };

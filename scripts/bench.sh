@@ -15,13 +15,13 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS="$HOME/Library/Application Support/murmur/models"
 BIN="$REPO/src-tauri/target/release/examples"
-STT_MODEL="small.en" # the shipped default — gate what users actually run
+STT_MODEL="small" # the shipped default — gate what users actually run
 
 # ── Thresholds ──────────────────────────────────────────────────────────────
 # Generous margin below measured-healthy so normal variance never trips them,
 # but a real regression does. Measured healthy on an M4: STT ~26x, TTS ~4.5x,
 # mic-ready ~75ms. Override via env for a different machine.
-STT_MIN_REALTIME="${STT_MIN_REALTIME:-10}" # small.en holds 25x+; medium.en throttles to ~2.7x
+STT_MIN_REALTIME="${STT_MIN_REALTIME:-10}" # small held 25x+ (same size/arch as small.en); medium throttles to ~2.7x
 TTS_MIN_REALTIME="${TTS_MIN_REALTIME:-2}"  # must stay above 1x or playback stalls
 MIC_MAX_MS="${MIC_MAX_MS:-250}"            # mic live well under the ~0.5-1s that lost first words
 

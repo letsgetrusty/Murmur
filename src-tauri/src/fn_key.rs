@@ -224,7 +224,10 @@ unsafe extern "C" fn tap_callback<R: Runtime>(
         } else {
             // Trigger released: refine if the modifier was held at any point.
             let mode = dictation_mode(state.refine_latch.load(Ordering::Acquire));
-            hotkeys::on_release(&state.app, mode);
+            // The Fn trigger is always the primary language; the alternate one
+            // has its own chord.
+            let lang = hotkeys::language_for_action(&state.app, hotkeys::HotkeyAction::Dictate);
+            hotkeys::on_release(&state.app, mode, lang);
         }
     } else if trigger_down_now && (flags & refine_mask(&state.app)) != 0 {
         // Modifier pressed while the trigger is already held (handles

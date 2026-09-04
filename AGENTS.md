@@ -51,8 +51,11 @@ gotchas). When this file and the architecture doc disagree, ask.**
 4. **Fn hold-to-dictate is a `CGEventTap` (`fn_key.rs`) gated on Accessibility
    alone** — never call `IOHIDRequestAccess`: it records an Input Monitoring
    denial that overrides the Accessibility coupling and silently wedges the tap
-   off. Default chords: dictation `Cmd+Shift+D`, read-aloud `Cmd+Shift+R`, cycle
-   speed `Cmd+Ctrl+S` (all hold-to-talk except speed). Two chord traps, both
+   off. Default chords: dictation `Cmd+Shift+D`, alternate-language
+   dictation `Cmd+Shift+N`, read-aloud `Cmd+Shift+R`, cycle
+   speed `Cmd+Ctrl+S` (all hold-to-talk except speed). The alternate-language
+   chord transcribes as `stt_language_alt` (default `nl`) and is always plain —
+   never refined, since the refine LLM is tuned for English. Two chord traps, both
    confirmed on-device: **Option-based** chords (e.g. `Alt+…`) are swallowed by
    macOS special-character input, and **`Cmd+Space`-family** chords are eaten by
    Spotlight/input-source switching — neither fires as a global shortcut, so
@@ -83,7 +86,9 @@ tray "Check for Updates…" checks surface an install banner in Settings —
 `update.rs`; the endpoint points at the public releases `latest.json`, which
 resolves once the repo is public — see `docs/launch-checklist.md`), and SQLite
 dictation history. The TTS backend is
-chosen via `tts_provider` in config; the local Whisper model (default `small.en`,
+chosen via `tts_provider` in config; the local Whisper model (default `small` —
+multilingual, since the `.en` builds cannot transcribe the alternate dictation
+language at all,
 name in `stt_model`) auto-downloads to `<app-support>/murmur/models/` on first
 run (and via `setup.sh`). Read-aloud can also use local neural **Kokoro**
 (`tts_provider = "kokoro"`): its ONNX model + voice packs auto-download to

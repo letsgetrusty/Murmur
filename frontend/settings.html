@@ -148,12 +148,21 @@
             <div class="sec-label">Speech model</div>
             <div class="card">
               <div class="row">
-                <div class="lbl">Model<small>Whisper · runs locally with Metal</small></div>
+                <div class="lbl">Model<small>Whisper · runs locally with Metal · multilingual</small></div>
                 <select class="sel" id="stt-model">
-                  <option value="base.en">Whisper base.en · 142 MB</option>
-                  <option value="small.en">Whisper small.en · 466 MB</option>
-                  <option value="medium.en">Whisper medium.en · 1.5 GB</option>
+                  <option value="base">Whisper base · 142 MB</option>
+                  <option value="small">Whisper small · 466 MB</option>
+                  <option value="medium">Whisper medium · 1.5 GB</option>
+                  <option value="large-v3-turbo">Whisper large-v3-turbo · 1.6 GB</option>
                 </select>
+              </div>
+              <div class="row">
+                <div class="lbl">Language<small>Spoken language for the main trigger</small></div>
+                <select class="sel" id="stt-language"></select>
+              </div>
+              <div class="row">
+                <div class="lbl">Alternate language<small>For the second dictation chord — never refined</small></div>
+                <select class="sel" id="stt-language-alt"></select>
               </div>
               <div class="row">
                 <div class="lbl">Dictation trigger<small>Rebind in <span class="ilink" data-goto="shortcuts">Shortcuts</span></small></div>
@@ -230,7 +239,8 @@
                   </optgroup>
                 </select>
               </div>
-              <div class="row"><div class="lbl">Dictate — alternate shortcut</div><button class="rec recorder" data-action="dictate"></button></div>
+              <div class="row"><div class="lbl">Dictate — keyboard shortcut</div><button class="rec recorder" data-action="dictate"></button></div>
+              <div class="row"><div class="lbl">Dictate — alternate language</div><button class="rec recorder" data-action="dictate_alt"></button></div>
               <div class="row"><div class="lbl">Read selection aloud</div><button class="rec recorder" data-action="tts_toggle"></button></div>
               <div class="row"><div class="lbl">Cycle read-aloud speed</div><button class="rec recorder" data-action="tts_speed"></button></div>
               <div class="row">
