@@ -104,6 +104,19 @@ trait Transcriber {
 
 ## 5. macOS gotchas (read before writing code — this is where projects die)
 
+- **Dock presence follows Settings and Setup window lifetime.** Start with
+  `LSUIElement = true` in both the release and development bundles and set
+  `ActivationPolicy::Accessory` on the built Tauri `App` before `run`. Setting
+  it only in `setup` is too late: Tao has already applied its startup policy.
+  Build Settings/Setup hidden, then switch to `Regular` before showing and
+  focusing them. Serialize the entire open operation on the main thread.
+  On `RunEvent::WindowEvent::Destroyed`, query the surviving `main` and
+  `onboarding` windows after Tauri removes the closed window from its registry.
+  Use `Accessory` only when neither exists. Focus, minimization, Cmd+H, and the
+  recording overlay do not affect the policy. Keep window destruction on close
+  so the idle app releases the settings WebKit process. Use activation policy,
+  not `set_dock_visibility`, whose current Tao implementation throttles hiding
+  and changes every window's `canHide` flag.
 - **The literal Fn key is hard.** `tauri-plugin-global-shortcut` can't capture the
   raw Fn key. Wispr does it via a low-level `CGEventTap`/IOKit listener, which also
   needs **Input Monitoring** permission. **For v1, use a normal chord** (e.g.

@@ -53,6 +53,9 @@ whisper-rs = { version = "0.16.0", features = ["metal"] }
 kokoro-en = { version = "0.1.5", default-features = false }
 llama-cpp-2 = { version = "0.1.154", features = ["metal"] }
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [profile.release]
 # LTO + strip miscompile cpal's CoreAudio device enumeration into a
 # null-pointer deref. Disable until we have a smaller repro to file
