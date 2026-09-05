@@ -11,6 +11,11 @@ accounts, no API keys.
 Open the `.dmg`, drag **Murmur** to Applications, and launch it. Updates install
 with one click. **Requires macOS 11+ on Apple Silicon (M1 or later).**
 
+Murmur runs in the menu bar. Its Dock icon appears while Settings or Setup is
+open, including when minimized or hidden with Cmd+H. Closing the last of these
+windows removes it from the Dock; dictation and read-aloud keep running. Open Settings
+from the menu bar to bring it back.
+
 ## What it does
 
 - **Dictate anywhere** — hold **Fn**, speak, release. On-device Whisper types it

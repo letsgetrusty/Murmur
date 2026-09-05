@@ -30,7 +30,8 @@ use crate::tts::Speaker as _;
 use serde::Serialize;
 use tauri::{
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
-    AppHandle, Emitter, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, Wry,
+    ActivationPolicy, AppHandle, Emitter, Manager, RunEvent, Runtime, WebviewUrl,
+    WebviewWindowBuilder, WindowEvent, Wry,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -264,7 +265,7 @@ pub fn run() {
     };
     let cfg = config::load();
 
-    tauri::Builder::default()
+    let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -580,46 +581,51 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        // Keep the app alive when the overlay hides. Tauri's default is to
-        // exit when the last visible window goes away — but our overlay is
-        // a transient pill that's hidden most of the time, with the tray icon
-        // as the persistent UI. Only exit when the tray Quit menu item calls
-        // `app.exit(N)` (which surfaces here as `code = Some(N)`).
-        .run(|app, event| match event {
-            RunEvent::ExitRequested { code, api, .. } => {
-                if code.is_none() {
-                    api.prevent_exit();
-                }
+        .expect("error while building tauri application");
+
+    // LSUIElement keeps Launch Services from showing a Dock icon. Set Tao's
+    // initial policy too, before it launches NSApplication: setup runs after
+    // that point and would allow the default Regular policy to flash the icon.
+    app.set_activation_policy(ActivationPolicy::Accessory);
+    app.run(|app, event| match event {
+        // Closing a window must not quit this menu bar app. Explicit exits
+        // and restarts still go through the existing shutdown paths.
+        RunEvent::ExitRequested { code, api, .. } => {
+            if code.is_none() {
+                api.prevent_exit();
             }
-            // macOS: clicking the dock icon (with no visible windows) fires
-            // Reopen. During first-run onboarding a dock click means "come back
-            // to the flow" — the user just granted Accessibility in System
-            // Settings and clicked our icon to return — so re-focus the
-            // onboarding window instead of popping Settings over it. Once
-            // onboarding finishes its window is gone, so this falls through to
-            // the normal "bring the settings window up" behavior.
-            RunEvent::Reopen { .. } => {
-                if let Some(win) = app.get_webview_window("onboarding") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
-                } else {
-                    show_main_window(app);
-                }
+        }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Destroyed,
+            ..
+        } if matches!(label.as_str(), "main" | "onboarding") => {
+            // Tauri removes the destroyed window from its registry before
+            // this callback. CloseRequested can be cancelled; only actual
+            // destruction changes Dock presence. The other window may
+            // still exist, including during the onboarding handoff.
+            if let Err(e) = app.set_activation_policy(dock_activation_policy(app)) {
+                log::warn!("failed to update Dock presence after closing {label}: {e}");
             }
-            _ => {}
-        });
+        }
+        // Dock clicks and reopening the running app through Finder or
+        // Spotlight fire Reopen. During onboarding this means "come back
+        // to the flow" — the user just granted Accessibility in System
+        // Settings and clicked our icon to return — so re-focus the
+        // onboarding window instead of popping Settings over it. Once
+        // onboarding finishes its window is gone, so this falls through to
+        // the normal "bring the settings window up" behavior.
+        RunEvent::Reopen { .. } => {
+            if app.get_webview_window("onboarding").is_some() {
+                show_onboarding_window(app);
+            } else {
+                show_main_window(app);
+            }
+        }
+        _ => {}
+    });
 }
 
-/// Show the main settings/history window, creating it if needed. Used by the
-/// dock-reopen handler and the tray "Settings…" item.
-///
-/// The window is not declared in `tauri.conf.json`; it's built here on first
-/// open and destroyed when the user closes it (Tauri's default), so an idle
-/// Murmur keeps no WebKit content process for a window that's rarely opened.
-/// It self-populates from the backend on load (`settings.js` `init`), so a
-/// fresh instance needs no restored state.
 /// One-shot marker (a temp file) that tells the *next* launch to open the
 /// settings window. Set by `finish_onboarding` when it relaunches to activate the
 /// Fn tap, so the restarted app lands the user in the desktop UI rather than
@@ -645,16 +651,51 @@ fn take_reveal_main_on_launch() -> bool {
     }
 }
 
+/// Dock presence follows window lifetime, not focus or visibility. Minimized
+/// and Cmd+H-hidden windows stay reachable through the Dock and Cmd+Tab. The
+/// recording overlay never participates. Query only on the main thread, where
+/// creation and destruction are serialized; no duplicate lifecycle state.
+fn dock_activation_policy<R: Runtime>(app: &AppHandle<R>) -> ActivationPolicy {
+    if app.get_webview_window("main").is_some() || app.get_webview_window("onboarding").is_some() {
+        ActivationPolicy::Regular
+    } else {
+        ActivationPolicy::Accessory
+    }
+}
+
+/// Present an existing settings/setup window on the main thread. New windows
+/// are built hidden so promotion to a normal app precedes showing/focusing.
+fn present_window<R: Runtime>(win: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    win.app_handle()
+        .set_activation_policy(ActivationPolicy::Regular)?;
+    win.unminimize()?;
+    win.show()?;
+    win.set_focus()
+}
+
+/// Show Settings, creating it if needed. Closing destroys its WebKit process;
+/// settings.js repopulates the next instance from the backend. Calls also come
+/// from IPC and update workers, so serialize the whole operation on the main
+/// thread, including the lookup, to prevent competing window creations.
 pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || show_main_window_on_main_thread(&handle)) {
+        log::warn!("failed to dispatch settings window: {e}");
+    }
+}
+
+fn show_main_window_on_main_thread<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.unminimize();
-        let _ = win.set_focus();
+        if let Err(e) = present_window(&win) {
+            log::warn!("failed to show settings window: {e}");
+        }
         return;
     }
     let mut builder =
         WebviewWindowBuilder::new(app, "main", WebviewUrl::App("settings.html".into()))
             .title("Murmur")
+            .visible(false)
+            .focused(false)
             // Unified-sidebar look (matches the design reference): a transparent
             // overlay title bar so the native traffic lights float over the sidebar
             // top with no title strip. The sidebar reserves top room for them.
@@ -713,7 +754,9 @@ pub(crate) fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
             }
             #[cfg(all(debug_assertions, target_os = "macos"))]
             write_ui_shot_windowid(&win);
-            let _ = win.set_focus();
+            if let Err(e) = present_window(&win) {
+                log::warn!("failed to show settings window: {e}");
+            }
         }
         Err(e) => log::warn!("failed to create settings window: {e}"),
     }
@@ -742,15 +785,24 @@ fn write_ui_shot_windowid<R: Runtime>(win: &tauri::WebviewWindow<R>) {
 /// startup while `config.onboarding_done` is false, and re-openable from the
 /// tray. Built here (not in `tauri.conf.json`) like the settings window.
 pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || show_onboarding_window_on_main_thread(&handle)) {
+        log::warn!("failed to dispatch onboarding window: {e}");
+    }
+}
+
+fn show_onboarding_window_on_main_thread<R: Runtime>(app: &AppHandle<R>) {
     if let Some(win) = app.get_webview_window("onboarding") {
-        let _ = win.show();
-        let _ = win.unminimize();
-        let _ = win.set_focus();
+        if let Err(e) = present_window(&win) {
+            log::warn!("failed to show onboarding window: {e}");
+        }
         return;
     }
     let mut builder =
         WebviewWindowBuilder::new(app, "onboarding", WebviewUrl::App("onboarding.html".into()))
             .title("Welcome to Murmur")
+            .visible(false)
+            .focused(false)
             .inner_size(560.0, 500.0)
             .resizable(false)
             .center()
@@ -784,7 +836,9 @@ pub fn show_onboarding_window<R: Runtime>(app: &AppHandle<R>) {
         Ok(win) => {
             #[cfg(all(debug_assertions, target_os = "macos"))]
             write_ui_shot_windowid(&win);
-            let _ = win.set_focus();
+            if let Err(e) = present_window(&win) {
+                log::warn!("failed to show onboarding window: {e}");
+            }
         }
         Err(e) => log::warn!("failed to create onboarding window: {e}"),
     }
@@ -2285,7 +2339,51 @@ async fn paste_on_main_thread<R: Runtime>(app: &AppHandle<R>, text: String) -> a
 
 #[cfg(test)]
 mod tests {
-    use super::format_accelerator;
+    use super::{dock_activation_policy, format_accelerator};
+    use tauri::{test::mock_app, ActivationPolicy, WebviewUrl, WebviewWindowBuilder};
+
+    #[test]
+    fn dock_policy_ignores_the_recording_overlay() {
+        let app = mock_app();
+        assert!(matches!(
+            dock_activation_policy(app.handle()),
+            ActivationPolicy::Accessory
+        ));
+
+        WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::default())
+            .build()
+            .unwrap();
+        assert!(matches!(
+            dock_activation_policy(app.handle()),
+            ActivationPolicy::Accessory
+        ));
+    }
+
+    #[test]
+    fn dock_policy_keeps_either_management_window_reachable() {
+        // These are the surviving registry entries before, during, and after
+        // the Setup-to-Settings handoff. Hidden windows still count: the policy
+        // must not use focus, visibility, or minimized state as a proxy for
+        // whether a window has been closed.
+        for labels in [
+            &["onboarding"][..],
+            &["onboarding", "main"][..],
+            &["main"][..],
+        ] {
+            let app = mock_app();
+            for label in labels {
+                WebviewWindowBuilder::new(&app, *label, WebviewUrl::default())
+                    .visible(false)
+                    .focused(false)
+                    .build()
+                    .unwrap();
+            }
+            assert!(matches!(
+                dock_activation_policy(app.handle()),
+                ActivationPolicy::Regular
+            ));
+        }
+    }
 
     #[test]
     fn accelerator_renders_mac_symbols() {
