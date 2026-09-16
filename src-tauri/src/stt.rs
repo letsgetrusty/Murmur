@@ -246,6 +246,39 @@ fn transcribe_threads() -> std::os::raw::c_int {
         .unwrap_or(4)
 }
 
+/// Turn Whisper's raw output into the text we paste. This is the single ordered
+/// pipeline for every transcript — keep all post-decode cleanup here (don't
+/// inline steps at the call site) so the order is one place and the composition
+/// tests below guard the whole thing against regressions:
+///   1. drop non-speech placeholders ("[BLANK_AUDIO]" …),
+///   2. strip Whisper's leading dialogue dash (a lone dash → empty),
+///   3. apply the user's deterministic corrections.
+///
+/// An empty result means the caller pastes nothing.
+fn finalize_transcript(raw: &str, rules: &[(String, String)]) -> String {
+    let cleaned = strip_nonspeech(raw);
+    let cleaned = strip_leading_dialogue_dash(&cleaned);
+    apply_corrections(cleaned, rules)
+}
+
+/// Strip Whisper's leading "dialogue dash": it prefixes some segments with a
+/// dash/bullet (e.g. "- No, this…"), and on a near-silent clip emits a lone "-".
+/// Both are artifacts, not speech — remove one leading marker plus any following
+/// space. A lone marker collapses to empty, so the caller pastes nothing instead
+/// of a stray "-". A marker glued to a digit ("-5") is kept, since that's a
+/// negative number rather than the dialogue artifact.
+fn strip_leading_dialogue_dash(text: &str) -> &str {
+    let t = text.trim_start();
+    let rest = ['-', '\u{2013}', '\u{2014}', '\u{2022}', '*']
+        .iter()
+        .find_map(|m| t.strip_prefix(*m));
+    match rest {
+        Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => t,
+        Some(rest) => rest.trim_start(),
+        None => t,
+    }
+}
+
 /// Drop whisper.cpp's non-speech placeholders — "[BLANK_AUDIO]", "[ Silence ]",
 /// "(music)", "[ Inaudible ]", etc. — that it emits for silent/non-speech audio.
 /// Only bracketed/parenthesized spans containing a non-speech keyword are
@@ -382,16 +415,12 @@ impl Transcriber for WhisperStt {
                 queue_ms,
                 state_ms,
             );
-            // Clean whisper's non-speech placeholders, then apply the user's
-            // deterministic corrections (before paste and before the refine LLM,
-            // so both see the fixed terms).
-            let cleaned = strip_nonspeech(&text);
             let rules = self
                 .corrections
                 .lock()
                 .map(|g| g.clone())
                 .unwrap_or_default();
-            Ok(apply_corrections(&cleaned, &rules))
+            Ok(finalize_transcript(&text, &rules))
         })
     }
 
@@ -551,6 +580,99 @@ mod tests {
         );
     }
 
+    /// Exercise the vocabulary-biasing path against a real model: tokenize the
+    /// shipped dev-terms default and feed it through `set_tokens` + `full`, the
+    /// exact sequence `transcribe` runs. Proves the whisper-rs API wiring works
+    /// and the default fits whisper's ~224-token prompt budget. Ignored by
+    /// default (needs the model on disk); run manually:
+    ///   MURMUR_TEST_MODEL=small.en \
+    ///     cargo test --no-default-features -- --ignored --nocapture vocabulary_
+    #[test]
+    #[ignore = "needs a local Whisper model on disk"]
+    fn vocabulary_tokenizes_and_biases_within_budget() {
+        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
+        let ctx = open_context(&model).expect("open model");
+        let vocab = crate::config::DEFAULT_DICTATION_VOCABULARY;
+        let tokens = ctx.tokenize(vocab, 224).expect("tokenize vocab");
+        assert!(!tokens.is_empty(), "dev vocab should produce prompt tokens");
+        assert!(
+            tokens.len() <= 224,
+            "default vocab is {} tokens, over whisper's ~224 prompt budget — trim it",
+            tokens.len()
+        );
+        // Run the same param setup transcribe uses, with the prompt tokens set,
+        // over 0.5 s of silence — proves set_tokens + full() don't panic.
+        let mut state = ctx.create_state().expect("state");
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        set_dictation_params(&mut params);
+        params.set_tokens(&tokens);
+        state
+            .full(params, &vec![0f32; 16_000 / 2])
+            .expect("full() with prompt tokens");
+    }
+
+    // Guards the FULL post-decode pipeline (`finalize_transcript`) end-to-end, so
+    // a regression in any step — or in the order/wiring — is caught even though
+    // each step also has its own unit test. These mirror real bugs seen in the
+    // wild (leading dialogue dash, lone dash pasting a stray "-", placeholders).
+    #[test]
+    fn finalize_transcript_handles_the_reported_regressions() {
+        let rules = parse_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
+
+        // Leading dialogue dash is stripped (was: pasted "- No, this…").
+        assert_eq!(
+            finalize_transcript("- No, this is good", &rules),
+            "No, this is good"
+        );
+        // Lone dash → empty, so the caller pastes nothing (was: pasted a "-").
+        assert_eq!(finalize_transcript("-", &rules), "");
+        // Non-speech placeholder → empty (nothing pasted).
+        assert_eq!(finalize_transcript("[BLANK_AUDIO]", &rules), "");
+        // Dash strip AND corrections both apply, in order.
+        assert_eq!(
+            finalize_transcript("- the cdci pipeline shipped", &rules),
+            "the CI/CD pipeline shipped"
+        );
+        // Placeholder removed mid-text, speech kept, corrections applied.
+        assert_eq!(
+            finalize_transcript("I use Rust C [BLANK_AUDIO]", &rules),
+            "I use rustc"
+        );
+        // Ordinary dictation is returned unchanged.
+        assert_eq!(
+            finalize_transcript("Ship the feature today", &rules),
+            "Ship the feature today"
+        );
+        // With no rules configured, cleanup still runs.
+        assert_eq!(finalize_transcript("- hello world", &[]), "hello world");
+    }
+
+    #[test]
+    fn strips_whispers_leading_dialogue_dash() {
+        // The two reported symptoms: leading "- " on real text, and a lone "-".
+        assert_eq!(
+            strip_leading_dialogue_dash("- No, this is bad"),
+            "No, this is bad"
+        );
+        assert_eq!(
+            strip_leading_dialogue_dash("-add a sound effect"),
+            "add a sound effect"
+        );
+        assert_eq!(strip_leading_dialogue_dash("-"), ""); // lone dash → nothing pasted
+        assert_eq!(
+            strip_leading_dialogue_dash("  –  spaced en-dash"),
+            "spaced en-dash"
+        );
+        // Only one leading marker is removed; interior dashes are untouched.
+        assert_eq!(
+            strip_leading_dialogue_dash("well-behaved text"),
+            "well-behaved text"
+        );
+        assert_eq!(strip_leading_dialogue_dash("normal text"), "normal text");
+        // A dash glued to a digit is a negative number, not the artifact.
+        assert_eq!(strip_leading_dialogue_dash("-5 degrees"), "-5 degrees");
+    }
+
     #[test]
     fn parses_correction_rules_skipping_comments_and_blanks() {
         let rules = parse_corrections(
@@ -601,37 +723,6 @@ mod tests {
             apply_corrections("using Rust-C here", &rules),
             "using rustc here"
         );
-    }
-
-    /// Exercise the vocabulary-biasing path against a real model: tokenize the
-    /// shipped dev-terms default and feed it through `set_tokens` + `full`, the
-    /// exact sequence `transcribe` runs. Proves the whisper-rs API wiring works
-    /// and the default fits whisper's ~224-token prompt budget. Ignored by
-    /// default (needs the model on disk); run manually:
-    ///   MURMUR_TEST_MODEL=small.en \
-    ///     cargo test --no-default-features -- --ignored --nocapture vocabulary_
-    #[test]
-    #[ignore = "needs a local Whisper model on disk"]
-    fn vocabulary_tokenizes_and_biases_within_budget() {
-        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
-        let ctx = open_context(&model).expect("open model");
-        let vocab = crate::config::DEFAULT_DICTATION_VOCABULARY;
-        let tokens = ctx.tokenize(vocab, 224).expect("tokenize vocab");
-        assert!(!tokens.is_empty(), "dev vocab should produce prompt tokens");
-        assert!(
-            tokens.len() <= 224,
-            "default vocab is {} tokens, over whisper's ~224 prompt budget — trim it",
-            tokens.len()
-        );
-        // Run the same param setup transcribe uses, with the prompt tokens set,
-        // over 0.5 s of silence — proves set_tokens + full() don't panic.
-        let mut state = ctx.create_state().expect("state");
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        set_dictation_params(&mut params);
-        params.set_tokens(&tokens);
-        state
-            .full(params, &vec![0f32; 16_000 / 2])
-            .expect("full() with prompt tokens");
     }
 
     /// End-to-end local transcription against a real WAV fixture + model.
