@@ -201,23 +201,36 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
     Ok(Arc::new(ctx))
 }
 
+/// First-pass decode temperature. 0 = deterministic and fast; the common case
+/// decodes in one pass at this temperature.
+const DICTATION_TEMPERATURE: f32 = 0.0;
+/// Temperature-fallback step. MUST stay > 0 — it enables whisper's fallback
+/// ladder so a hard clip that fails the entropy/logprob thresholds retries at a
+/// higher temperature instead of returning an empty/garbage transcript. Setting
+/// this to 0 silently dropped whole dictations (a 22 s clip decoding to nothing).
+const DICTATION_TEMPERATURE_INC: f32 = 0.2;
+
+// Compile-time guard: a zero step disables whisper's fallback ladder, which
+// silently dropped whole dictations. Don't "fix" a build failure here by
+// lowering the value to 0 — that reintroduces the empty-transcript bug.
+const _: () = assert!(
+    DICTATION_TEMPERATURE_INC > 0.0,
+    "temperature_inc must stay > 0 so whisper's temperature fallback stays on"
+);
+
 /// The whisper decode params shared by warm-up and real transcription, kept in
 /// one place so the two can't drift. Pin to English (matches the cloud path); a
 /// dictation clip is one self-contained utterance, so don't seed the decoder with
-/// prior-window text. Start at temperature 0 (deterministic, fast — the common
-/// case decodes in one pass here), but KEEP whisper's temperature fallback on
-/// (`temperature_inc` > 0): when a hard clip fails the entropy/logprob
-/// thresholds, whisper retries at a higher temperature instead of returning an
-/// empty/garbage transcript. Disabling the fallback silently dropped whole
-/// dictations (a 22 s clip that decoded to nothing); the occasional retry
-/// latency on a hard clip is well worth not losing the user's words.
-/// Give it the machine's cores, and silence whisper's stdout chatter.
+/// prior-window text. Start at temperature 0 (deterministic, fast), but keep
+/// whisper's temperature fallback on (see `DICTATION_TEMPERATURE_INC`), so a hard
+/// clip recovers instead of pasting nothing. Give it the machine's cores, and
+/// silence whisper's stdout chatter.
 fn set_dictation_params(params: &mut FullParams) {
     params.set_language(Some("en"));
     params.set_translate(false);
     params.set_no_context(true);
-    params.set_temperature(0.0);
-    params.set_temperature_inc(0.2);
+    params.set_temperature(DICTATION_TEMPERATURE);
+    params.set_temperature_inc(DICTATION_TEMPERATURE_INC);
     params.set_n_threads(transcribe_threads());
     params.set_print_special(false);
     params.set_print_progress(false);
@@ -285,10 +298,13 @@ fn strip_leading_dialogue_dash(text: &str) -> &str {
 }
 
 /// Drop whisper.cpp's non-speech placeholders — "[BLANK_AUDIO]", "[ Silence ]",
-/// "(music)", "[ Inaudible ]", etc. — that it emits for silent/non-speech audio.
-/// Only bracketed/parenthesized spans containing a non-speech keyword are
-/// removed, so ordinary dictation is untouched; if silence was all that was
-/// "heard", the result is empty and the caller pastes nothing.
+/// "(music)", "[ Inaudible ]", "[END PLAYBACK]", etc. — that it emits for
+/// silent/non-speech audio. A bracketed/parenthesized span is removed when it
+/// contains a non-speech keyword, OR when it's a square-bracket span with
+/// letters but no lowercase (whisper writes its annotations as ALL-CAPS square
+/// brackets — [END], [TYPING] — which ordinary dictation never produces). Real
+/// prose and lowercase parentheticals are left intact; if silence was all that
+/// was "heard", the result is empty and the caller pastes nothing.
 fn strip_nonspeech(text: &str) -> String {
     const KEYWORDS: &[&str] = &[
         "blank_audio",
@@ -326,11 +342,18 @@ fn strip_nonspeech(text: &str) -> String {
         };
         if let Some(close) = close {
             if let Some(j) = (i + 1..chars.len()).find(|&k| chars[k] == close) {
-                let inner: String = chars[i + 1..j]
-                    .iter()
-                    .collect::<String>()
-                    .to_ascii_lowercase();
-                if KEYWORDS.iter().any(|k| inner.contains(k)) {
+                let inner: String = chars[i + 1..j].iter().collect();
+                let has_keyword = {
+                    let lower = inner.to_ascii_lowercase();
+                    KEYWORDS.iter().any(|k| lower.contains(k))
+                };
+                // Whisper annotates non-speech in ALL-CAPS square brackets
+                // ([END PLAYBACK], [TYPING]); a `[...]` span with letters but no
+                // lowercase is one of those, not dictated text.
+                let is_caps_annotation = chars[i] == '['
+                    && inner.chars().any(|c| c.is_ascii_alphabetic())
+                    && !inner.chars().any(|c| c.is_ascii_lowercase());
+                if has_keyword || is_caps_annotation {
                     i = j + 1; // drop the whole "[…]" / "(…)" span
                     continue;
                 }
@@ -425,7 +448,17 @@ impl Transcriber for WhisperStt {
                 .lock()
                 .map(|g| g.clone())
                 .unwrap_or_default();
-            Ok(finalize_transcript(&text, &rules))
+            let finalized = finalize_transcript(&text, &rules);
+            // Diagnose empty results: log whether whisper itself produced nothing
+            // (raw empty → decode/no-speech/prompt issue) or our cleanup stripped
+            // it (raw non-empty → strip/correction issue). Truncated + escaped.
+            if finalized.trim().is_empty() {
+                log::warn!(
+                    "stt: finalized transcript empty (raw whisper output = {:?})",
+                    text.chars().take(200).collect::<String>()
+                );
+            }
+            Ok(finalized)
         })
     }
 
@@ -572,6 +605,13 @@ mod tests {
         assert_eq!(strip_nonspeech("  [ Silence ]  "), "");
         assert_eq!(strip_nonspeech("(music)"), "");
         assert_eq!(strip_nonspeech("[ Inaudible ]"), "");
+        // ALL-CAPS square-bracket annotations whisper hallucinates on silence.
+        assert_eq!(strip_nonspeech("[END PLAYBACK]"), "");
+        assert_eq!(strip_nonspeech("[END]"), "");
+        assert_eq!(
+            strip_nonspeech("Take out the trash [END PLAYBACK]"),
+            "Take out the trash"
+        );
         // Mixed: keep the speech, drop the annotation.
         assert_eq!(
             strip_nonspeech("Take out the trash [BLANK_AUDIO]"),
@@ -727,6 +767,57 @@ mod tests {
         assert_eq!(
             apply_corrections("using Rust-C here", &rules),
             "using rustc here"
+        );
+    }
+
+    fn fixture(name: &str) -> String {
+        format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// Golden smoke test of the FULL shipped pipeline (default vocabulary +
+    /// corrections + decode params) against committed real audio. Guards the
+    /// core experience end to end: real speech must not decode to empty (the
+    /// reported regression) and must contain its words, while silence must
+    /// produce nothing (hallucination placeholders stripped, not pasted). Run
+    /// with the model on disk (CI downloads it):
+    ///   MURMUR_TEST_MODEL=base.en \
+    ///     cargo test --no-default-features -- --ignored --nocapture dictation_pipeline_golden
+    #[test]
+    #[ignore = "needs a local Whisper model (MURMUR_TEST_MODEL, default small.en)"]
+    fn dictation_pipeline_golden() {
+        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
+        let stt = WhisperStt::new(&model);
+        // Exercise the exact config users ship with.
+        stt.set_vocabulary(crate::config::DEFAULT_DICTATION_VOCABULARY);
+        stt.set_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        // Real speech → non-empty, and its distinctive words survive the pipeline.
+        let speech = std::fs::read(fixture("speech.wav")).expect("read speech.wav");
+        let out = rt
+            .block_on(stt.transcribe(&speech))
+            .expect("transcribe speech");
+        assert!(
+            !out.trim().is_empty(),
+            "real speech decoded to EMPTY — the core dictation regression"
+        );
+        // A distinctive word that reliably survives (exact wording varies by
+        // model, so assert real content without being brittle about it).
+        assert!(
+            out.to_lowercase().contains("dictation"),
+            "expected content missing from transcript: {out:?}"
+        );
+
+        // Silence → nothing pasted (whisper's placeholders must be stripped).
+        let silence = std::fs::read(fixture("silence.wav")).expect("read silence.wav");
+        let out = rt
+            .block_on(stt.transcribe(&silence))
+            .expect("transcribe silence");
+        assert!(
+            out.trim().is_empty(),
+            "silence should produce no text, got {out:?}"
         );
     }
 
