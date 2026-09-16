@@ -19,6 +19,11 @@ pub trait Transcriber: Send + Sync {
     /// doesn't pay the load. Default no-op; safe to call repeatedly (it's a
     /// cheap check once the model is resident).
     fn warm(&self) {}
+
+    /// Set the vocabulary/"initial prompt" that biases the decoder toward the
+    /// user's spellings (proper nouns, jargon). Applied on the next transcribe;
+    /// no reload. Default no-op for impls without prompt biasing.
+    fn set_vocabulary(&self, _vocabulary: &str) {}
 }
 
 // -----------------------------------------------------------------------------
@@ -59,6 +64,9 @@ pub struct WhisperStt {
     model_name: String,
     // Behind an `Arc` so `warm` can hand the cell to a background thread.
     ctx: Arc<Mutex<Option<Arc<WhisperContext>>>>,
+    // Vocabulary/"initial prompt" biasing text; read (and tokenized) fresh on
+    // each transcribe, so `set_vocabulary` applies without a reload.
+    vocabulary: Mutex<String>,
 }
 
 impl WhisperStt {
@@ -66,6 +74,7 @@ impl WhisperStt {
         Self {
             model_name: model_name.into(),
             ctx: Arc::new(Mutex::new(None)),
+            vocabulary: Mutex::new(String::new()),
         }
     }
 
@@ -231,6 +240,13 @@ impl Transcriber for WhisperStt {
             let t_enter = std::time::Instant::now();
             let ctx = self.context()?;
             let ctx_ms = t_enter.elapsed().as_secs_f32() * 1000.0;
+            // Vocabulary biasing text (may be empty); moved into the blocking
+            // closure and tokenized there against the loaded model.
+            let vocabulary = self
+                .vocabulary
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
             let t_decode = std::time::Instant::now();
             let samples = wav_to_mono_f32(wav)?;
             let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
@@ -238,8 +254,8 @@ impl Transcriber for WhisperStt {
             // whisper.cpp is a blocking CPU/GPU job — keep it off the async
             // runtime's worker threads.
             let t_spawn = std::time::Instant::now();
-            let (text, infer_secs, queue_ms, state_ms) =
-                tokio::task::spawn_blocking(move || -> Result<(String, f32, f32, f32)> {
+            let (text, infer_secs, queue_ms, state_ms, prompt_n) =
+                tokio::task::spawn_blocking(move || -> Result<(String, f32, f32, f32, usize)> {
                     // Time spent waiting for a free thread in the blocking pool
                     // before this closure ran; seconds here means the pool was
                     // saturated (a concurrent transcribe/refine) and we queued.
@@ -249,8 +265,20 @@ impl Transcriber for WhisperStt {
                         .create_state()
                         .map_err(|e| anyhow!("whisper state: {e}"))?;
                     let state_ms = t_state.elapsed().as_secs_f32() * 1000.0;
+                    // Tokenize the vocabulary into whisper's prompt tokens (0.16
+                    // has no `set_initial_prompt`; `set_tokens` is the seam). Must
+                    // outlive `params`, which borrows the slice — declare it first.
+                    // 224 is whisper's prompt budget; extra tokens are dropped.
+                    let prompt_tokens: Vec<std::os::raw::c_int> = if vocabulary.trim().is_empty() {
+                        Vec::new()
+                    } else {
+                        ctx.tokenize(&vocabulary, 224).unwrap_or_default()
+                    };
                     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
                     set_dictation_params(&mut params);
+                    if !prompt_tokens.is_empty() {
+                        params.set_tokens(&prompt_tokens);
+                    }
                     let t0 = std::time::Instant::now();
                     state
                         .full(params, &samples)
@@ -264,12 +292,12 @@ impl Transcriber for WhisperStt {
                                 .map_err(|e| anyhow!("segment: {e}"))?,
                         );
                     }
-                    Ok((out, infer_secs, queue_ms, state_ms))
+                    Ok((out, infer_secs, queue_ms, state_ms, prompt_tokens.len()))
                 })
                 .await
                 .context("whisper task join")??;
             log::info!(
-                "stt: transcribed {:.1}s of audio in {:.0}ms ({:.1}x realtime) [setup: ctx {:.0}ms, decode {:.0}ms, blocking-queue {:.0}ms, state {:.0}ms]",
+                "stt: transcribed {:.1}s of audio in {:.0}ms ({:.1}x realtime) [setup: ctx {:.0}ms, decode {:.0}ms, blocking-queue {:.0}ms, state {:.0}ms, vocab {prompt_n} tok]",
                 audio_secs,
                 infer_secs * 1000.0,
                 audio_secs / infer_secs.max(1e-3),
@@ -317,6 +345,12 @@ impl Transcriber for WhisperStt {
             *guard = Some(ctx);
             log::info!("stt: model warmed (weights + graph)");
         });
+    }
+
+    fn set_vocabulary(&self, vocabulary: &str) {
+        if let Ok(mut g) = self.vocabulary.lock() {
+            *g = vocabulary.to_string();
+        }
     }
 }
 
@@ -424,6 +458,37 @@ mod tests {
             strip_nonspeech("the total (net) is five"),
             "the total (net) is five"
         );
+    }
+
+    /// Exercise the vocabulary-biasing path against a real model: tokenize the
+    /// shipped dev-terms default and feed it through `set_tokens` + `full`, the
+    /// exact sequence `transcribe` runs. Proves the whisper-rs API wiring works
+    /// and the default fits whisper's ~224-token prompt budget. Ignored by
+    /// default (needs the model on disk); run manually:
+    ///   MURMUR_TEST_MODEL=small.en \
+    ///     cargo test --no-default-features -- --ignored --nocapture vocabulary_
+    #[test]
+    #[ignore = "needs a local Whisper model on disk"]
+    fn vocabulary_tokenizes_and_biases_within_budget() {
+        let model = std::env::var("MURMUR_TEST_MODEL").unwrap_or_else(|_| "small.en".into());
+        let ctx = open_context(&model).expect("open model");
+        let vocab = crate::config::DEFAULT_DICTATION_VOCABULARY;
+        let tokens = ctx.tokenize(vocab, 224).expect("tokenize vocab");
+        assert!(!tokens.is_empty(), "dev vocab should produce prompt tokens");
+        assert!(
+            tokens.len() <= 224,
+            "default vocab is {} tokens, over whisper's ~224 prompt budget — trim it",
+            tokens.len()
+        );
+        // Run the same param setup transcribe uses, with the prompt tokens set,
+        // over 0.5 s of silence — proves set_tokens + full() don't panic.
+        let mut state = ctx.create_state().expect("state");
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        set_dictation_params(&mut params);
+        params.set_tokens(&tokens);
+        state
+            .full(params, &vec![0f32; 16_000 / 2])
+            .expect("full() with prompt tokens");
     }
 
     /// End-to-end local transcription against a real WAV fixture + model.

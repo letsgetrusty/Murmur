@@ -323,7 +323,10 @@ pub fn run() {
             // a ~0.5 GB download; WhisperStt loads it lazily on first transcribe.
             let transcriber: Arc<dyn stt::Transcriber> = {
                 log::info!("stt: local Whisper backend (model '{}')", cfg.stt_model);
-                Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()))
+                let stt: Arc<dyn stt::Transcriber> =
+                    Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()));
+                stt.set_vocabulary(&cfg.dictation_vocabulary);
+                stt
             };
 
             // Cumulative refinement usage, persisted across restarts.

@@ -55,6 +55,13 @@ pub struct Config {
     /// The GGML file is fetched to <app-support>/murmur/models/ggml-<name>.bin.
     #[serde(default = "default_stt_model")]
     pub stt_model: String,
+    /// Whisper "initial prompt" seeded before each dictation to bias the decoder
+    /// toward these spellings — proper nouns, code jargon, project names. Applied
+    /// live (no restart). Whisper's prompt budget is ~224 tokens; words past that
+    /// are ignored, and too much unrelated text can hurt accuracy, so keep it to
+    /// the terms you actually dictate. Editable in Settings.
+    #[serde(default = "default_dictation_vocabulary")]
+    pub dictation_vocabulary: String,
     /// Text-to-speech backend: "native" (AVSpeechSynthesizer) or "kokoro" (local
     /// neural). Both on-device. Defaults to native.
     #[serde(default = "default_tts_provider")]
@@ -128,6 +135,13 @@ pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
 fn default_stt_model() -> String {
     DEFAULT_STT_MODEL.to_string()
 }
+// Seeds Whisper toward common developer/tech spellings out of the box. A comma
+// list of terms is the pattern Whisper biases best on. Users edit this in
+// Settings to add their own project names, people, and jargon.
+pub const DEFAULT_DICTATION_VOCABULARY: &str = "Tauri, Rust, cargo, clippy, rustc, TypeScript, JavaScript, Python, Swift, Objective-C, async, await, tokio, struct, enum, trait, impl, closure, borrow, macro, API, CLI, SDK, JSON, YAML, TOML, SQL, SQLite, PostgreSQL, Redis, Kafka, Kubernetes, kubectl, Docker, nginx, OAuth, JWT, GraphQL, REST, npm, git, GitHub, GitLab, CI/CD, regex, stdout, stderr, localhost, backend, frontend, middleware, runtime, config, repo, changelog, refactor, boolean, macOS, Xcode, Metal, Whisper, Kokoro, whisper-rs, cpal, LLM, embeddings.";
+fn default_dictation_vocabulary() -> String {
+    DEFAULT_DICTATION_VOCABULARY.to_string()
+}
 fn default_tts_provider() -> String {
     DEFAULT_TTS_PROVIDER.to_string()
 }
@@ -155,6 +169,7 @@ impl Default for Config {
             refine_modifier: default_refine_modifier(),
             dictation_trigger: default_dictation_trigger(),
             stt_model: default_stt_model(),
+            dictation_vocabulary: default_dictation_vocabulary(),
             tts_provider: default_tts_provider(),
             llm_model: default_llm_model(),
             onboarding_done: false,
@@ -227,6 +242,7 @@ mod tests {
         assert_eq!(c.dictation_trigger, DEFAULT_DICTATION_TRIGGER);
         assert_eq!(c.mic_name, None);
         assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
+        assert_eq!(c.dictation_vocabulary, DEFAULT_DICTATION_VOCABULARY);
         assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);
         assert_eq!(c.llm_model, DEFAULT_LLM_MODEL);
     }

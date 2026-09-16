@@ -107,6 +107,31 @@ async function saveRefinePrompt() {
   }
 }
 
+// Vocabulary biasing text — same debounced auto-save as the refine prompt. It
+// applies live on the next dictation (the backend re-tokenizes it), so no
+// relaunch is needed.
+let vocabSaveTimer = null;
+function queueVocabSave() {
+  clearTimeout(vocabSaveTimer);
+  vocabSaveTimer = setTimeout(saveVocabulary, 600);
+}
+async function saveVocabulary() {
+  clearTimeout(vocabSaveTimer);
+  if (!invoke || !currentConfig) return;
+  const value = el("dictation-vocabulary").value;
+  if (value === (currentConfig.dictation_vocabulary ?? "")) return; // no change
+  const next = { ...currentConfig, dictation_vocabulary: value };
+  setStatus("Saving…");
+  try {
+    await invoke(CMD.SAVE_CONFIG, { config: next });
+    currentConfig = next;
+    setStatus("Saved ✓", "ok");
+    setTimeout(() => setStatus(""), 1500);
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+  }
+}
+
 async function loadConfig() {
   if (!invoke) {
     setStatus("IPC unavailable", "error");
@@ -115,6 +140,7 @@ async function loadConfig() {
   try {
     currentConfig = await invoke(CMD.GET_CONFIG);
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
+    el("dictation-vocabulary").value = currentConfig.dictation_vocabulary ?? "";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
@@ -917,6 +943,8 @@ async function init() {
   // Refinement prompt auto-saves (debounced while typing, flushed on blur).
   el("refine-prompt").addEventListener("input", queueRefineSave);
   el("refine-prompt").addEventListener("blur", saveRefinePrompt);
+  el("dictation-vocabulary").addEventListener("input", queueVocabSave);
+  el("dictation-vocabulary").addEventListener("blur", saveVocabulary);
 
   await loadConfig();
   await loadOptions();
