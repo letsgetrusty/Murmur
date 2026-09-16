@@ -204,15 +204,20 @@ fn open_context(model_name: &str) -> Result<Arc<WhisperContext>> {
 /// The whisper decode params shared by warm-up and real transcription, kept in
 /// one place so the two can't drift. Pin to English (matches the cloud path); a
 /// dictation clip is one self-contained utterance, so don't seed the decoder with
-/// prior-window text, and pin a single temperature so a hard clip can't trip
-/// whisper's temperature-fallback retries (which re-decode and spike latency).
+/// prior-window text. Start at temperature 0 (deterministic, fast — the common
+/// case decodes in one pass here), but KEEP whisper's temperature fallback on
+/// (`temperature_inc` > 0): when a hard clip fails the entropy/logprob
+/// thresholds, whisper retries at a higher temperature instead of returning an
+/// empty/garbage transcript. Disabling the fallback silently dropped whole
+/// dictations (a 22 s clip that decoded to nothing); the occasional retry
+/// latency on a hard clip is well worth not losing the user's words.
 /// Give it the machine's cores, and silence whisper's stdout chatter.
 fn set_dictation_params(params: &mut FullParams) {
     params.set_language(Some("en"));
     params.set_translate(false);
     params.set_no_context(true);
     params.set_temperature(0.0);
-    params.set_temperature_inc(0.0);
+    params.set_temperature_inc(0.2);
     params.set_n_threads(transcribe_threads());
     params.set_print_special(false);
     params.set_print_progress(false);

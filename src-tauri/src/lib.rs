@@ -2095,8 +2095,25 @@ fn handle_recording<R: Runtime>(
         }
         let (state, dwell_ms) = match transcribe_result {
             Ok(text) if text.is_empty() => {
-                log::info!("dictation: empty transcript");
-                (OverlayState::Done { chars: 0 }, 400)
+                // A real, substantial clip decoding to nothing is a failure, not
+                // silence — surface it so the user retries instead of silently
+                // losing their words. (Short/quiet clips stay quiet: expected.)
+                if recording.duration_ms >= 1500 && recording.mean_abs >= 1e-3 {
+                    log::warn!(
+                        "dictation: {}ms of audio (mean|amp|={:.4}) decoded to empty — hard clip; asking user to retry",
+                        recording.duration_ms,
+                        recording.mean_abs
+                    );
+                    (
+                        OverlayState::Error {
+                            message: "no speech recognized — try again".into(),
+                        },
+                        2500,
+                    )
+                } else {
+                    log::info!("dictation: empty transcript");
+                    (OverlayState::Done { chars: 0 }, 400)
+                }
             }
             Ok(text) => {
                 log::info!(
