@@ -326,6 +326,7 @@ pub fn run() {
                 let stt: Arc<dyn stt::Transcriber> =
                     Arc::new(stt::WhisperStt::new(cfg.stt_model.clone()));
                 stt.set_vocabulary(&cfg.dictation_vocabulary);
+                stt.set_corrections(&cfg.dictation_corrections);
                 stt
             };
 

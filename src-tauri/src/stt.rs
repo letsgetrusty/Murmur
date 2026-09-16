@@ -24,6 +24,78 @@ pub trait Transcriber: Send + Sync {
     /// user's spellings (proper nouns, jargon). Applied on the next transcribe;
     /// no reload. Default no-op for impls without prompt biasing.
     fn set_vocabulary(&self, _vocabulary: &str) {}
+
+    /// Set deterministic post-transcription corrections ("spoken form =>
+    /// replacement" lines) for terms biasing can't land reliably. Applied on the
+    /// next transcribe; no reload. Default no-op.
+    fn set_corrections(&self, _rules: &str) {}
+}
+
+/// Parse the correction rules config — one `spoken form => replacement` per
+/// line, `#` comments and blanks skipped — into (pattern, replacement) pairs.
+/// Patterns keep their original text; matching lowercases per-char at compare
+/// time (`apply_corrections`), so store them as written.
+fn parse_corrections(rules: &str) -> Vec<(String, String)> {
+    rules
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (pat, rep) = line.split_once("=>")?;
+            let pat = pat.trim();
+            if pat.is_empty() {
+                return None;
+            }
+            Some((pat.to_string(), rep.trim().to_string()))
+        })
+        .collect()
+}
+
+/// Apply the correction rules to `text`: case-insensitive (ASCII) whole-word
+/// find/replace, so a rule for "c" never rewrites inside "cat" and multi-word
+/// patterns ("rust see") match across the spaces. Rules apply in order.
+fn apply_corrections(text: &str, rules: &[(String, String)]) -> String {
+    let mut out = text.to_string();
+    for (pat, rep) in rules {
+        out = replace_whole_word_ci(&out, pat, rep);
+    }
+    out
+}
+
+/// One rule: replace every whole-word, ASCII-case-insensitive occurrence of
+/// `needle` in `haystack` with `replacement`. A match at `i..j` is whole-word
+/// when the chars just outside it are non-alphanumeric (or a string edge), so
+/// substrings inside larger words are left alone.
+fn replace_whole_word_ci(haystack: &str, needle: &str, replacement: &str) -> String {
+    let hay: Vec<char> = haystack.chars().collect();
+    let need: Vec<char> = needle.chars().collect();
+    if need.is_empty() {
+        return haystack.to_string();
+    }
+    let bounded_before = |i: usize| i == 0 || !hay[i - 1].is_alphanumeric();
+    let bounded_after = |j: usize| j == hay.len() || !hay[j].is_alphanumeric();
+    let mut out = String::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < hay.len() {
+        let j = i + need.len();
+        let matches = j <= hay.len()
+            && bounded_before(i)
+            && bounded_after(j)
+            && hay[i..j]
+                .iter()
+                .zip(&need)
+                .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        if matches {
+            out.push_str(replacement);
+            i = j;
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 // -----------------------------------------------------------------------------
@@ -67,6 +139,9 @@ pub struct WhisperStt {
     // Vocabulary/"initial prompt" biasing text; read (and tokenized) fresh on
     // each transcribe, so `set_vocabulary` applies without a reload.
     vocabulary: Mutex<String>,
+    // Parsed deterministic corrections applied to each transcript; updated by
+    // `set_corrections` so edits apply without a reload.
+    corrections: Mutex<Vec<(String, String)>>,
 }
 
 impl WhisperStt {
@@ -75,6 +150,7 @@ impl WhisperStt {
             model_name: model_name.into(),
             ctx: Arc::new(Mutex::new(None)),
             vocabulary: Mutex::new(String::new()),
+            corrections: Mutex::new(Vec::new()),
         }
     }
 
@@ -306,7 +382,16 @@ impl Transcriber for WhisperStt {
                 queue_ms,
                 state_ms,
             );
-            Ok(strip_nonspeech(&text))
+            // Clean whisper's non-speech placeholders, then apply the user's
+            // deterministic corrections (before paste and before the refine LLM,
+            // so both see the fixed terms).
+            let cleaned = strip_nonspeech(&text);
+            let rules = self
+                .corrections
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            Ok(apply_corrections(&cleaned, &rules))
         })
     }
 
@@ -350,6 +435,12 @@ impl Transcriber for WhisperStt {
     fn set_vocabulary(&self, vocabulary: &str) {
         if let Ok(mut g) = self.vocabulary.lock() {
             *g = vocabulary.to_string();
+        }
+    }
+
+    fn set_corrections(&self, rules: &str) {
+        if let Ok(mut g) = self.corrections.lock() {
+            *g = parse_corrections(rules);
         }
     }
 }
@@ -457,6 +548,58 @@ mod tests {
         assert_eq!(
             strip_nonspeech("the total (net) is five"),
             "the total (net) is five"
+        );
+    }
+
+    #[test]
+    fn parses_correction_rules_skipping_comments_and_blanks() {
+        let rules = parse_corrections(
+            "# a comment\n\nrust see => rustc\n  cicd  =>  CI/CD  \n=> nope\nbad line\n",
+        );
+        assert_eq!(
+            rules,
+            vec![
+                ("rust see".to_string(), "rustc".to_string()),
+                ("cicd".to_string(), "CI/CD".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn corrections_are_whole_word_and_case_insensitive() {
+        let rules = parse_corrections("rust see => rustc\ncicd => CI/CD\nc => C-lang");
+        // Case-insensitive, multi-word, and mid-sentence.
+        assert_eq!(
+            apply_corrections("I ran Rust See then cicd", &rules),
+            "I ran rustc then CI/CD"
+        );
+        // Whole-word only: "c" must not rewrite inside "cat" or "cicd".
+        assert_eq!(apply_corrections("the cat", &rules), "the cat");
+        // But a standalone "c" is replaced.
+        assert_eq!(
+            apply_corrections("write c today", &rules),
+            "write C-lang today"
+        );
+        // No rules → unchanged.
+        assert_eq!(apply_corrections("untouched", &[]), "untouched");
+    }
+
+    #[test]
+    fn default_corrections_parse_and_apply() {
+        let rules = parse_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
+        assert!(!rules.is_empty());
+        // The real forms observed from dictation: "Rust C" / "Rust-C" / "cdci".
+        assert_eq!(
+            apply_corrections("the cdci pipeline", &rules),
+            "the CI/CD pipeline"
+        );
+        assert_eq!(
+            apply_corrections("I use Rust C daily", &rules),
+            "I use rustc daily"
+        );
+        assert_eq!(
+            apply_corrections("using Rust-C here", &rules),
+            "using rustc here"
         );
     }
 

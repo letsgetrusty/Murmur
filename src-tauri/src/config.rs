@@ -62,6 +62,13 @@ pub struct Config {
     /// the terms you actually dictate. Editable in Settings.
     #[serde(default = "default_dictation_vocabulary")]
     pub dictation_vocabulary: String,
+    /// Deterministic post-transcription fixes for terms Whisper mis-hears even
+    /// with vocabulary biasing (multi-token words, initialisms). One
+    /// "spoken form => replacement" per line; `#` starts a comment. Matched
+    /// case-insensitively on whole words, applied after cleanup and before
+    /// paste/refine. Editable in Settings.
+    #[serde(default = "default_dictation_corrections")]
+    pub dictation_corrections: String,
     /// Text-to-speech backend: "native" (AVSpeechSynthesizer) or "kokoro" (local
     /// neural). Both on-device. Defaults to native.
     #[serde(default = "default_tts_provider")]
@@ -142,6 +149,20 @@ pub const DEFAULT_DICTATION_VOCABULARY: &str = "Tauri, Rust, cargo, clippy, rust
 fn default_dictation_vocabulary() -> String {
     DEFAULT_DICTATION_VOCABULARY.to_string()
 }
+// Deterministic fixes for terms biasing can't reliably land. Seeded with the
+// known-stubborn cases; users add their own by copying what they actually see
+// mis-transcribed (Settings → history) on the left. Keep left-hand phrases
+// distinctive so they don't misfire on ordinary speech.
+pub const DEFAULT_DICTATION_CORRECTIONS: &str = "\
+# One \"spoken form => replacement\" per line. '#' starts a comment.
+# Case-insensitive, whole-word. Add the exact wording you see mis-transcribed.
+rust c => rustc
+rust-c => rustc
+cdci => CI/CD
+cicd => CI/CD";
+fn default_dictation_corrections() -> String {
+    DEFAULT_DICTATION_CORRECTIONS.to_string()
+}
 fn default_tts_provider() -> String {
     DEFAULT_TTS_PROVIDER.to_string()
 }
@@ -170,6 +191,7 @@ impl Default for Config {
             dictation_trigger: default_dictation_trigger(),
             stt_model: default_stt_model(),
             dictation_vocabulary: default_dictation_vocabulary(),
+            dictation_corrections: default_dictation_corrections(),
             tts_provider: default_tts_provider(),
             llm_model: default_llm_model(),
             onboarding_done: false,
@@ -243,6 +265,7 @@ mod tests {
         assert_eq!(c.mic_name, None);
         assert_eq!(c.stt_model, DEFAULT_STT_MODEL);
         assert_eq!(c.dictation_vocabulary, DEFAULT_DICTATION_VOCABULARY);
+        assert_eq!(c.dictation_corrections, DEFAULT_DICTATION_CORRECTIONS);
         assert_eq!(c.tts_provider, DEFAULT_TTS_PROVIDER);
         assert_eq!(c.llm_model, DEFAULT_LLM_MODEL);
     }

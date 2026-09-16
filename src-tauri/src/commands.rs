@@ -87,10 +87,14 @@ pub fn save_config(state: State<AppState>, config: Config) -> Result<(), String>
         let mut c = state.config.lock().map_err(|e| e.to_string())?;
         *c = config.clone();
     }
-    // Vocabulary biasing applies live on the next transcribe (no model reload).
+    // Vocabulary biasing + corrections apply live on the next transcribe (no
+    // model reload).
     state
         .transcriber
         .set_vocabulary(&config.dictation_vocabulary);
+    state
+        .transcriber
+        .set_corrections(&config.dictation_corrections);
     crate::config::save(&config).map_err(|e| e.to_string())?;
     log::info!("config: saved from settings");
     Ok(())

@@ -132,6 +132,30 @@ async function saveVocabulary() {
   }
 }
 
+// Correction rules — same debounced auto-save. Applied deterministically after
+// transcription, live on the next dictation.
+let correctionsSaveTimer = null;
+function queueCorrectionsSave() {
+  clearTimeout(correctionsSaveTimer);
+  correctionsSaveTimer = setTimeout(saveCorrections, 600);
+}
+async function saveCorrections() {
+  clearTimeout(correctionsSaveTimer);
+  if (!invoke || !currentConfig) return;
+  const value = el("dictation-corrections").value;
+  if (value === (currentConfig.dictation_corrections ?? "")) return; // no change
+  const next = { ...currentConfig, dictation_corrections: value };
+  setStatus("Saving…");
+  try {
+    await invoke(CMD.SAVE_CONFIG, { config: next });
+    currentConfig = next;
+    setStatus("Saved ✓", "ok");
+    setTimeout(() => setStatus(""), 1500);
+  } catch (e) {
+    setStatus(`Save failed: ${e}`, "error");
+  }
+}
+
 async function loadConfig() {
   if (!invoke) {
     setStatus("IPC unavailable", "error");
@@ -141,6 +165,7 @@ async function loadConfig() {
     currentConfig = await invoke(CMD.GET_CONFIG);
     el("refine-prompt").value = currentConfig.refine_prompt ?? "";
     el("dictation-vocabulary").value = currentConfig.dictation_vocabulary ?? "";
+    el("dictation-corrections").value = currentConfig.dictation_corrections ?? "";
     el("stt-model").value = currentConfig.stt_model ?? "small.en";
     el("llm-model").value = currentConfig.llm_model ?? "Qwen3-1.7B-Q4_K_M";
     el("tts-provider").value = currentConfig.tts_provider ?? "native";
@@ -945,6 +970,8 @@ async function init() {
   el("refine-prompt").addEventListener("blur", saveRefinePrompt);
   el("dictation-vocabulary").addEventListener("input", queueVocabSave);
   el("dictation-vocabulary").addEventListener("blur", saveVocabulary);
+  el("dictation-corrections").addEventListener("input", queueCorrectionsSave);
+  el("dictation-corrections").addEventListener("blur", saveCorrections);
 
   await loadConfig();
   await loadOptions();
