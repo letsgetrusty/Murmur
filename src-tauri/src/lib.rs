@@ -11,6 +11,7 @@ mod history;
 mod hotkeys;
 mod inject;
 mod ipc;
+mod kokoro;
 mod llm;
 mod local_llm;
 mod permissions;

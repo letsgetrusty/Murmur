@@ -51,6 +51,8 @@ whisper-rs = { version = "0.16.0", features = ["metal"] }
 # links GPL-3.0 espeak-ng — incompatible with our MIT license. Kokoro falls back
 # to its dictionary-based (cmudict) grapheme-to-phoneme instead.
 kokoro-en = { version = "0.1.5", default-features = false }
+# Same ORT already supplied by kokoro-en; synchronous inference worker.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std"] }
 llama-cpp-2 = { version = "0.1.154", features = ["metal"] }
 
 [profile.release]

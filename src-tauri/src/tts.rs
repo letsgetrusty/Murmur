@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::kokoro::{Cancellation, KokoroTts};
 use anyhow::Result;
-use kokoro_en::KokoroTts;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
 use objc2_foundation::NSString;
@@ -447,14 +447,10 @@ pub fn install_g2p_lexicon() {
     }
 }
 
-/// Pin Kokoro's CoreML compute path. The crate defaults to `ALL` (ANE + GPU +
-/// CPU), which lets CoreML silently fall off the power-managed Apple Neural
-/// Engine mid-session — synth then drops from ~4.5× realtime to ~1.7×, the TTS
-/// latency swings we measured. Pinning the Metal GPU trades a little peak
-/// throughput for a *consistent* path: the GPU isn't power-gated / shared the way
-/// the ANE is, so no silent fallback. Set once at startup, **before the first
-/// synth** (the crate reads it when it builds the session). Respects an explicit
-/// user override so it can be A/B'd from the environment.
+/// Select the measured CoreML compute policy before the session is created.
+/// This limits eligible devices; it does not prove where each operator runs.
+/// Preserve explicit environment overrides for reproducible comparisons with
+/// `scripts/profile-tts.py`. Inference timing alone cannot identify fallback.
 pub fn pin_coreml_compute_units() {
     if std::env::var_os("KOKORO_COREML_COMPUTE_UNITS").is_some() {
         log::info!("tts: KOKORO_COREML_COMPUTE_UNITS set by env — leaving as-is");
@@ -462,7 +458,7 @@ pub fn pin_coreml_compute_units() {
     }
     // Safe on edition 2021; set at startup before any synth reads it.
     std::env::set_var("KOKORO_COREML_COMPUTE_UNITS", "cpu_and_gpu");
-    log::info!("tts: pinned CoreML compute units → cpu_and_gpu (consistent GPU path)");
+    log::info!("tts: CoreML compute policy → cpu_and_gpu");
 }
 
 /// Normalize text before synthesis so the neural voice pronounces code-style
@@ -612,9 +608,31 @@ async fn synth_chunk_wav(
     voice: &str,
     tail_gap_ms: u32,
 ) -> Option<Vec<u8>> {
+    synth_chunk_wav_cancellable(tts, text, voice, tail_gap_ms, None).await
+}
+
+async fn synth_chunk_wav_cancellable(
+    tts: &KokoroTts,
+    text: &str,
+    voice: &str,
+    tail_gap_ms: u32,
+    cancellation: Option<Cancellation>,
+) -> Option<Vec<u8>> {
     let t0 = std::time::Instant::now();
-    match tts.synth(text, voice).await {
-        Ok((samples, _)) => {
+    let result = tts
+        .synth_cancellable(text, voice, cancellation.clone())
+        .await;
+    if cancellation
+        .as_ref()
+        .is_some_and(Cancellation::is_cancelled)
+    {
+        return None;
+    }
+    match result {
+        Ok((samples, inference)) => {
+            let synth_secs = t0.elapsed().as_secs_f32();
+            let inference_ms = inference.as_secs_f32() * 1000.0;
+            let other_ms = (synth_secs * 1000.0 - inference_ms).max(0.0);
             // Kokoro pads every chunk with edge silence (~220ms lead, ~430ms tail
             // measured). Trim it so chunks play gapless — the leading trim comes
             // straight off time-to-first-word — then append a short, controlled
@@ -624,20 +642,27 @@ async fn synth_chunk_wav(
             let mut out = Vec::with_capacity(voiced.len() + gap);
             out.extend_from_slice(voiced);
             out.resize(out.len() + gap, 0.0);
-            // Synth-vs-realtime ratio: >~2x means the ONNX session is really on
-            // the ANE/GPU (CoreML), ~1x or slower means it fell back to CPU. At
-            // `debug` (per-chunk, ~20 lines/read) — set RUST_LOG=debug to see it
-            // when diagnosing synth speed; time-to-first-word below stays `info`.
-            let synth_secs = t0.elapsed().as_secs_f32();
+            // The worker reports ONNX run time separately from G2P, voice
+            // lookup, tensor preparation, and waiting in its request queue.
+            // Slow throughput is not evidence of a particular device/fallback.
             let audio_secs = out.len() as f32 / KOKORO_SAMPLE_RATE as f32;
             log::debug!(
-                "tts/kokoro: synth {} chars → {:.2}s audio in {:.0}ms ({:.1}x realtime) [trimmed {:.0}ms pad]",
+                "tts/kokoro: synth {} chars → {:.2}s audio in {:.0}ms ({:.1}x realtime) [inference {:.0}ms, other/queue {:.0}ms, trimmed {:.0}ms pad]",
                 text.chars().count(),
                 audio_secs,
                 synth_secs * 1000.0,
                 audio_secs / synth_secs.max(1e-3),
+                inference_ms,
+                other_ms,
                 samples.len().saturating_sub(voiced.len()) as f32 / KOKORO_SAMPLE_RATE as f32 * 1000.0,
             );
+            if synth_secs >= 2.0 && audio_secs / synth_secs < 2.0 {
+                log::info!(
+                    "tts/kokoro: slow synth: {} chars, {:.0}ms total, {:.0}ms inference, {:.0}ms other/queue, {:.1}x realtime",
+                    text.chars().count(), synth_secs * 1000.0, inference_ms,
+                    other_ms, audio_secs / synth_secs,
+                );
+            }
             Some(pcm_f32_to_wav(&out, KOKORO_SAMPLE_RATE))
         }
         Err(e) => {
@@ -713,7 +738,16 @@ fn write_cache_file(path: &std::path::Path, bytes: &[u8]) -> bool {
 /// current speed setting. Held in `slot` so a new preview (or stop()) replaces +
 /// releases the previous one. The cached file is never deleted (`temps` stays
 /// empty), unlike read-aloud's transient chunk files.
-fn play_preview_file(slot: &Arc<Mutex<Option<KokoroQueue>>>, path: &std::path::Path, speed: f32) {
+fn play_preview_file(
+    slot: &Arc<Mutex<Option<KokoroQueue>>>,
+    path: &std::path::Path,
+    speed: f32,
+    cancellation: &Cancellation,
+) {
+    let mut guard = slot.lock().expect("preview mutex");
+    if cancellation.is_cancelled() {
+        return;
+    }
     let Some(qp) = new_queue_player() else {
         return;
     };
@@ -735,7 +769,7 @@ fn play_preview_file(slot: &Arc<Mutex<Option<KokoroQueue>>>, path: &std::path::P
         let _: () = msg_send![qp.as_ptr(), playImmediatelyAtRate: speed];
     }
     // Replace any previous preview (its KokoroQueue drops → pause + release).
-    *slot.lock().expect("preview mutex") = Some(queue);
+    *guard = Some(queue);
 }
 
 /// Load (and cache) the Kokoro model, shared by `speak`, `preview`, and
@@ -768,8 +802,12 @@ impl Speaker for KokoroSpeaker {
         };
         // Don't overlap an in-progress read-aloud (also clears a prior preview).
         self.stop();
+        let cancellation = Cancellation::new(
+            self.generation.clone(),
+            self.generation.load(Ordering::Acquire),
+        );
         if path.exists() {
-            play_preview_file(&self.preview_player, &path, speed); // cached → instant
+            play_preview_file(&self.preview_player, &path, speed, &cancellation); // cached → instant
             return;
         }
         // Cache miss: synth once (~1s), cache, then play — next time is instant.
@@ -782,9 +820,12 @@ impl Speaker for KokoroSpeaker {
             let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
                 return;
             };
-            if let Some(wav) = synth_chunk_wav(&tts, &text, &voice, 0).await {
+            if let Some(wav) =
+                synth_chunk_wav_cancellable(&tts, &text, &voice, 0, Some(cancellation.clone()))
+                    .await
+            {
                 if write_cache_file(&path, &wav) {
-                    play_preview_file(&slot, &path, speed);
+                    play_preview_file(&slot, &path, speed, &cancellation);
                 }
             }
         });
@@ -848,11 +889,16 @@ impl Speaker for KokoroSpeaker {
             let speak_t0 = std::time::Instant::now();
             // Load + cache the model on first use (shared with preview/warm).
             let Some(tts) = load_kokoro_tts(&tts_cell, &model_path, &voices_path).await else {
-                active.store(false, Ordering::Release);
+                if generation.load(Ordering::Acquire) == n {
+                    active.store(false, Ordering::Release);
+                }
                 return;
             };
             // Time to get the session: ~0 when warm; seconds means it reloaded or
             // waited on the shared session lock (another synth/preview in flight).
+            if generation.load(Ordering::Acquire) != n {
+                return;
+            }
             let model_ms = speak_t0.elapsed().as_secs_f32() * 1000.0;
 
             let chunks = split_for_tts(&normalize_for_tts(&text));
@@ -873,11 +919,18 @@ impl Speaker for KokoroSpeaker {
                     return;
                 }
             };
-            *player_slot.lock().expect("player mutex") = Some(KokoroQueue {
-                player: qp,
-                temps: Vec::new(),
-                buffering: true,
-            });
+            {
+                let mut slot = player_slot.lock().expect("player mutex");
+                let queue = KokoroQueue {
+                    player: qp,
+                    temps: Vec::new(),
+                    buffering: true,
+                };
+                if generation.load(Ordering::Acquire) != n {
+                    return;
+                }
+                *slot = Some(queue);
+            }
 
             let chunk_chars: Arc<Vec<f32>> = Arc::new(
                 chunks
@@ -1012,7 +1065,15 @@ impl Speaker for KokoroSpeaker {
                     SOFT_GAP_MS
                 };
                 let t_synth = std::time::Instant::now();
-                let wav = match synth_chunk_wav(&tts, chunk, voice.as_str(), tail_gap_ms).await {
+                let wav = match synth_chunk_wav_cancellable(
+                    &tts,
+                    chunk,
+                    voice.as_str(),
+                    tail_gap_ms,
+                    Some(Cancellation::new(generation.clone(), n)),
+                )
+                .await
+                {
                     Some(w) => w,
                     None => break,
                 };
@@ -1153,6 +1214,7 @@ impl Speaker for KokoroSpeaker {
     }
 
     fn stop(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
         self.active.store(false, Ordering::Release);
         *self.player.lock().expect("player mutex") = None;
         *self.preview_player.lock().expect("preview mutex") = None;
@@ -1446,6 +1508,37 @@ mod tests {
             )
             .unwrap();
         });
+    }
+
+    #[test]
+    #[ignore = "requires installed Kokoro assets and plays local audio"]
+    fn kokoro_worker_playback_and_stop() {
+        pin_coreml_compute_units();
+        let speaker =
+            KokoroSpeaker::new(kokoro_model_path().unwrap(), kokoro_voices_dir().unwrap());
+        speaker.set_voice("am_puck");
+        speaker.speak("Murmur's background speech worker is ready.");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut saw_progress = false;
+        while speaker.is_speaking() && !saw_progress && std::time::Instant::now() < deadline {
+            saw_progress |= speaker.progress().is_some_and(|p| p > 0.0 && p < 1.0);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(saw_progress, "AVQueuePlayer never advanced");
+        // This headless test verifies queue startup and stop. Natural playback
+        // completion needs a separate live-app check with its native event loop.
+        speaker.stop();
+        assert!(!speaker.is_speaking());
+        speaker.speak("This cancelled sentence must not start playing after stop.");
+        speaker.stop();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        assert!(!speaker.is_speaking());
+        assert!(speaker.player.lock().unwrap().is_none());
+        // A cache-miss preview shares the same cancellation epoch.
+        speaker.preview("This uncached preview is cancelled before it can play.");
+        speaker.stop();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        assert!(speaker.preview_player.lock().unwrap().is_none());
     }
 
     /// Compare old sentence-sized startup against the actual new split/buffer
