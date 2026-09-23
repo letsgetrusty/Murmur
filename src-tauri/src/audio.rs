@@ -2,10 +2,10 @@
 //
 // cpal hands us whatever sample format and rate the OS prefers (usually 44.1 or
 // 48 kHz f32). We mix to mono on the capture thread (cheap, locks held briefly),
-// then resample to 16 kHz mono i16 on stop and emit a WAV blob ready to POST.
+// then resample to 16 kHz mono for local transcription.
 //
 // Capture runs on cpal's audio thread, not tokio. Stop is synchronous and
-// fast — the heavy work (transcribe) happens after we hand back the bytes.
+// fast — inference runs on background workers, never the capture callback.
 
 use std::io::{Cursor, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -163,8 +163,18 @@ impl Recorder {
         })
     }
 
+    /// Lightweight handle for background transcription; never runs inference
+    /// on the realtime capture callback.
+    pub fn feed(&self) -> AudioFeed {
+        AudioFeed {
+            inner: self.inner.clone(),
+            rate: self.source_sample_rate,
+        }
+    }
+
     pub fn stop(self) -> Result<Recording> {
         // Dropping the stream stops it; the mutex is no longer contended after.
+        drop(self._stream);
         let samples = std::mem::take(
             &mut self
                 .inner
@@ -172,7 +182,6 @@ impl Recorder {
                 .map_err(|_| anyhow!("audio buffer mutex poisoned"))?
                 .samples,
         );
-        drop(self._stream);
 
         let resampled = resample_linear(&samples, self.source_sample_rate, TARGET_SAMPLE_RATE);
 
@@ -196,6 +205,57 @@ impl Recorder {
             duration_ms,
             mean_abs,
         })
+    }
+}
+
+/// Read-only access to captured samples, with offsets in 16 kHz samples.
+/// Copies only the unread suffix under the capture lock, resamples outside.
+pub struct AudioFeed {
+    inner: Arc<Mutex<Inner>>,
+    rate: u32,
+}
+
+impl AudioFeed {
+    #[cfg(test)]
+    pub(crate) fn test_samples(samples: Vec<f32>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Inner { samples })),
+            rate: TARGET_SAMPLE_RATE,
+        }
+    }
+
+    pub fn since(&self, start: usize) -> Result<Vec<f32>> {
+        let ratio = self.rate as f64 / TARGET_SAMPLE_RATE as f64;
+        let source_start = (start as f64 * ratio).floor() as usize;
+        let (samples, end) = {
+            let g = self
+                .inner
+                .lock()
+                .map_err(|_| anyhow!("audio buffer poisoned"))?;
+            let total = (g.samples.len() as f64 / ratio).floor() as usize;
+            // On 8 kHz inputs, defer the interpolated final sample until its
+            // right-hand neighbour arrives. Otherwise each poll would bake in
+            // a provisional sample that differs from the final recording.
+            let stable = if g.samples.is_empty() {
+                0
+            } else {
+                ((g.samples.len() - 1) as f64 / ratio).floor() as usize + 1
+            };
+            let end = total.min(stable);
+            (
+                g.samples.get(source_start..).unwrap_or_default().to_vec(),
+                end,
+            )
+        };
+        Ok((start..end)
+            .map(|i| {
+                let pos = i as f64 * ratio;
+                let index = pos.floor() as usize - source_start;
+                let a = samples[index];
+                let b = samples.get(index + 1).copied().unwrap_or(a);
+                a + (b - a) * (pos - pos.floor()) as f32
+            })
+            .collect())
     }
 }
 
@@ -257,7 +317,7 @@ fn resample_linear(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
 }
 
 /// Minimal RIFF/WAV writer — 16-bit PCM, mono. Avoids pulling in `hound`.
-fn encode_wav_i16(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
+pub(crate) fn encode_wav_i16(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
     let bytes_per_sample = 2u16;
     let channels = 1u16;
     let byte_rate = sample_rate * channels as u32 * bytes_per_sample as u32;
@@ -309,6 +369,26 @@ mod tests {
         assert_eq!(s0, 0);
         assert_eq!(s1, i16::MAX);
         assert_eq!(s2, -i16::MAX);
+    }
+
+    #[test]
+    fn live_suffix_matches_final_resampling_at_fractional_offsets() {
+        for rate in [8_000, 16_000, 24_000, 44_100, 48_000] {
+            let samples: Vec<f32> = (0..rate).map(|i| (i as f32 * 0.017).sin()).collect();
+            let expected = resample_linear(&samples, rate, TARGET_SAMPLE_RATE);
+            let feed = AudioFeed {
+                inner: Arc::new(Mutex::new(Inner { samples })),
+                rate,
+            };
+            let stable_end = feed.since(0).unwrap().len();
+            assert!(stable_end >= expected.len() - 1);
+            for start in [0, 1, 713, 15_900, 16_000, 20_000] {
+                assert_eq!(
+                    feed.since(start).unwrap(),
+                    expected[..stable_end].get(start..).unwrap_or_default()
+                );
+            }
+        }
     }
 
     #[test]

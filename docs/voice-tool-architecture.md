@@ -9,6 +9,24 @@ content artifact.
 > product" concerns are explicitly out of scope and should not drive any design
 > decision here. When in doubt, pick the simpler macOS-native path.
 
+> **Current implementation (September 2026):** `AGENTS.md` is authoritative
+> for the shipped on-device stack; the cloud backends and older macOS guidance
+> below describe the original build plan, not current requirements.
+>
+> Dictation now transcribes completed phrases during recording at sustained
+> speech pauses (400 ms), retaining 200 ms of silence before the next phrase.
+> Release awaits an in-flight phrase and decodes only the remaining tail. Speech
+> without a usable pause remains one final chunk; failed/empty chunk decodes
+> retry the intact recording. Whisper's model and decoder state are reused,
+> with inference serialized and per-call context reset. Corrections apply after
+> joining chunks; refinement and clipboard injection still happen once.
+>
+> Kokoro uses a short opening chunk (about 64 characters), then ramps to 100
+> and 220 characters, preserving words. Startup and stall recovery buffer based
+> on measured synthesis time, estimated next-chunk cost, and current playback
+> speed. The buffer budget is capped at three wall-clock seconds; it cannot
+> guarantee uninterrupted playback when synthesis is slower than consumption.
+
 ---
 
 ## 1. Design principles

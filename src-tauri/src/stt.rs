@@ -8,12 +8,27 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
+
+mod streaming;
+pub use streaming::LiveTranscription;
 
 pub type TranscribeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
 
 pub trait Transcriber: Send + Sync {
     fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a>;
+
+    /// Decode a pause-delimited chunk; backends can defer corrections until
+    /// all chunks are joined, so multi-word corrections still span pauses.
+    fn transcribe_chunk<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
+        self.transcribe(wav)
+    }
+
+    fn finish_chunks(&self, chunks: &[String]) -> String {
+        chunks.join(" ").trim().to_string()
+    }
 
     /// Preload the model off the calling thread so the first `transcribe`
     /// doesn't pay the load. Default no-op; safe to call repeatedly (it's a
@@ -139,6 +154,7 @@ pub struct WhisperStt {
     // Vocabulary/"initial prompt" biasing text; read (and tokenized) fresh on
     // each transcribe, so `set_vocabulary` applies without a reload.
     vocabulary: Mutex<String>,
+    decoder: Arc<Mutex<Option<WhisperState>>>,
     // Parsed deterministic corrections applied to each transcript; updated by
     // `set_corrections` so edits apply without a reload.
     corrections: Mutex<Vec<(String, String)>>,
@@ -150,6 +166,7 @@ impl WhisperStt {
             model_name: model_name.into(),
             ctx: Arc::new(Mutex::new(None)),
             vocabulary: Mutex::new(String::new()),
+            decoder: Arc::new(Mutex::new(None)),
             corrections: Mutex::new(Vec::new()),
         }
     }
@@ -238,14 +255,11 @@ fn set_dictation_params(params: &mut FullParams) {
     params.set_print_timestamps(false);
 }
 
-/// Run one throwaway inference on ~0.5 s of silence to force whisper's Metal
+/// Run one warm-up inference on ~0.5 s of silence to force whisper's Metal
 /// graph compile + state allocation up front, so the first real dictation hits a
 /// fully-warm engine rather than paying that one-time cost. Uses the same
-/// no-fallback params as `transcribe` so it stays fast and deterministic.
-fn warm_infer(ctx: &WhisperContext) -> Result<()> {
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| anyhow!("whisper warm state: {e}"))?;
+/// fallback-enabled params as `transcribe` so it stays fast and deterministic.
+fn warm_infer(state: &mut WhisperState) -> Result<()> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     set_dictation_params(&mut params);
     let silence = vec![0f32; 16_000 / 2];
@@ -369,11 +383,33 @@ fn strip_nonspeech(text: &str) -> String {
 impl Transcriber for WhisperStt {
     fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
         Box::pin(async move {
+            let raw = self.transcribe_chunk(wav).await?;
+            Ok(self.finish_chunks(&[raw]))
+        })
+    }
+
+    fn finish_chunks(&self, chunks: &[String]) -> String {
+        let rules = self
+            .corrections
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let cleaned: Vec<String> = chunks
+            .iter()
+            .map(|raw| finalize_transcript(raw, &[]))
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        finalize_transcript(&cleaned.join(" "), &rules)
+    }
+
+    fn transcribe_chunk<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
+        Box::pin(async move {
             // Instrumentation: split the pre-inference setup so an intermittent
             // slow transcribe can be pinned to a layer — ctx acquire (model-lock
             // contention / reload), WAV decode, time queued for a blocking thread
             // (pool saturation), and whisper state alloc — vs. the inference
             // itself. See the summary log below.
+            let decoder = self.decoder.clone();
             let t_enter = std::time::Instant::now();
             let ctx = self.context()?;
             let ctx_ms = t_enter.elapsed().as_secs_f32() * 1000.0;
@@ -398,9 +434,16 @@ impl Transcriber for WhisperStt {
                     // saturated (a concurrent transcribe/refine) and we queued.
                     let queue_ms = t_spawn.elapsed().as_secs_f32() * 1000.0;
                     let t_state = std::time::Instant::now();
-                    let mut state = ctx
-                        .create_state()
-                        .map_err(|e| anyhow!("whisper state: {e}"))?;
+                    let mut slot = decoder
+                        .lock()
+                        .map_err(|_| anyhow!("whisper decoder poisoned"))?;
+                    if slot.is_none() {
+                        *slot = Some(
+                            ctx.create_state()
+                                .map_err(|e| anyhow!("whisper state: {e}"))?,
+                        );
+                    }
+                    let state = slot.as_mut().expect("decoder initialized");
                     let state_ms = t_state.elapsed().as_secs_f32() * 1000.0;
                     // Tokenize the vocabulary into whisper's prompt tokens (0.16
                     // has no `set_initial_prompt`; `set_tokens` is the seam). Must
@@ -443,22 +486,7 @@ impl Transcriber for WhisperStt {
                 queue_ms,
                 state_ms,
             );
-            let rules = self
-                .corrections
-                .lock()
-                .map(|g| g.clone())
-                .unwrap_or_default();
-            let finalized = finalize_transcript(&text, &rules);
-            // Diagnose empty results: log whether whisper itself produced nothing
-            // (raw empty → decode/no-speech/prompt issue) or our cleanup stripped
-            // it (raw non-empty → strip/correction issue). Truncated + escaped.
-            if finalized.trim().is_empty() {
-                log::warn!(
-                    "stt: finalized transcript empty (raw whisper output = {:?})",
-                    text.chars().take(200).collect::<String>()
-                );
-            }
-            Ok(finalized)
+            Ok(text)
         })
     }
 
@@ -471,6 +499,7 @@ impl Transcriber for WhisperStt {
         // block on the ~1s model read.
         let cell = self.ctx.clone();
         let name = self.model_name.clone();
+        let decoder = self.decoder.clone();
         std::thread::spawn(move || {
             // Hold the cell lock across load → warm-inference → publish. A
             // concurrent transcribe fetches the ctx through the same lock, so it
@@ -491,8 +520,16 @@ impl Transcriber for WhisperStt {
                     return;
                 }
             };
-            if let Err(e) = warm_infer(&ctx) {
-                log::warn!("stt: warm inference failed: {e}");
+            match ctx.create_state() {
+                Ok(mut state) => {
+                    if let Err(e) = warm_infer(&mut state) {
+                        log::warn!("stt: warm inference failed: {e}");
+                    }
+                    if let Ok(mut slot) = decoder.lock() {
+                        *slot = Some(state);
+                    }
+                }
+                Err(e) => log::warn!("stt: warm state allocation failed: {e}"),
             }
             *guard = Some(ctx);
             log::info!("stt: model warmed (weights + graph)");
@@ -591,6 +628,16 @@ mod tests {
         assert!((f[1] - 1.0).abs() < 1e-3);
         assert!((f[2] + 1.0).abs() < 1e-3);
         assert!((f[3] - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn chunk_corrections_apply_once_across_boundaries() {
+        let stt = WhisperStt::new("unused");
+        stt.set_corrections("rust see => rustc\nrustc => Rust compiler");
+        assert_eq!(
+            stt.finish_chunks(&[" - Use rust".into(), "see here [BLANK_AUDIO]".into()]),
+            "Use Rust compiler here"
+        );
     }
 
     #[test]

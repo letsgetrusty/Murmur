@@ -281,6 +281,7 @@ pub async fn ensure_kokoro_assets(on_progress: impl Fn(u64, u64)) -> Result<()> 
 struct KokoroQueue {
     player: NonNull<AnyObject>,
     temps: Vec<PathBuf>,
+    buffering: bool,
 }
 // SAFETY: the AVQueuePlayer pointer is only messaged under the player mutex, and
 // AVPlayer playback methods are thread-safe (the main-thread rule is UI only).
@@ -338,7 +339,7 @@ pub struct KokoroSpeaker {
     /// Loaded lazily on first `speak` and cached (model load is ~1s).
     tts: Arc<AsyncMutex<Option<Arc<KokoroTts>>>>,
     voice: Mutex<String>,
-    speed: Mutex<f32>,
+    speed: Arc<Mutex<f32>>,
     /// The queue player for the current read (all chunks play through this one).
     player: Arc<Mutex<Option<KokoroQueue>>>,
     active: Arc<AtomicBool>,
@@ -363,7 +364,7 @@ impl KokoroSpeaker {
             voices_path,
             tts: Arc::new(AsyncMutex::new(None)),
             voice: Mutex::new(KOKORO_DEFAULT_VOICE.into()),
-            speed: Mutex::new(1.0),
+            speed: Arc::new(Mutex::new(1.0)),
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicU64::new(0)),
@@ -511,26 +512,15 @@ const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — just flows
 // prosody inverts. Enforced at compile time.
 const _: () = assert!(SENTENCE_GAP_MS > SOFT_GAP_MS);
 
-/// Split read-aloud text into `(chunk, hard_break)` pairs, breaking **only at
-/// natural pauses** so a boundary never lands mid-phrase (Kokoro synthesizes each
-/// chunk as an independent utterance with its own prosody, so a mid-clause seam
-/// sounds like an unnatural pause). Rules:
-/// - Break at sentence ends (`. ! ? ; :` or newline) past `MIN` → a whole
-///   sentence, `hard = true` (a natural breath follows it).
-/// - **First chunk only:** also break at the earliest comma within `FIRST_MAX`
-///   → a small opening chunk so the first word plays sooner. It's a *real* pause
-///   (a comma), marked `hard = false` so it flows into the rest of the sentence.
-/// - Only a sentence longer than `CAP` is broken further, at the last comma
-///   before the cap (else the last word boundary). Rare; most sentences stay whole.
-///
-/// The `hard` flag drives how much silence we append after the chunk (see
-/// `SENTENCE_GAP_MS` / `SOFT_GAP_MS`); trimming makes seams gapless so these small
-/// controlled gaps are the *only* spacing between chunks.
+/// Split at natural pauses where possible. Bound the opening phrase to about
+/// 64 characters even without punctuation, then ramp to 100 and 220 characters
+/// for subsequent chunks. Word boundaries preserve text; soft gaps avoid a
+/// sentence-length pause when a latency-driven split lands mid-clause.
 fn split_for_tts(text: &str) -> Vec<(String, bool)> {
     let text = text.trim();
     const MIN: usize = 16; // keep tiny fragments merged into the next clause
-    const FIRST_MAX: usize = 100; // first chunk may break at an *early* comma only
-    const CAP: usize = 220; // only a long sentence is broken further, at a comma
+    const FIRST_MAX: usize = 64; // short opening phrase, even without a comma
+    const CAP: usize = 220; // normal chunks prefer sentences, then commas/words
     let mut chunks: Vec<(String, bool)> = Vec::new();
     let mut cur = String::new();
     let mut last_comma = 0usize; // byte index just past the most recent comma
@@ -543,20 +533,29 @@ fn split_for_tts(text: &str) -> Vec<(String, bool)> {
             _ => {}
         }
         let first = chunks.is_empty();
+        let cap = match chunks.len() {
+            0 => FIRST_MAX,
+            1 => 100,
+            _ => CAP,
+        };
         let sentence_end = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
         if sentence_end && cur.trim_end().len() >= MIN {
             push_chunk(&mut chunks, &cur, true);
             cur.clear();
             last_comma = 0;
             last_space = 0;
-        } else if first && ch == ',' && cur.trim_end().len() >= MIN && cur.len() <= FIRST_MAX {
+        } else if first
+            && ch == ','
+            && cur.trim_end().len() >= MIN
+            && cur.chars().count() <= FIRST_MAX
+        {
             // Fast first word: end the opening chunk at the first comma (a real
             // pause). Soft break — flows into the rest of the sentence.
             push_chunk(&mut chunks, &cur, false);
             cur.clear();
             last_comma = 0;
             last_space = 0;
-        } else if cur.len() >= CAP {
+        } else if cur.chars().count() >= cap {
             // Too long with no sentence end: break at the last comma (natural
             // pause), else the last word boundary — never mid-word.
             let at = if last_comma > MIN {
@@ -568,9 +567,12 @@ fn split_for_tts(text: &str) -> Vec<(String, bool)> {
                 let carry = cur.split_off(at);
                 push_chunk(&mut chunks, &cur, false);
                 cur = carry;
-            } else {
+            } else if ch.is_whitespace() {
                 push_chunk(&mut chunks, &cur, false);
                 cur.clear();
+            } else {
+                // A single long word/URL must never be split in two.
+                continue;
             }
             last_comma = 0;
             last_space = 0;
@@ -581,6 +583,16 @@ fn split_for_tts(text: &str) -> Vec<(String, bool)> {
         chunks.push((text.to_string(), true));
     }
     chunks
+}
+
+/// Cover the estimated time to synthesize the next chunk, with 25% headroom.
+/// Cap the startup/rebuffer budget at three wall-clock seconds: slower-than-
+/// playback synthesis cannot be made stall-free by a small initial buffer.
+fn buffer_target(speed: f32, seconds_per_char: f32, next_chars: usize) -> f32 {
+    if next_chars == 0 {
+        return 0.0;
+    }
+    speed * (seconds_per_char * next_chars as f32 * 1.25 + 0.08).clamp(0.15, 3.0)
 }
 
 /// Push `s` (trimmed) onto `chunks` with its break kind unless it's empty.
@@ -708,6 +720,7 @@ fn play_preview_file(slot: &Arc<Mutex<Option<KokoroQueue>>>, path: &std::path::P
     let queue = KokoroQueue {
         player: qp,
         temps: Vec::new(),
+        buffering: false,
     };
     // SAFETY: `qp` is a live AVQueuePlayer from new_queue_player(); `enqueue_wav`
     // and `playImmediatelyAtRate:` are valid messages with the argument types
@@ -813,7 +826,7 @@ impl Speaker for KokoroSpeaker {
     fn speak(&self, text: &str) {
         let text = text.to_string();
         let voice = Arc::new(self.voice.lock().expect("voice mutex").clone());
-        let speed = *self.speed.lock().expect("speed mutex");
+        let live_speed = self.speed.clone();
         // This read's id; a newer speak bumps `generation` past it so we only
         // clean up our own player.
         let n = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
@@ -863,6 +876,7 @@ impl Speaker for KokoroSpeaker {
             *player_slot.lock().expect("player mutex") = Some(KokoroQueue {
                 player: qp,
                 temps: Vec::new(),
+                buffering: true,
             });
 
             let chunk_chars: Arc<Vec<f32>> = Arc::new(
@@ -888,7 +902,8 @@ impl Speaker for KokoroSpeaker {
                     let mut last_item: usize = 0; // currentItem ptr as usize (0 = nil)
                     let mut idx: usize = 0; // currently-playing chunk index
                     let mut chars_before = 0f32;
-                    let mut item_start = std::time::Instant::now();
+                    let mut last_poll = std::time::Instant::now();
+                    let mut item_elapsed = 0.0f32;
                     let mut started = false;
                     let mut drained_polls = 0u32;
                     loop {
@@ -901,7 +916,7 @@ impl Speaker for KokoroSpeaker {
                         {
                             break;
                         }
-                        let cur = {
+                        let (cur, playback_rate) = {
                             let g = player_slot.lock().expect("player mutex");
                             match g.as_ref() {
                                 Some(h) => {
@@ -909,12 +924,15 @@ impl Speaker for KokoroSpeaker {
                                     unsafe {
                                         let c: *mut AnyObject =
                                             msg_send![h.player.as_ptr(), currentItem];
-                                        c as usize
+                                        let rate: f32 = msg_send![h.player.as_ptr(), rate];
+                                        (c as usize, if h.buffering { 0.0 } else { rate })
                                     }
                                 }
                                 None => break,
                             }
                         };
+                        let elapsed = last_poll.elapsed().as_secs_f32();
+                        last_poll = std::time::Instant::now();
                         let enq = durations.lock().expect("dur mutex").len();
                         if cur != 0 {
                             drained_polls = 0;
@@ -924,8 +942,10 @@ impl Speaker for KokoroSpeaker {
                                     idx += 1;
                                 }
                                 last_item = cur;
-                                item_start = std::time::Instant::now();
+                                item_elapsed = 0.0;
                                 started = true;
+                            } else {
+                                item_elapsed += elapsed * playback_rate;
                             }
                             let dur = durations
                                 .lock()
@@ -934,7 +954,7 @@ impl Speaker for KokoroSpeaker {
                                 .copied()
                                 .unwrap_or(0.0);
                             let frac = if dur > 0.0 {
-                                (item_start.elapsed().as_secs_f32() * speed / dur).clamp(0.0, 1.0)
+                                (item_elapsed / dur).clamp(0.0, 1.0)
                             } else {
                                 0.0
                             };
@@ -966,13 +986,9 @@ impl Speaker for KokoroSpeaker {
             // Synthesize each chunk (one at a time — the ONNX session is the
             // bottleneck) and append it; playback of earlier chunks overlaps.
             //
-            // Hold playback until this many seconds of audio are buffered, then
-            // start. Kept small: synth measured ~2–4.5× real time on the ANE (well
-            // above 1×), so the lead only *grows* once playing and low prebuffer
-            // won't stall — it just sets how soon the first word plays. The first
-            // chunk is a small opening clause when the sentence has an early comma
-            // (split_for_tts), so playback begins as soon as that synthesizes.
-            const PREBUFFER_SECS: f32 = 0.6;
+            // Predict the next chunk's synthesis cost from observed throughput.
+            // Re-evaluate at each enqueue and use the current playback speed.
+            let mut seconds_per_char = 0.0f32;
             let mut playing = false;
             let mut buffered = 0f32;
             // Cumulative synth time for the lead chunks before playback starts —
@@ -1000,8 +1016,15 @@ impl Speaker for KokoroSpeaker {
                     Some(w) => w,
                     None => break,
                 };
+                let elapsed = t_synth.elapsed().as_secs_f32();
+                let observed = elapsed / chunk.chars().count().max(1) as f32;
+                seconds_per_char = if i == 0 {
+                    observed
+                } else {
+                    0.5 * seconds_per_char + 0.5 * observed
+                };
                 if !playing {
-                    synth_ms += t_synth.elapsed().as_secs_f32() * 1000.0;
+                    synth_ms += elapsed * 1000.0;
                 }
                 if !active.load(Ordering::Acquire) || generation.load(Ordering::Acquire) != n {
                     break;
@@ -1011,6 +1034,15 @@ impl Speaker for KokoroSpeaker {
                 if std::fs::write(&temp, &wav).is_err() {
                     break;
                 }
+                let speed_guard = live_speed.lock().expect("speed mutex");
+                let speed = *speed_guard;
+                let target = buffer_target(
+                    speed,
+                    seconds_per_char,
+                    chunks
+                        .get(i + 1)
+                        .map_or(0, |(text, _)| text.chars().count()),
+                );
                 let ok = {
                     let mut g = player_slot.lock().expect("player mutex");
                     match g.as_mut() {
@@ -1020,6 +1052,13 @@ impl Speaker for KokoroSpeaker {
                         // the new read installs its queue with, so it's race-free.
                         Some(_) if generation.load(Ordering::Acquire) != n => false,
                         Some(h) => {
+                            // SAFETY: live AVQueuePlayer held under the mutex.
+                            let rate: f32 = unsafe { msg_send![h.player.as_ptr(), rate] };
+                            if playing && rate == 0.0 && !h.buffering {
+                                h.buffering = true;
+                                buffered = 0.0;
+                                log::info!("tts/kokoro: queue drained; rebuilding buffer");
+                            }
                             // SAFETY: live AVQueuePlayer; enqueue + rate control.
                             let ok = unsafe { enqueue_wav(h.player.as_ptr(), &temp) };
                             if ok {
@@ -1028,31 +1067,25 @@ impl Speaker for KokoroSpeaker {
                                 buffered += secs;
                                 // SAFETY: live AVQueuePlayer held under the mutex.
                                 unsafe {
-                                    let rate: f32 = msg_send![h.player.as_ptr(), rate];
-                                    if !playing {
-                                        if buffered >= PREBUFFER_SECS || i + 1 == chunk_count {
-                                            let _: () =
-                                                msg_send![h.player.as_ptr(), setRate: speed];
-                                            playing = true;
+                                    if h.buffering && (buffered >= target || i + 1 == chunk_count) {
+                                        let _: () = msg_send![h.player.as_ptr(), setRate: speed];
+                                        h.buffering = false;
+                                        if !playing {
                                             log::info!(
-                                                "tts/kokoro: first audio {:.0}ms after speak (model {:.0}ms, synth {:.0}ms @ {:.1}x realtime, {:.1}s buffered)",
+                                                "tts/kokoro: first audio {:.0}ms after speak (model {:.0}ms, synth {:.0}ms @ {:.1}x realtime, {:.1}s buffered, target {:.1}s)",
                                                 speak_t0.elapsed().as_secs_f32() * 1000.0,
-                                                model_ms,
-                                                synth_ms,
+                                                model_ms, synth_ms,
                                                 buffered / (synth_ms / 1000.0).max(1e-3),
+                                                buffered, target,
+                                            );
+                                        } else {
+                                            log::info!(
+                                                "tts/kokoro: resuming with {:.1}s buffered at {}x",
                                                 buffered,
+                                                speed
                                             );
                                         }
-                                    } else if rate == 0.0 {
-                                        // Queue drained mid-read (synth fell behind) → resume.
-                                        // Logged: a mid-read stall is a "seconds" pause
-                                        // the user hears in the middle of a read.
-                                        log::info!(
-                                            "tts/kokoro: playback stalled at chunk {}/{} (synth fell behind) — resuming",
-                                            i + 1,
-                                            chunk_count,
-                                        );
-                                        let _: () = msg_send![h.player.as_ptr(), setRate: speed];
+                                        playing = true;
                                     }
                                 }
                             }
@@ -1061,6 +1094,7 @@ impl Speaker for KokoroSpeaker {
                         None => false, // stopped
                     }
                 };
+                drop(speed_guard);
                 if !ok {
                     let _ = std::fs::remove_file(&temp);
                     break;
@@ -1070,13 +1104,21 @@ impl Speaker for KokoroSpeaker {
             // If we buffered audio but never crossed the prebuffer threshold, start
             // now. If nothing was enqueued (synth failed / stopped), clear `active`
             // so the progress task ends instead of spinning.
-            if !playing {
+            let needs_start = player_slot
+                .lock()
+                .expect("player mutex")
+                .as_ref()
+                .is_some_and(|h| h.buffering);
+            if needs_start || !playing {
+                let speed_guard = live_speed.lock().expect("speed mutex");
+                let speed = *speed_guard;
                 let started_now = {
-                    let g = player_slot.lock().expect("player mutex");
-                    match g.as_ref() {
+                    let mut g = player_slot.lock().expect("player mutex");
+                    match g.as_mut() {
                         // Superseded by a newer read — its queue isn't ours to start.
                         Some(_) if generation.load(Ordering::Acquire) != n => false,
                         Some(h) if !durations.lock().expect("dur mutex").is_empty() => {
+                            h.buffering = false;
                             // SAFETY: live AVQueuePlayer held under the mutex.
                             unsafe {
                                 let _: () = msg_send![h.player.as_ptr(), setRate: speed];
@@ -1145,9 +1187,12 @@ impl Speaker for KokoroSpeaker {
     }
 
     fn set_speed(&self, speed: f32) {
-        *self.speed.lock().expect("speed mutex") = speed;
+        // Keep speed → player lock order shared with enqueue/start, so a
+        // concurrent synthesis completion cannot restore an old speed.
+        let mut speed_guard = self.speed.lock().expect("speed mutex");
+        *speed_guard = speed;
         let g = self.player.lock().expect("player mutex");
-        if let Some(h) = g.as_ref() {
+        if let Some(h) = g.as_ref().filter(|h| !h.buffering) {
             // SAFETY: `h.player` is a live AVQueuePlayer held under the mutex;
             // `setRate:` takes a float.
             unsafe {
@@ -1299,10 +1344,8 @@ mod tests {
     }
 
     #[test]
-    fn chunks_break_only_at_sentence_ends() {
-        // Every chunk of a normal (sub-CAP) multi-sentence read must end at a
-        // sentence boundary, so Kokoro never resets prosody mid-phrase (which
-        // sounds like an unnatural pause). Words are preserved.
+    fn later_chunks_prefer_sentence_ends() {
+        // After the short startup chunks, normal sentences stay together.
         let text = "The quick brown fox jumps over the lazy dog again and again \
                     while the sleepy cat watches from the warm windowsill. Then it \
                     finally drifts off to sleep. A third sentence follows here.";
@@ -1311,10 +1354,10 @@ mod tests {
             chunks.len() >= 2,
             "expected multiple chunks, got {chunks:?}"
         );
-        // This text has no early comma, so every chunk is a whole sentence (the
-        // first-chunk comma exception is covered separately).
-        for (c, hard) in &chunks {
-            assert!(hard, "sentence-only text should yield hard breaks: {c:?}");
+        // The opening ramp can split at word boundaries; later chunks keep
+        // sentence boundaries when they fit within the regular cap.
+        for (c, hard) in chunks.iter().skip(2) {
+            assert!(hard, "later chunks should yield hard breaks: {c:?}");
             assert!(
                 matches!(c.chars().last(), Some('.' | '!' | '?' | ';' | ':')),
                 "chunk should end at a sentence boundary, not mid-phrase: {c:?}"
@@ -1325,6 +1368,32 @@ mod tests {
             .map(|(c, _)| c.split_whitespace().count())
             .sum();
         assert_eq!(words, text.split_whitespace().count());
+    }
+
+    #[test]
+    fn opening_is_bounded_without_punctuation_and_preserves_unicode_words() {
+        let text = "Résumé naïve café this opening sentence has no comma and continues for a long time without giving the reader anywhere obvious to breathe before it finally ends.";
+        let chunks = split_for_tts(text);
+        assert!(chunks[0].0.chars().count() <= 64);
+        assert!(!chunks[0].1);
+        assert_eq!(
+            chunks
+                .iter()
+                .flat_map(|(s, _)| s.split_whitespace())
+                .collect::<Vec<_>>(),
+            text.split_whitespace().collect::<Vec<_>>()
+        );
+        let long_word = "x".repeat(300);
+        assert_eq!(split_for_tts(&long_word)[0].0, long_word);
+    }
+
+    #[test]
+    fn buffering_covers_next_synthesis_and_scales_with_speed() {
+        assert!((buffer_target(1.0, 0.01, 100) - 1.33).abs() < 0.001);
+        assert!((buffer_target(2.0, 0.01, 100) - 2.66).abs() < 0.001);
+        assert!(buffer_target(1.0, 0.02, 100) > buffer_target(1.0, 0.01, 100));
+        assert_eq!(buffer_target(2.0, 1.0, 200), 6.0);
+        assert_eq!(buffer_target(2.0, 1.0, 0), 0.0);
     }
 
     #[test]
@@ -1376,6 +1445,44 @@ mod tests {
                 pcm_f32_to_wav(&samples, KOKORO_SAMPLE_RATE),
             )
             .unwrap();
+        });
+    }
+
+    /// Compare old sentence-sized startup against the actual new split/buffer
+    /// policy using the installed model. No playback and no timing assertions.
+    #[test]
+    #[ignore = "needs the local Kokoro model; measures latency"]
+    fn kokoro_startup_benchmark() {
+        pin_coreml_compute_units();
+        install_g2p_lexicon();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let tts = KokoroTts::new(kokoro_model_path().unwrap(), kokoro_voices_dir().unwrap()).await.unwrap();
+            synth_chunk_wav(&tts, "Ready to read.", "af_heart", 0).await.unwrap();
+            let text = "Local dictation should feel instant and reading a long opening sentence without commas should start quickly while the rest of the text is generated in the background. Another sentence follows.";
+            let old_first = text.split_once(". ").unwrap().0.to_string() + ".";
+            let t = std::time::Instant::now();
+            synth_chunk_wav(&tts, &old_first, "af_heart", SENTENCE_GAP_MS).await.unwrap();
+            let baseline = t.elapsed();
+            let chunks = split_for_tts(text);
+            let t = std::time::Instant::now();
+            let mut buffered = 0.0;
+            let mut cost = 0.0;
+            for (i, (text, hard)) in chunks.iter().enumerate() {
+                let tick = std::time::Instant::now();
+                let wav = synth_chunk_wav(&tts, text, "af_heart", if *hard { SENTENCE_GAP_MS } else { SOFT_GAP_MS }).await.unwrap();
+                let observed = tick.elapsed().as_secs_f32() / text.chars().count() as f32;
+                cost = if i == 0 { observed } else { (cost + observed) / 2.0 };
+                buffered += (wav.len() - 44) as f32 / 2.0 / KOKORO_SAMPLE_RATE as f32;
+                let target = buffer_target(1.0, cost, chunks.get(i+1).map_or(0, |(s, _)| s.chars().count()));
+                if buffered >= target || i + 1 == chunks.len() {
+                    eprintln!("KOKORO STARTUP: sentence {:.0}ms; incremental {:.0}ms ({} chunk(s), {:.2}s buffered, target {:.2}s)", baseline.as_secs_f32()*1000.0, t.elapsed().as_secs_f32()*1000.0, i+1, buffered, target);
+                    break;
+                }
+            }
         });
     }
 

@@ -1795,6 +1795,7 @@ fn spawn_dictation_worker<R: Runtime>(
     let (tx, mut rx) = unbounded_channel::<DictationCmd>();
     std::thread::spawn(move || {
         let mut rec: Option<audio::Recorder> = None;
+        let mut live: Option<stt::LiveTranscription> = None;
         while let Some(cmd) = rx.blocking_recv() {
             match cmd {
                 DictationCmd::Start => {
@@ -1829,6 +1830,8 @@ fn spawn_dictation_worker<R: Runtime>(
                     match audio::Recorder::start(mic.as_deref(), Some(on_level)) {
                         Ok(r) => {
                             log::info!("dictation: recording started");
+                            live =
+                                Some(stt::LiveTranscription::start(r.feed(), transcriber.clone()));
                             rec = Some(r);
                         }
                         Err(e) => {
@@ -1847,6 +1850,7 @@ fn spawn_dictation_worker<R: Runtime>(
                     }
                 }
                 DictationCmd::Cancel => {
+                    live.take();
                     if rec.take().is_some() {
                         log::info!("dictation: cancelled");
                     }
@@ -1864,6 +1868,10 @@ fn spawn_dictation_worker<R: Runtime>(
                         hotkeys::unregister_escape(&app);
                         continue;
                     };
+                    let live = live.take();
+                    if let Some(session) = &live {
+                        session.stop();
+                    }
                     play_dictation_cue(&app, false);
                     let stop_t0 = std::time::Instant::now();
                     match r.stop() {
@@ -1879,6 +1887,7 @@ fn spawn_dictation_worker<R: Runtime>(
                                 chat.clone(),
                                 recording,
                                 mode,
+                                live,
                             );
                         }
                         Err(e) => {
@@ -2014,6 +2023,7 @@ fn handle_recording<R: Runtime>(
     chat: Arc<dyn llm::LlmChat>,
     recording: audio::Recording,
     mode: DictationMode,
+    live: Option<stt::LiveTranscription>,
 ) {
     // Onboarding "Try it": no overlay, paste, refine, or history — just
     // transcribe (unless the clip was silent or too short) and report the text
@@ -2024,10 +2034,11 @@ fn handle_recording<R: Runtime>(
         tauri::async_runtime::spawn(async move {
             emit_test_state(&app, "transcribing", String::new(), heard);
             let text = if heard && recording.duration_ms >= 200 {
-                transcriber
-                    .transcribe(&recording.wav)
-                    .await
-                    .unwrap_or_default()
+                match live {
+                    Some(session) => session.finish(&recording.wav).await,
+                    None => transcriber.transcribe(&recording.wav).await,
+                }
+                .unwrap_or_default()
             } else {
                 String::new()
             };
@@ -2080,7 +2091,10 @@ fn handle_recording<R: Runtime>(
     let pipeline_t0 = std::time::Instant::now();
     tauri::async_runtime::spawn(async move {
         let secs = recording.duration_ms as f64 / 1000.0;
-        let transcribe_result = transcriber.transcribe(&recording.wav).await;
+        let transcribe_result = match live {
+            Some(session) => session.finish(&recording.wav).await,
+            None => transcriber.transcribe(&recording.wav).await,
+        };
         // Esc pressed while Whisper was running: abandon the transcript (the
         // native call already finished — we just drop its output), don't paste.
         if dictation_cancelled(&app, gen) {
