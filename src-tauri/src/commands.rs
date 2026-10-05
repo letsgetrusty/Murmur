@@ -112,6 +112,8 @@ pub struct Options {
     speeds: Vec<f32>,
     voices: Vec<VoiceOption>,
     mics: Vec<String>,
+    /// False on Intel Macs, where the Kokoro engine isn't built (see build.rs).
+    kokoro_supported: bool,
 }
 
 #[tauri::command]
@@ -136,6 +138,7 @@ pub fn get_options(state: State<AppState>) -> Options {
         // window where early CoreAudio enumeration crashes the release build —
         // the recorder already enumerates on demand the same way (`audio.rs`).
         mics: crate::audio::list_input_devices(),
+        kokoro_supported: cfg!(kokoro),
     }
 }
 
@@ -342,6 +345,8 @@ pub struct OnboardingStatus {
     llm_ready: bool,
     /// Whether the Kokoro neural-voice assets are already on disk.
     kokoro_ready: bool,
+    /// False on Intel Macs: no Kokoro engine, so onboarding has nothing to fetch.
+    kokoro_supported: bool,
     /// Whether the Fn dictation tap is installed and live. Distinct from
     /// `accessibility`: right after a fresh grant the tap installs live (via
     /// `fn_key::try_activate` below) so this flips true without a relaunch — but
@@ -373,6 +378,7 @@ pub fn onboarding_status(app: AppHandle, state: State<AppState>) -> OnboardingSt
         whisper_ready,
         llm_ready: crate::local_llm::assets_present(&llm_model),
         kokoro_ready: crate::tts::kokoro_assets_present(),
+        kokoro_supported: cfg!(kokoro),
         fn_tap_active: crate::fn_key::is_active(),
     }
 }

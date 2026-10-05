@@ -139,7 +139,12 @@ async function refreshStatus() {
     // Seed the download bars for anything already on disk.
     if (status.whisper_ready) markDownloadDone(DOWNLOAD.WHISPER);
     if (status.llm_ready) markDownloadDone(DOWNLOAD.LLM);
-    if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
+    if (status.kokoro_supported === false) {
+      // Intel Mac: read-aloud uses the built-in voice, so there's no Kokoro model.
+      kokoroUnsupported = true;
+      markDownloadDone(DOWNLOAD.KOKORO);
+      $(`#${DL_EL[DOWNLOAD.KOKORO]}`)?.setAttribute("hidden", "");
+    } else if (status.kokoro_ready) markDownloadDone(DOWNLOAD.KOKORO);
     // Reflect speech-model readiness on the Finish button (gated on Whisper).
     updateCta();
     updateTryCard();
@@ -165,8 +170,9 @@ const dlDone = {
 // the downloads step. They can switch to the built-in macOS voice later in
 // Settings; that never needs this ~310 MB model.
 let neuralStarted = false;
+let kokoroUnsupported = false;
 function startNeural() {
-  if (neuralStarted || !invoke) return;
+  if (neuralStarted || kokoroUnsupported || !invoke) return;
   neuralStarted = true;
   invoke(CMD.RETRY_DOWNLOAD, { id: DOWNLOAD.KOKORO }).catch(() => {
     neuralStarted = false; // let a later attempt retry

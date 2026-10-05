@@ -136,8 +136,12 @@ pub const DEFAULT_STT_MODEL: &str = "small.en";
 // Default to the higher-quality on-device neural voice. It needs a ~310 MB
 // download, fetched during first-run onboarding — see the kokoro prefetch in
 // lib.rs (gated on `onboarding_done`). Users switch to the built-in macOS voice
-// in Settings if they prefer.
+// in Settings if they prefer. Intel Macs (no `cfg(kokoro)`, see build.rs) only
+// have the native voice.
+#[cfg(kokoro)]
 pub const DEFAULT_TTS_PROVIDER: &str = "kokoro";
+#[cfg(not(kokoro))]
+pub const DEFAULT_TTS_PROVIDER: &str = "native";
 pub const DEFAULT_LLM_MODEL: &str = "Qwen3-1.7B-Q4_K_M";
 fn default_stt_model() -> String {
     DEFAULT_STT_MODEL.to_string()
@@ -220,6 +224,11 @@ pub fn load() -> Config {
                 // AVPlayer's pitch-preserving spectral algorithm sounds
                 // natural up to ~2.0×; clamp anything wilder.
                 c.tts_speed = c.tts_speed.clamp(0.5, 2.0);
+                // A config carried over from an Apple Silicon Mac may name a
+                // backend this build doesn't have.
+                if !cfg!(kokoro) && c.tts_provider == "kokoro" {
+                    c.tts_provider = DEFAULT_TTS_PROVIDER.to_string();
+                }
                 log::info!("config: loaded from {}", path.display());
                 c
             }

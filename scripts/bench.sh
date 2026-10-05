@@ -41,7 +41,7 @@ run_gate() {
 
 if [ "${1:-}" != "--no-build" ]; then
   note "Building release benches…"
-  ( cd "$REPO/src-tauri" && cargo build --release \
+  ( cd "$REPO/src-tauri" && cargo build --release --features kokoro-bench \
       --example bench_stt --example bench_tts --example bench_start >/dev/null ) \
     || { echo "bench build failed"; exit 1; }
 fi

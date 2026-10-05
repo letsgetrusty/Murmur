@@ -9,7 +9,9 @@ accounts, no API keys.
 ### **[Download Murmur for macOS »](https://github.com/letsgetrusty/Murmur/releases/latest)**
 
 Open the `.dmg`, drag **Murmur** to Applications, and launch it. Updates install
-with one click. **Requires macOS 11+ on Apple Silicon (M1 or later).**
+with one click. **Requires macOS 11+ on Apple Silicon (M1 or later).** The
+official DMG is Apple Silicon only, but you can build from source on an Intel Mac
+(see below).
 
 ## What it does
 

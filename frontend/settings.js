@@ -321,6 +321,12 @@ async function loadOptions() {
 
   renderSpeedSeg(opts.speeds, currentConfig.tts_speed);
 
+  // Intel Macs have no Kokoro engine; offer only the native voice there.
+  if (opts.kokoro_supported === false) {
+    el("tts-provider").querySelector('option[value="kokoro"]')?.remove();
+    el("tts-provider").value = "native";
+  }
+
   const voice = el("voice");
   voice.innerHTML = "";
   for (const v of opts.voices) addOption(voice, v.id, v.name);

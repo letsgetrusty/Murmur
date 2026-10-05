@@ -47,13 +47,28 @@ block2 = "0.6"
 # Phase B — dictation history (embedded, single-user)
 rusqlite = { version = "0.32", features = ["bundled"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
+llama-cpp-2 = { version = "0.1.154", features = ["metal"] }
+
+# Kokoro neural TTS (ONNX Runtime) is Apple-Silicon-only: `ort` ships no
+# prebuilt ONNX Runtime for x86_64-apple-darwin, so Intel builds drop it and read
+# aloud with the native AVSpeechSynthesizer voice instead. build.rs turns this
+# same arch split into `cfg(kokoro)`.
+[target.'cfg(not(target_arch = "x86_64"))'.dependencies]
 # default-features disabled to drop the `g2p-espeak` backend, which statically
 # links GPL-3.0 espeak-ng — incompatible with our MIT license. Kokoro falls back
 # to its dictionary-based (cmudict) grapheme-to-phoneme instead.
 kokoro-en = { version = "0.1.5", default-features = false }
 # Same ORT already supplied by kokoro-en; synchronous inference worker.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std"] }
-llama-cpp-2 = { version = "0.1.154", features = ["metal"] }
+
+[features]
+# Opt-in for the Kokoro TTS benchmark example. It drives `ort` directly, which
+# only exists off x86_64 (see build.rs), so a plain `cargo test` skips it.
+kokoro-bench = []
+
+[[example]]
+name = "bench_tts"
+required-features = ["kokoro-bench"]
 
 [profile.release]
 # LTO + strip miscompile cpal's CoreAudio device enumeration into a
