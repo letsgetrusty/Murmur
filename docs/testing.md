@@ -80,6 +80,38 @@ Bypass the gate only when you can't run it (no models on the machine):
 
 ## What isn't covered (and why)
 
+### Dock lifecycle
+
+Unit tests cover the window registry states that determine Dock presence,
+including the overlay exclusion and both windows during the Setup-to-Settings
+handoff. They use Tauri's mock runtime and do not start the audio engine or open
+native windows. AppKit focus, Dock rendering, and Cmd+Tab require a native check.
+
+Run the following on a signed test build in a disposable macOS user session.
+Keep its model/config/history files separate from a daily-driver installation;
+`dev.sh` normally replaces and relaunches the development bundle.
+
+1. After setup, quit and launch Murmur. It starts in the menu bar without a
+   transient Dock icon. Dictation and read-aloud still work; their overlays do
+   not add Murmur to the Dock or take focus from the target app.
+2. Open Settings from the menu bar. Murmur appears in the Dock and Cmd+Tab, and
+   Settings accepts keyboard input. Switch apps, minimize, and use Cmd+H. It
+   stays in the Dock, and reopening restores the existing window.
+3. Open Setup while Settings is open. Close either window, then the other.
+   The Dock icon remains until the second window closes. Repeat quickly to
+   check that no delayed transition leaves an idle Dock icon or hides it while
+   a management window still exists.
+4. With both windows closed, open Settings from the menu bar and then reopen
+   the running app through Finder/Spotlight. There is one Settings window.
+   While Setup exists, Finder/Spotlight returns to Setup instead.
+5. Exercise first-run Setup, including returning from System Settings after
+   permission grants, and finish it. Dock presence continues when Settings
+   opens, including after the permission-related relaunch. Close Settings to
+   return to the menu bar. Check the explicit Settings opening from the tray's
+   update action too.
+
+### Hardware and end-to-end behavior
+
 - **Transcription accuracy / voice quality** — subjective and model-dependent;
   guarded by the `bench_stt` ignored test (`MURMUR_TEST_WAV`) for spot checks and
   by listening during `scripts/dev.sh`.
