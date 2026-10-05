@@ -393,9 +393,10 @@ noted above, release assets are only publicly fetchable once the repo is public.
   bundled dylibs → no library-validation exception needed). If a hardened-runtime
   crash ever appears *inside* ML inference, the usual fix is adding
   `com.apple.security.cs.allow-jit`; we don't ship it preemptively.
-- **Architecture:** this builds for the host arch (Apple Silicon → `aarch64`). A
-  universal binary would need `tauri build --target universal-apple-darwin` and
-  an Intel toolchain; skip it unless you actually need Intel support.
+- **Architecture:** releases build for Apple Silicon (`aarch64`). Intel Macs can
+  build from source (`./scripts/dev.sh`) but without Kokoro neural TTS — see
+  AGENTS.md "Intel Macs". A universal binary would need `tauri build --target
+  universal-apple-darwin`, and the Intel half would ship without Kokoro.
 - **Keep the signing identity stable** across releases so users' Accessibility
   grants survive updates (same principle as the dev cert — see the CLAUDE.md
   hard rules).

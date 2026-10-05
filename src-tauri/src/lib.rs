@@ -11,6 +11,7 @@ mod history;
 mod hotkeys;
 mod inject;
 mod ipc;
+#[cfg(kokoro)]
 mod kokoro;
 mod llm;
 mod local_llm;
@@ -26,6 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(kokoro)]
 use crate::tts::Speaker as _;
 
 use serde::Serialize;
@@ -360,6 +362,7 @@ pub fn run() {
             // Text-to-speech (both on-device): "kokoro" local neural, or the
             // native macOS AVSpeechSynthesizer (default).
             let speaker: Arc<dyn tts::Speaker> = match cfg.tts_provider.as_str() {
+                #[cfg(kokoro)]
                 "kokoro" => {
                     if tts::kokoro_assets_present() {
                         log::info!("tts: Kokoro local neural backend");

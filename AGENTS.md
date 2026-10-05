@@ -63,6 +63,18 @@ gotchas). When this file and the architecture doc disagree, ask.**
 6. **Surface microphone-permission failure explicitly** — without it macOS feeds
    empty audio silently and recording appears to work with a flat waveform.
 
+## Intel Macs (build-from-source only)
+`ort` has no prebuilt ONNX Runtime for `x86_64-apple-darwin`, so **Kokoro is
+Apple-Silicon-only**: `kokoro-en` + `ort` are target deps excluded on x86_64
+(`Cargo.toml`), and `build.rs` sets `cfg(kokoro)` on every other arch. The Kokoro
+backend lives in `tts_kokoro.rs` and the `kokoro` module, both behind that cfg;
+`tts.rs` supplies stubs otherwise. On Intel the default/only read-aloud engine is
+native `AVSpeechSynthesizer`, `config::load` rewrites a saved `"kokoro"` provider
+to `"native"`, and onboarding/settings hide Kokoro (`kokoro_supported`). Whisper and
+llama.cpp build for x86_64 as-is (Metal needs a supported GPU; otherwise slower).
+Official releases stay Apple Silicon. `bench_tts` needs `--features kokoro-bench`.
+Don't add Kokoro-only code outside `cfg(kokoro)` code paths.
+
 ## Backends behind traits
 STT, TTS, and the refine LLM each sit behind a trait (`Transcriber`, `Speaker`,
 `LlmChat`); all implementations are **on-device**. TTS has two backends selected

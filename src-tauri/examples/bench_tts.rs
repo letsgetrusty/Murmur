@@ -3,7 +3,8 @@
 // to compare eligible-device policies and latency under sustained load.
 // Policy and elapsed time do not identify which device executes each operator.
 //
-// Usage: cargo run --example bench_tts --release -- <compute_units> [iters]
+// Usage: cargo run --example bench_tts --features kokoro-bench --release -- <compute_units> [iters]
+// (Apple Silicon only — Intel builds have no Kokoro/ONNX Runtime.)
 //   compute_units ∈ { cpu_and_gpu, cpu_and_neural_engine, all, cpu_only, cpu }
 // `cpu` uses ONNX Runtime's CPU provider; `cpu_only` uses CoreML on CPU.
 // MURMUR_TTS_PROFILE=1 adds identical short/medium/long cases, post-idle runs,
