@@ -70,6 +70,14 @@ class Scoring(unittest.TestCase):
         candidate["latency"]["stt/speech/warm"]["wall_ms"]["p95"] = 181
         self.assertTrue(any("p95" in e for e in b.failures(candidate, CORPUS, base)))
 
+    def test_stability_checks_both_directions(self):
+        fast = b.summarize(rows(), CORPUS)
+        slow = copy.deepcopy(fast)
+        slow["latency"]["stt/speech/warm"]["wall_ms"].update(median=250, p95=250)
+        self.assertTrue(b.stability_failures(fast, slow, CORPUS))
+        self.assertTrue(b.stability_failures(slow, fast, CORPUS))
+        self.assertEqual(b.stability_failures(fast, fast, CORPUS), [])
+
     def test_faster_does_not_hide_quality_loss(self):
         base = b.summarize(rows(), CORPUS)
         data = rows()

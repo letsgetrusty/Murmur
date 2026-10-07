@@ -24,7 +24,7 @@ replays the pause fixture at recording speed through the actual streaming logic.
 The overlap scenario runs pause dictation and paragraph synthesis together to
 expose shared-resource regressions; it also collects 21 observations per engine.
 There are 21 isolated warm observations per case; first/idle/replay have only three.
-A full default run contains 237 measurements.
+The measurement count follows the corpus; adding cases increases run time.
 Engine order alternates between repeats. File caches are **not** flushed: “first”
 means fresh process, not cold boot. Only the first case after load/idle measures
 that immediate transition; the remaining cases measure the resumed sequence.
@@ -149,3 +149,21 @@ open: repeat under controlled machine load and review timing stability before
 using this gate as evidence for an optimization. Thresholds have not been
 relaxed and the baseline has not been replaced. Live microphone, playback,
 cancel, and retrigger checks remain necessary outside the engine harness.
+
+## Checking measurement stability
+
+Run `./scripts/bench.sh stability` before judging speed changes. It builds one
+executable and runs two unchanged arms adjacent for each engine and repeat,
+reversing arm order on alternate repeats. Both arms must meet quality limits
+and pass the latency comparison in both directions. It writes reports and
+raw arm-labelled observations but never reads or replaces a baseline. A failure
+means timing or output is insufficiently repeatable to attribute a change to
+code; control machine load and investigate instead of loosening thresholds.
+This diagnostic takes approximately twice the normal suite time and does not
+prove statistical significance. Schema 3 and the expanded fixtures require a
+new separately named baseline; retain the older baseline for review.
+
+The added corpus covers quiet speech surrounded by silence, a pause followed
+by much quieter speech, and TTS decimals, versions, abbreviations and code
+identifiers. Listen to generated TTS audio: fingerprints cannot grade pronunciation.
+Consented natural speech remains needed to assess real-world accuracy.

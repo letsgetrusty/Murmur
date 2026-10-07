@@ -14,3 +14,10 @@ The existing silence and mid-sentence-pause fixtures live under
 `src-tauri/tests/fixtures/`; the pause fixture has its own provenance note there.
 There are no user dictation recordings in this corpus. Synthetic voice fixtures
 exercise deterministic regressions but do not replace testing natural speech.
+
+`quiet-with-silence.wav` surrounds the frozen short clip, scaled to 0.2%
+amplitude and quantized to PCM16, with five seconds of digital silence on each
+side. `multiple-pauses.wav` appends one second of silence and the same quiet
+clip and another one-second pause followed by the original short clip. These deterministic transformations exercise
+quiet speech and a large change in volume; they are synthetic stress cases,
+not representative real-microphone accuracy measurements.

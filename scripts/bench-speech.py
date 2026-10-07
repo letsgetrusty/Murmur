@@ -166,6 +166,12 @@ def failures(summary, corpus, baseline=None):
     return errors
 
 
+def stability_failures(a, b, corpus):
+    # Symmetric comparison prevents a slow reference arm hiding noisy timing.
+    return (["b versus a: " + e for e in failures(b, corpus, a)]
+            + ["a versus b: " + e for e in failures(a, corpus, b)])
+
+
 def power():
     status = command("pmset", "-g", "batt")
     settings = command("pmset", "-g", "custom")
@@ -185,7 +191,7 @@ def compatibility(corpus, args):
             if (f.getnchannels(), f.getsampwidth(), f.getframerate(), f.getcomptype()) != (1, 2, 16000, "NONE"):
                 raise ValueError(f"Expected mono 16kHz PCM16: {path}")
         inputs["fixture/" + case["id"]] = path
-    return {"schema": 2, "hardware": {"chip": command("sysctl", "-n", "machdep.cpu.brand_string"),
+    return {"schema": 3, "hardware": {"chip": command("sysctl", "-n", "machdep.cpu.brand_string"),
             "ram": command("sysctl", "-n", "hw.memsize"), "arch": platform.machine()},
             "macos": command("sw_vers", "-productVersion"), "macos_build": command("sw_vers", "-buildVersion"),
             "rustc": command("rustc", "--version"), "power": power(),
@@ -223,7 +229,7 @@ def report(summary, errors, baseline):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("baseline", "compare"), nargs="?", default="compare")
+    parser.add_argument("action", choices=("baseline", "compare", "stability"), nargs="?", default="compare")
     parser.add_argument("--baseline", type=Path, default=ROOT / ".benchmarks/baseline.json")
     parser.add_argument("--replace-baseline", action="store_true")
     parser.add_argument("--repeats", type=int, default=3)
@@ -249,7 +255,7 @@ def run_suite(args, parser):
         if not args.baseline.exists():
             parser.error("No local baseline. Run scripts/bench.sh baseline on a known-good revision first.")
         old = json.loads(args.baseline.read_text())
-    elif args.baseline.exists() and not args.replace_baseline:
+    elif args.action == "baseline" and args.baseline.exists() and not args.replace_baseline:
         parser.error("Baseline exists. Replacement requires explicit --replace-baseline after review.")
     corpus = json.loads((ROOT / "benchmarks/corpus.json").read_text())
     comparable = compatibility(corpus, args)  # Missing model/fixture is an error, never a skip.
@@ -276,31 +282,37 @@ def run_suite(args, parser):
     try:
         for repeat in range(args.repeats):
             for engine in (("stt", "tts", "mixed") if repeat % 2 == 0 else ("tts", "stt", "mixed")):
-                scenario = "same-process overlap" if engine == "mixed" else f"first, warm, {args.idle_secs}s idle"
-                print(f"Repeat {repeat+1}/{args.repeats}: {engine} ({scenario})", flush=True)
-                artifacts = folder / f"{repeat}-{engine}"
-                with (folder / f"{repeat}-{engine}.log").open("w+") as log:
-                    result = subprocess.run([str(binary), engine, str(ROOT), str(ROOT / "benchmarks/corpus.json"),
-                                str(args.rounds), str(args.idle_secs), str(artifacts)], env=env,
-                                stdout=log, stderr=subprocess.STDOUT, timeout=900 + args.idle_secs)
-                    log.seek(0)
-                    for line in log:
-                        if line.startswith("BENCH "):
-                            rows.append({**json.loads(line[6:]), "repeat": repeat})
-                    result.check_returncode()
-                write_json(folder / "results.json", rows)
-        validate_rows(rows, corpus, args.repeats, args.rounds)
+                # Adjacent unchanged runs, with arm order reversed each repeat.
+                arms = (("a", "b") if repeat % 2 == 0 else ("b", "a")) if args.action == "stability" else ("candidate",)
+                for arm in arms:
+                    scenario = "same-process overlap" if engine == "mixed" else f"first, warm, {args.idle_secs}s idle"
+                    print(f"Repeat {repeat+1}/{args.repeats}: {engine} ({scenario})", flush=True)
+                    artifacts = folder / f"{repeat}-{engine}-{arm}"
+                    with (folder / f"{repeat}-{engine}-{arm}.log").open("w+") as log:
+                        result = subprocess.run([str(binary), engine, str(ROOT), str(ROOT / "benchmarks/corpus.json"),
+                                    str(args.rounds), str(args.idle_secs), str(artifacts)], env=env,
+                                    stdout=log, stderr=subprocess.STDOUT, timeout=900 + args.idle_secs)
+                        log.seek(0)
+                        for line in log:
+                            if line.startswith("BENCH "):
+                                rows.append({**json.loads(line[6:]), "repeat": repeat, "arm": arm})
+                        result.check_returncode()
+                    write_json(folder / "results.json", rows)
+        arms = ["a", "b"] if args.action == "stability" else ["candidate"]
+        measurements = {arm: [r for r in rows if r["arm"] == arm] for arm in arms}
+        for data in measurements.values():
+            validate_rows(data, corpus, args.repeats, args.rounds)
         if comparable["power"] != power():
             raise ValueError("Power source/settings changed during benchmark")
         if source != source_hashes():
             raise ValueError("Source changed during benchmark; rerun against one fixed revision")
         provenance["thermal_after"] = command("pmset", "-g", "therm")
         provenance["load_after"] = os.getloadavg()
-        summary = summarize(rows, corpus)
-        previous = old["summary"] if old else None
-        errors = failures(summary, corpus, previous)
+        summary = summarize(measurements[arms[-1]], corpus)
+        previous = summarize(measurements["a"], corpus) if args.action == "stability" else (old["summary"] if old else None)
+        errors = stability_failures(previous, summary, corpus) if args.action == "stability" else failures(summary, corpus, previous)
         result = {"compatibility": comparable, "provenance": provenance, "summary": summary,
-                  "errors": errors, "artifacts": str(folder)}
+                  "errors": errors, "action": args.action, "artifacts": str(folder)}
         write_json(folder / "summary.json", result)
         (folder / "report.md").write_text(report(summary, errors, previous))
         for error in errors:

@@ -29,6 +29,22 @@
       "reference": "",
       "max_wer": 0,
       "max_punctuation_errors": 0
+    },
+    {
+      "id": "quiet-with-silence",
+      "wav": "benchmarks/fixtures/quiet-with-silence.wav",
+      "reference": "Please update the readme file and run the tests before you push this change.",
+      "max_wer": 0.15,
+      "max_punctuation_errors": 2,
+      "replay": false
+    },
+    {
+      "id": "multiple-pauses",
+      "wav": "benchmarks/fixtures/multiple-pauses.wav",
+      "reference": "Please update the readme file and run the tests before you push this change. Please update the readme file and run the tests before you push this change. Please update the readme file and run the tests before you push this change.",
+      "max_wer": 0.15,
+      "max_punctuation_errors": 2,
+      "replay": true
     }
   ],
   "tts": [
@@ -45,6 +61,11 @@
     {
       "id": "paragraph",
       "text": "Local dictation should feel instant and reading a long opening sentence without commas should start quickly while the rest of the text is generated in the background. Another sentence follows, with a natural pause. Please keep every word.",
+      "voice": "am_puck"
+    },
+    {
+      "id": "numbers-and-abbreviations",
+      "text": "The measured value was 3.14 seconds. Dr. Smith installed version 1.2.3 from example.com. The Rust API uses HTTPServer and snake_case identifiers.",
       "voice": "am_puck"
     }
   ]
