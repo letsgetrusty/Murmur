@@ -23,6 +23,8 @@ pub struct Recording {
     /// Mean absolute amplitude of the resampled signal in [0.0, 1.0].
     /// Near-zero strongly suggests a missing Microphone permission.
     pub mean_abs: f32,
+    /// True when captured audio contains at least one nonzero PCM16 sample.
+    pub has_audio: bool,
 }
 
 pub struct Recorder {
@@ -204,8 +206,16 @@ impl Recorder {
             wav,
             duration_ms,
             mean_abs,
+            has_audio: has_pcm_audio(&resampled),
         })
     }
+}
+
+// Match the PCM16 encoder: sub-quantization samples cannot reach Whisper.
+fn has_pcm_audio(samples: &[f32]) -> bool {
+    samples
+        .iter()
+        .any(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16 != 0)
 }
 
 /// Read-only access to captured samples, with offsets in 16 kHz samples.
@@ -360,6 +370,16 @@ pub(crate) fn encode_wav_i16(samples: &[f32], sample_rate: u32) -> Result<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quiet_speech_survives_long_silence() {
+        let mut samples = vec![0.0f32; 160_000];
+        samples.extend(vec![0.0001; 1600]);
+        assert!(samples.iter().map(|s| s.abs()).sum::<f32>() / (samples.len() as f32) < 1e-4);
+        assert!(has_pcm_audio(&samples));
+        assert!(!has_pcm_audio(&[0.0; 320]));
+        assert!(!has_pcm_audio(&[0.000001; 320]));
+    }
 
     #[test]
     fn wav_header_size_and_clamping() {

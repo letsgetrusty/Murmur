@@ -137,21 +137,15 @@ async fn finish_prefix(engine: &dyn Transcriber, prefix: Prefix, wav: &[u8]) -> 
     let Some(tail) = samples.get(prefix.consumed..) else {
         return engine.transcribe(wav).await;
     };
-    let threshold = (frame_peak(&samples) * 0.025).clamp(1e-5, 0.001);
-    if frame_peak(tail) >= threshold {
+    // Nonzero tails may contain quiet words. Only exact digital silence is
+    // safe to skip without a speech classifier. Room noise costs a full decode.
+    if tail.iter().any(|sample| *sample != 0.0) {
         // A pause inside a sentence isn't its end. Re-decode with both sides
         // of the pause instead of pasting "I would like. To change this.".
         log::info!("stt: speech continued after snapshot; decoding complete recording");
         return engine.transcribe(wav).await;
     }
     Ok(prefix.text)
-}
-
-fn frame_peak(samples: &[f32]) -> f32 {
-    samples
-        .chunks(FRAME)
-        .map(|frame| frame.iter().map(|v| v.abs()).sum::<f32>() / frame.len() as f32)
-        .fold(0.0, f32::max)
 }
 
 /// Find a sustained quiet interval after at least two seconds. This is only
@@ -291,11 +285,16 @@ mod tests {
     }
 
     #[test]
-    fn release_skips_retained_room_noise_but_keeps_quiet_speech() {
+    fn release_redecodes_every_nonzero_tail_including_quiet_speech() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        for (tail_amplitude, expected) in [(0.0003, "prefix"), (0.01, "tail")] {
+        for (tail_amplitude, expected) in [
+            (0.0, "prefix"),
+            (0.0001, "tail"),
+            (0.0003, "tail"),
+            (0.01, "tail"),
+        ] {
             let engine = Fake(Mutex::new(Vec::new()));
             let mut samples = vec![0.1; RATE * 3];
             samples.extend(vec![tail_amplitude; RATE / 2]);
@@ -311,7 +310,7 @@ mod tests {
             );
             assert_eq!(
                 engine.0.lock().unwrap().len(),
-                usize::from(tail_amplitude > 0.001)
+                usize::from(tail_amplitude > 0.0)
             );
         }
     }

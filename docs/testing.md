@@ -65,7 +65,7 @@ path. The full local corpus keeps silence as a zero-tolerance quality case.
 
 ### STT pause-context regression
 
-Pause detection now triggers a speculative decode of the **whole recording so far**. New snapshots replace earlier text. If speech continues after the latest snapshot, releasing the hotkey decodes the complete recording; it never concatenates independent pause fragments. This gives Whisper both sides of a mid-sentence pause to revise punctuation and word choices. If the cached snapshot already covers speech through release, it can still be reused. Continuing speech may incur more release-time inference than the old tail-only path; accuracy takes priority.
+Pause detection now triggers a speculative decode of the **whole recording so far**. New snapshots replace earlier text. If speech continues after the latest snapshot, releasing the hotkey decodes the complete recording; it never concatenates independent pause fragments. This gives Whisper both sides of a mid-sentence pause to revise punctuation and word choices. A cached snapshot is reused only when all remaining PCM samples are exactly zero; any nonzero tail triggers complete decoding so quiet speech is retained. Continuing speech may incur more release-time inference than the old tail-only path; accuracy takes priority.
 
 The synthetic `mid-sentence-pause.wav` fixture reproduces “make. is to keep” with the old split decoding. Its expected continuous sentence is guarded with `small.en`:
 
@@ -74,4 +74,14 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features pause_fixt
 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features continued_speech_matches_whole_recording_fixture -- --ignored --nocapture
 ```
 
-Fast tests also cover speculative periods/ellipses being replaced, legitimate final punctuation remaining intact, quiet tails, failed snapshots, and cancellation. The model, decoder sampling strategy, vocabulary, and user corrections are unchanged. These tests address context lost at artificial boundaries; they do not establish general word accuracy across accents, microphones, or background noise.
+Fast tests also cover speculative periods/ellipses being replaced, legitimate final punctuation remaining intact, nonzero quiet tails, failed snapshots, and cancellation. The model, decoder sampling strategy, vocabulary, and user corrections are unchanged. These tests address context lost at artificial boundaries; they do not establish general word accuracy across accents, microphones, or background noise.
+
+### Quiet microphone input
+
+Microphone authorization is checked directly; low whole-recording amplitude
+is no longer treated as a permission denial. Any nonzero PCM16 input remains
+eligible for transcription, including quiet speech diluted by long silence.
+Authorized all-zero input reports an input-device problem. Nonzero room noise
+can now reach Whisper and cause additional inference or hallucinations; exact
+silence and transcript cleanup remain safeguards, not a speech classifier.
+Snapshot reuse is conservative: any nonzero tail forces whole-recording decode.

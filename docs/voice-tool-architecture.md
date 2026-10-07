@@ -16,7 +16,7 @@ content artifact.
 > Dictation uses speculative whole-recording snapshots at sustained speech
 > pauses (400 ms). Each snapshot replaces the previous transcript; pauses never
 > split the final transcript into independently decoded fragments. Release
-> awaits an in-flight snapshot and reuses it when the remaining audio is quiet.
+> awaits an in-flight snapshot and reuses it only when the remaining PCM audio is digital silence.
 > If speech continued, no snapshot succeeded, or a snapshot failed, release
 > decodes the complete recording so Whisper can revise words and punctuation
 > across pauses. This can cost more release-time inference than tail decoding.

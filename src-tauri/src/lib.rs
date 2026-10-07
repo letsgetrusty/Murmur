@@ -2021,6 +2021,15 @@ fn spawn_read_test_watcher<R: Runtime>(app: AppHandle<R>) {
     });
 }
 
+fn microphone_input_error(status: i64, has_audio: bool) -> Option<&'static str> {
+    match status {
+        1 | 2 => Some("microphone access denied — grant Microphone access"),
+        0 => Some("microphone access not granted — complete Setup"),
+        _ if !has_audio => Some("no mic input — check your microphone and input device"),
+        _ => None,
+    }
+}
+
 fn handle_recording<R: Runtime>(
     app: AppHandle<R>,
     transcriber: Arc<dyn stt::Transcriber>,
@@ -2034,7 +2043,7 @@ fn handle_recording<R: Runtime>(
     // back to the onboarding window, which turns it into a success or a
     // diagnosis. This validates the real mic → capture → STT path end to end.
     if mode == DictationMode::Test {
-        let heard = recording.mean_abs >= 1e-4;
+        let heard = recording.has_audio && permissions::microphone_status() == 3;
         tauri::async_runtime::spawn(async move {
             emit_test_state(&app, "transcribing", String::new(), heard);
             let text = if heard && recording.duration_ms >= 200 {
@@ -2062,18 +2071,16 @@ fn handle_recording<R: Runtime>(
         idle_after(app, Duration::from_millis(250));
         return;
     }
-    // CLAUDE.md hard rule #7: silent audio almost always means missing mic
-    // permission. Surface it explicitly.
-    if recording.mean_abs < 1e-4 {
-        log::warn!(
-            "dictation: clip is silent (mean|amp|={:.6}). Grant Microphone access in System Settings → Privacy & Security → Microphone, then try again.",
-            recording.mean_abs
-        );
+    // Authorization is authoritative; low amplitude alone is not a denial.
+    if let Some(message) =
+        microphone_input_error(permissions::microphone_status(), recording.has_audio)
+    {
+        log::warn!("dictation: {message}");
         hotkeys::unregister_escape(&app);
         emit_state(
             &app,
             OverlayState::Error {
-                message: "no mic input — grant Microphone access".into(),
+                message: message.into(),
             },
         );
         idle_after(app, Duration::from_millis(2500));
@@ -2325,6 +2332,22 @@ async fn paste_on_main_thread<R: Runtime>(app: &AppHandle<R>, text: String) -> a
 #[cfg(test)]
 mod tests {
     use super::format_accelerator;
+
+    #[test]
+    fn quiet_audio_is_not_a_permission_failure() {
+        assert_eq!(super::microphone_input_error(3, true), None);
+        assert!(super::microphone_input_error(3, false)
+            .unwrap()
+            .contains("input device"));
+        for status in [1, 2] {
+            assert!(super::microphone_input_error(status, true)
+                .unwrap()
+                .contains("denied"));
+        }
+        assert!(super::microphone_input_error(0, false)
+            .unwrap()
+            .contains("Setup"));
+    }
 
     #[test]
     fn accelerator_renders_mac_symbols() {
