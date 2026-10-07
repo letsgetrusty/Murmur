@@ -467,7 +467,7 @@ pub fn pin_coreml_compute_units() {
 /// into spoken words: `camelCase`/`PascalCase` → "camel Case", `snake_case` and
 /// `kebab-case` → spaces. Acronym runs stay together ("HTTPServer" → "HTTP
 /// Server", "NASA" stays "NASA").
-fn normalize_for_tts(text: &str) -> String {
+pub(crate) fn normalize_for_tts(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len() + text.len() / 8);
     for i in 0..chars.len() {
@@ -501,8 +501,8 @@ fn normalize_for_tts(text: &str) -> String {
 
 /// Inter-chunk gaps appended after trimming Kokoro's (uneven, ~630ms total) edge
 /// padding, so a read keeps natural spacing without the dead air we measured.
-const SENTENCE_GAP_MS: u32 = 140; // after a full sentence — a natural breath
-const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — just flows
+pub(crate) const SENTENCE_GAP_MS: u32 = 140; // after a full sentence — a natural breath
+pub(crate) const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — just flows
 
 // A sentence break must read as a longer pause than a soft (comma) break, or the
 // prosody inverts. Enforced at compile time.
@@ -512,7 +512,7 @@ const _: () = assert!(SENTENCE_GAP_MS > SOFT_GAP_MS);
 /// 64 characters even without punctuation, then ramp to 100 and 220 characters
 /// for subsequent chunks. Word boundaries preserve text; soft gaps avoid a
 /// sentence-length pause when a latency-driven split lands mid-clause.
-fn split_for_tts(text: &str) -> Vec<(String, bool)> {
+pub(crate) fn split_for_tts(text: &str) -> Vec<(String, bool)> {
     let text = text.trim();
     const MIN: usize = 16; // keep tiny fragments merged into the next clause
     const FIRST_MAX: usize = 64; // short opening phrase, even without a comma
@@ -584,7 +584,7 @@ fn split_for_tts(text: &str) -> Vec<(String, bool)> {
 /// Cover the estimated time to synthesize the next chunk, with 25% headroom.
 /// Cap the startup/rebuffer budget at three wall-clock seconds: slower-than-
 /// playback synthesis cannot be made stall-free by a small initial buffer.
-fn buffer_target(speed: f32, seconds_per_char: f32, next_chars: usize) -> f32 {
+pub(crate) fn buffer_target(speed: f32, seconds_per_char: f32, next_chars: usize) -> f32 {
     if next_chars == 0 {
         return 0.0;
     }
@@ -602,7 +602,7 @@ fn push_chunk(chunks: &mut Vec<(String, bool)>, s: &str, hard: bool) {
 }
 
 /// Synthesize one chunk to a 16-bit WAV buffer; `None` on synth error.
-async fn synth_chunk_wav(
+pub(crate) async fn synth_chunk_wav(
     tts: &KokoroTts,
     text: &str,
     voice: &str,

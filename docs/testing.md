@@ -4,8 +4,9 @@ Murmur's core is dictation (STT) and read-aloud (TTS). Most regressions we've hi
 there were **latency, timing, or audio-quality** bugs — a model that throttles,
 a synth that falls back to CPU, a start cue that delays the mic so the first
 words are lost. None of those are catchable by ordinary unit tests, because they
-need real Metal, the actual models, and live audio hardware — none of which exist
-on CI runners. So testing is **two layers**.
+need controlled hardware, the actual models, and sometimes live audio devices.
+CI runs a small real-audio smoke check, but shared runners do not provide stable
+performance measurements. Testing is **two layers**.
 
 ## Layer 1 — unit tests (deterministic logic, runs in CI)
 
@@ -32,58 +33,45 @@ What's covered (extend these when you touch the logic):
 Rule of thumb: if a bug can be reproduced with an in-memory input and no audio
 device, it belongs here.
 
-## Layer 2 — performance gate (local, pre-release)
+## Layer 2 — local performance and quality gate
 
-`scripts/bench.sh` runs the three benchmark examples against fixed thresholds and
-**fails** if a core path regressed. It can't run in CI (needs Metal + models +
-audio), so it's a **pre-release gate**: `publish-release.sh` runs it before
-tagging and **aborts the release** on a breach — right before the code would
-reach auto-updating users.
+See [Local speech benchmarks](benchmarks.md) for the corpus, metrics, limits,
+report format, and coverage boundaries.
 
-```
-scripts/bench.sh              # build the release benches + run the gate
-scripts/bench.sh --no-build   # reuse already-built benches
+```sh
+./scripts/bench.sh baseline   # capture a known-good local reference once
+./scripts/bench.sh            # compare current release build against it
+python3 -m unittest discover -s scripts/tests -v  # fast scoring/gate tests
 ```
 
-The benches (also useful standalone for diagnosis — see `src-tauri/examples/`):
+The local harness calls production Whisper and Kokoro code. It measures repeated
+first/warm/idle runs, replays the pause fixture through streaming finalization,
+gates word/punctuation accuracy, and detects changes in generated TTS audio.
+Missing inputs fail rather than skip. `publish-release.sh` runs the comparison
+before tagging; `--skip-bench` remains an explicit override. Hardware performance
+is measured locally; CI runs model-free gate tests and the existing real-audio
+STT smoke test. Native speech, microphone/device startup and actual audible
+playback still need a live smoke test; software queue estimates cannot certify
+them. The old `bench_stt`, `bench_tts`, and `bench_start` examples remain diagnostic
+tools, not the new baseline comparison gate.
 
-| Bench | Measures | Gate |
-|---|---|---|
-| `bench_stt` | Whisper realtime factor (per model) | `small.en` ≥ 10× (caught `medium.en` throttling to ~2.7×) |
-| `bench_tts` | Kokoro synth realtime factor | ≥ 2× (must beat 1× or playback stalls) |
-| `bench_start` | mic-ready latency after Fn press | ≤ 250ms (caught the cue-before-mic delay that lost first words) |
+### Digital-silence regression
 
-A bench whose model/hardware is **missing SKIPS** (a missing model isn't a
-regression); a bench that **runs and is below threshold FAILS**. Thresholds sit
-well below measured-healthy on an M4 (STT ~26×, TTS ~4.5×, mic-ready ~75ms) so
-normal variance never trips them — override per-machine via env
-(`STT_MIN_REALTIME`, `TTS_MIN_REALTIME`, `MIC_MAX_MS`).
+Repeated real-model runs exposed `[end]` being returned for an all-zero WAV,
+even though a single silence smoke test passed. Exactly zero samples now return
+an empty transcript before model loading/inference. No amplitude threshold is
+used: the fast test also checks that quiet nonzero audio still enters the model
+path. The full local corpus keeps silence as a zero-tolerance quality case.
 
-Bypass the gate only when you can't run it (no models on the machine):
+### STT pause-context regression
 
+Pause detection now triggers a speculative decode of the **whole recording so far**. New snapshots replace earlier text. If speech continues after the latest snapshot, releasing the hotkey decodes the complete recording; it never concatenates independent pause fragments. This gives Whisper both sides of a mid-sentence pause to revise punctuation and word choices. If the cached snapshot already covers speech through release, it can still be reused. Continuing speech may incur more release-time inference than the old tail-only path; accuracy takes priority.
+
+The synthetic `mid-sentence-pause.wav` fixture reproduces “make. is to keep” with the old split decoding. Its expected continuous sentence is guarded with `small.en`:
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --no-default-features pause_fixture_preserves_sentence_context -- --ignored --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml --no-default-features continued_speech_matches_whole_recording_fixture -- --ignored --nocapture
 ```
-./scripts/publish-release.sh --skip-bench
-```
 
-### Why these three thresholds catch what they catch
-
-- **STT throttle** — `small.en` holds 25×+ but `medium.en` thermally throttled to
-  ~2.7× under sustained load. A 10× floor passes the shipped default and fails a
-  slow model or a decode regression.
-- **TTS below realtime** — if synth drops under 1× (CoreML falling back to CPU, or
-  a heavier model), read-aloud stalls mid-sentence. A 2× floor keeps a safety
-  margin.
-- **Slow mic start** — the mic itself goes live in ~75ms; the "snappiness
-  regressed" bug came from a cold output-device wake (up to ~0.5–1s) sitting in
-  front of the mic open. The fix keeps the cue off the mic path (detached
-  thread); the ≤250ms gate fails if anything slow gets back in front of capture.
-
-## What isn't covered (and why)
-
-- **Transcription accuracy / voice quality** — subjective and model-dependent;
-  guarded by the `bench_stt` ignored test (`MURMUR_TEST_WAV`) for spot checks and
-  by listening during `scripts/dev.sh`.
-- **Full end-to-end (key → paste, selection → speech)** — needs Accessibility +
-  a focused app; exercised manually and via `scripts/sim-onboarding.sh` for the
-  first-run flow. A scripted e2e smoke is a possible Layer 3 if these paths start
-  regressing.
+Fast tests also cover speculative periods/ellipses being replaced, legitimate final punctuation remaining intact, quiet tails, failed snapshots, and cancellation. The model, decoder sampling strategy, vocabulary, and user corrections are unchanged. These tests address context lost at artificial boundaries; they do not establish general word accuracy across accents, microphones, or background noise.

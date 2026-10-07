@@ -26,3 +26,7 @@ src-tauri/WixTools/
 
 # Live UI screenshots from scripts/ui-shot.mjs (generated, not tracked)
 docs/design/shots/
+
+# Local hardware-specific speech baselines, reports, generated WAVs
+.benchmarks/
+__pycache__/

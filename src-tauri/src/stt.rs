@@ -404,6 +404,15 @@ impl Transcriber for WhisperStt {
 
     fn transcribe_chunk<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
         Box::pin(async move {
+            let t_decode = std::time::Instant::now();
+            let samples = wav_to_mono_f32(wav)?;
+            let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
+            // Digital silence contains no speech. Repeated inference on an
+            // all-zero recording can hallucinate text (including "[end]").
+            // Use exact zero, not an energy threshold that could drop quiet words.
+            if samples.iter().all(|&sample| sample == 0.0) {
+                return Ok(String::new());
+            }
             // Instrumentation: split the pre-inference setup so an intermittent
             // slow transcribe can be pinned to a layer — ctx acquire (model-lock
             // contention / reload), WAV decode, time queued for a blocking thread
@@ -420,9 +429,6 @@ impl Transcriber for WhisperStt {
                 .lock()
                 .map(|g| g.clone())
                 .unwrap_or_default();
-            let t_decode = std::time::Instant::now();
-            let samples = wav_to_mono_f32(wav)?;
-            let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
             let audio_secs = samples.len() as f32 / 16_000.0;
             // whisper.cpp is a blocking CPU/GPU job — keep it off the async
             // runtime's worker threads.
@@ -552,7 +558,7 @@ impl Transcriber for WhisperStt {
 /// Decode our own capture WAV (16 kHz mono 16-bit PCM from audio.rs) into the
 /// f32 [-1, 1] samples whisper-rs expects. Averages channels if the buffer ever
 /// carries more than one.
-fn wav_to_mono_f32(wav: &[u8]) -> Result<Vec<f32>> {
+pub(crate) fn wav_to_mono_f32(wav: &[u8]) -> Result<Vec<f32>> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return Err(anyhow!("not a RIFF/WAVE buffer"));
     }
@@ -594,6 +600,23 @@ fn wav_to_mono_f32(wav: &[u8]) -> Result<Vec<f32>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn digital_silence_skips_inference_but_quiet_audio_does_not() {
+        use super::{Transcriber, WhisperStt};
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // A nonexistent model proves silence returns without loading/inference.
+        let engine = WhisperStt::new("murmur-test-nonexistent-model");
+        let silence = crate::audio::encode_wav_i16(&vec![0.0; 16000], 16000).unwrap();
+        for _ in 0..10 {
+            assert_eq!(runtime.block_on(engine.transcribe(&silence)).unwrap(), "");
+        }
+        let quiet = crate::audio::encode_wav_i16(&vec![0.0001; 16000], 16000).unwrap();
+        assert!(runtime.block_on(engine.transcribe(&quiet)).is_err());
+    }
+
     use super::*;
 
     /// Build a minimal 16 kHz mono 16-bit WAV around the given samples.

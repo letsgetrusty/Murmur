@@ -9,17 +9,20 @@ content artifact.
 > product" concerns are explicitly out of scope and should not drive any design
 > decision here. When in doubt, pick the simpler macOS-native path.
 
-> **Current implementation (September 2026):** `AGENTS.md` is authoritative
+> **Current implementation (October 2026):** `AGENTS.md` is authoritative
 > for the shipped on-device stack; the cloud backends and older macOS guidance
 > below describe the original build plan, not current requirements.
 >
-> Dictation now transcribes completed phrases during recording at sustained
-> speech pauses (400 ms), retaining 200 ms of silence before the next phrase.
-> Release awaits an in-flight phrase and decodes only the remaining tail. Speech
-> without a usable pause remains one final chunk; failed/empty chunk decodes
-> retry the intact recording. Whisper's model and decoder state are reused,
-> with inference serialized and per-call context reset. Corrections apply after
-> joining chunks; refinement and clipboard injection still happen once.
+> Dictation uses speculative whole-recording snapshots at sustained speech
+> pauses (400 ms). Each snapshot replaces the previous transcript; pauses never
+> split the final transcript into independently decoded fragments. Release
+> awaits an in-flight snapshot and reuses it when the remaining audio is quiet.
+> If speech continued, no snapshot succeeded, or a snapshot failed, release
+> decodes the complete recording so Whisper can revise words and punctuation
+> across pauses. This can cost more release-time inference than tail decoding.
+> Whisper's model and decoder state are reused, with inference serialized and
+> per-call context reset. Corrections apply to each complete transcript;
+> refinement and clipboard injection still happen once.
 >
 > Kokoro uses a short opening chunk (about 64 characters), then ramps to 100
 > and 220 characters, preserving words. Startup and stall recovery buffer based

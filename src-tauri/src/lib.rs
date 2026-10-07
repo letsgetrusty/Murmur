@@ -1,6 +1,9 @@
 // Module layout per docs/voice-tool-architecture.md §4. lib.rs is the action router:
 // hotkey → recorder lifecycle → transcribe → inject.
 mod audio;
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod benchmark;
 mod commands;
 mod config;
 mod diagnostics;

@@ -117,6 +117,13 @@ shipped work: `docs/voice-tool-architecture.md` §7.
   `constants.js` names match the Rust events/commands — keep them in sync).
 - Frontend tests (from repo root): `npm test` (Vitest — pure helpers + shared
   constants; `npm run test:watch` to iterate).
+- Speech optimizations: capture a known-good **local** baseline with
+  `./scripts/bench.sh baseline` before changing STT/Kokoro behavior, then run
+  `./scripts/bench.sh` and review speed **and** quality before merging. Never
+  replace a baseline just to hide a regression. Reports/WAVs stay in
+  `.benchmarks/`; see `docs/benchmarks.md` for coverage and limitations. Run the
+  live dictation/read-aloud/cancel smoke test for paths outside this engine gate.
+  Fast gate tests: `python3 -m unittest discover -s scripts/tests -v`.
 - UI layout check: `npm run ui-diff` (or `node scripts/ui-diff.mjs [section…]`,
   `--target settings|onboarding`) renders the design reference
   (`docs/design/reference.html`) and the real app HTML at identical size,

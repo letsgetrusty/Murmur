@@ -64,3 +64,10 @@ lto = false
 opt-level = 3
 panic = "abort"
 strip = false
+
+[features]
+bench = []
+
+[[example]]
+name = "bench_speech"
+required-features = ["bench"]

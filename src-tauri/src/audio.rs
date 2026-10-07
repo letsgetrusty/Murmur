@@ -210,18 +210,28 @@ impl Recorder {
 
 /// Read-only access to captured samples, with offsets in 16 kHz samples.
 /// Copies only the unread suffix under the capture lock, resamples outside.
+#[derive(Clone)]
 pub struct AudioFeed {
     inner: Arc<Mutex<Inner>>,
     rate: u32,
 }
 
 impl AudioFeed {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     pub(crate) fn test_samples(samples: Vec<f32>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner { samples })),
             rate: TARGET_SAMPLE_RATE,
         }
+    }
+
+    #[cfg(feature = "bench")]
+    pub(crate) fn append_benchmark_samples(&self, samples: &[f32]) {
+        self.inner
+            .lock()
+            .expect("benchmark feed")
+            .samples
+            .extend_from_slice(samples);
     }
 
     pub fn since(&self, start: usize) -> Result<Vec<f32>> {

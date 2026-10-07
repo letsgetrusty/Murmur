@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "stt": [
+    {
+      "id": "short",
+      "wav": "benchmarks/fixtures/short.wav",
+      "reference": "Please update the readme file and run the tests before you push this change.",
+      "max_wer": 0.15,
+      "max_punctuation_errors": 0
+    },
+    {
+      "id": "pause",
+      "wav": "src-tauri/tests/fixtures/mid-sentence-pause.wav",
+      "reference": "The first important change that I would like us to make is to keep the whole sentence together while I am thinking about what to say next.",
+      "max_wer": 0.05,
+      "max_punctuation_errors": 0,
+      "replay": true
+    },
+    {
+      "id": "long",
+      "wav": "benchmarks/fixtures/long.wav",
+      "reference": "I am recording a longer passage to check that the transcription stays accurate across several sentences. The first task is to review the proposed changes and explain why they are needed. After that, we should run the existing tests and compare the results with the previous version. A faster response is useful only when it still contains every word that was spoken. Pauses should give the speaker time to think without forcing a new sentence in the middle of an idea. We also need to preserve questions, ordinary punctuation, and the order of the instructions. Once the checks are complete, save the report so that the next change can be measured against the same recording. This final sentence confirms that the end of a long recording is not lost.",
+      "max_wer": 0.15,
+      "max_punctuation_errors": 2
+    },
+    {
+      "id": "silence",
+      "wav": "src-tauri/tests/fixtures/silence.wav",
+      "reference": "",
+      "max_wer": 0,
+      "max_punctuation_errors": 0
+    }
+  ],
+  "tts": [
+    {
+      "id": "short",
+      "text": "Local dictation should feel instant,",
+      "voice": "am_puck"
+    },
+    {
+      "id": "sentence",
+      "text": "Local dictation should feel instant, and read aloud should start speaking right away.",
+      "voice": "af_heart"
+    },
+    {
+      "id": "paragraph",
+      "text": "Local dictation should feel instant and reading a long opening sentence without commas should start quickly while the rest of the text is generated in the background. Another sentence follows, with a natural pause. Please keep every word.",
+      "voice": "am_puck"
+    }
+  ]
+}

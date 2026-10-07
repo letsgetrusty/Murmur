@@ -71,14 +71,18 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      # Validate scoring/gating without hardware timing or model downloads.
+      - name: Local benchmark gate tests
+        run: python3 -m unittest discover -s scripts/tests -v
+
       - name: Format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --features bench --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features bench
 
       # Real-audio smoke test of the whole STT pipeline (decode params + default
       # vocabulary + corrections + cleanup) against committed WAV fixtures — the

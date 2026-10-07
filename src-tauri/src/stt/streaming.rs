@@ -1,6 +1,6 @@
-//! Pause-delimited incremental dictation. Keep the recording intact for a full
-//! retry if a chunk fails. No forced time cuts: uninterrupted speech stays in
-//! the final tail rather than risking dropped words at an artificial boundary.
+//! Speculative whole-recording dictation. Pauses trigger an early decode, never
+//! a sentence boundary. If speech continues after that snapshot, release decodes
+//! the complete recording so Whisper can revise punctuation and word choices.
 
 use super::{wav_to_mono_f32, Transcriber};
 use crate::audio::{encode_wav_i16, AudioFeed};
@@ -13,12 +13,12 @@ const RATE: usize = 16_000;
 const FRAME: usize = RATE / 50; // 20 ms
 const MIN_CHUNK: usize = 2 * RATE;
 const PAUSE_FRAMES: usize = 20; // 400 ms; don't cut between syllables
-const KEEP_QUIET: usize = RATE / 5; // 200 ms of leading silence for the next decode
+const KEEP_QUIET: usize = RATE / 5; // locate a point safely inside the detected pause
 
 #[derive(Default)]
 struct Prefix {
     consumed: usize,
-    chunks: Vec<String>,
+    text: String,
     failed: bool,
 }
 
@@ -53,10 +53,20 @@ impl LiveTranscription {
                     }
                 };
                 pending.extend(samples);
-                let Some(end) = pause_boundary(&pending) else {
+                if pause_boundary(&pending).is_none() {
                     continue;
+                }
+                // Include all earlier speech and the full available pause. A
+                // later snapshot replaces this text; independent chunk results
+                // must never be concatenated into the final dictation.
+                let snapshot = match feed.since(0) {
+                    Ok(samples) => samples,
+                    Err(_) => {
+                        prefix.failed = true;
+                        break;
+                    }
                 };
-                let wav = match encode_wav_i16(&pending[..end], RATE as u32) {
+                let wav = match encode_wav_i16(&snapshot, RATE as u32) {
                     Ok(wav) => wav,
                     Err(_) => {
                         prefix.failed = true;
@@ -66,19 +76,18 @@ impl LiveTranscription {
                 if stopping.load(Ordering::Acquire) {
                     break;
                 }
-                match engine.transcribe_chunk(&wav).await {
-                    Ok(text) if !engine.finish_chunks(std::slice::from_ref(&text)).is_empty() => {
-                        prefix.chunks.push(text);
-                        prefix.consumed += end;
-                        pending.drain(..end);
+                match engine.transcribe(&wav).await {
+                    Ok(text) if !text.trim().is_empty() => {
+                        prefix.text = text;
+                        prefix.consumed = snapshot.len();
+                        pending.clear();
                         log::info!(
-                            "stt: incremental prefix {:.1}s in {} chunk(s)",
-                            prefix.consumed as f32 / RATE as f32,
-                            prefix.chunks.len()
+                            "stt: speculative whole-recording snapshot {:.1}s",
+                            prefix.consumed as f32 / RATE as f32
                         );
                     }
                     result => {
-                        log::warn!("stt: incremental chunk failed or empty ({:?}); retrying whole recording on release", result.err());
+                        log::warn!("stt: speculative snapshot failed or empty ({:?}); retrying whole recording on release", result.err());
                         prefix.failed = true;
                         break;
                     }
@@ -104,7 +113,7 @@ impl LiveTranscription {
         let prefix = match self.task.take().expect("live task").await {
             Ok(prefix) => prefix,
             Err(e) => {
-                log::warn!("stt: incremental worker failed: {e}; retrying whole recording");
+                log::warn!("stt: speculative worker failed: {e}; retrying whole recording");
                 return self.transcriber.transcribe(wav).await;
             }
         };
@@ -120,28 +129,22 @@ impl Drop for LiveTranscription {
     }
 }
 
-async fn finish_prefix(engine: &dyn Transcriber, mut prefix: Prefix, wav: &[u8]) -> Result<String> {
-    if prefix.failed || prefix.chunks.is_empty() {
+async fn finish_prefix(engine: &dyn Transcriber, prefix: Prefix, wav: &[u8]) -> Result<String> {
+    if prefix.failed || prefix.text.is_empty() {
         return engine.transcribe(wav).await;
     }
     let samples = wav_to_mono_f32(wav)?;
     let Some(tail) = samples.get(prefix.consumed..) else {
         return engine.transcribe(wav).await;
     };
-    // Retained pause audio includes microphone noise, not digital silence.
-    // Use the same relative gate as the boundary detector so an empty decode
-    // of that noise doesn't force an unnecessary full-recording retry.
     let threshold = (frame_peak(&samples) * 0.025).clamp(1e-5, 0.001);
     if frame_peak(tail) >= threshold {
-        let tail_wav = encode_wav_i16(tail, RATE as u32)?;
-        match engine.transcribe_chunk(&tail_wav).await {
-            Ok(text) if !engine.finish_chunks(std::slice::from_ref(&text)).is_empty() => {
-                prefix.chunks.push(text)
-            }
-            _ => return engine.transcribe(wav).await,
-        }
+        // A pause inside a sentence isn't its end. Re-decode with both sides
+        // of the pause instead of pasting "I would like. To change this.".
+        log::info!("stt: speech continued after snapshot; decoding complete recording");
+        return engine.transcribe(wav).await;
     }
-    Ok(engine.finish_chunks(&prefix.chunks))
+    Ok(prefix.text)
 }
 
 fn frame_peak(samples: &[f32]) -> f32 {
@@ -151,9 +154,10 @@ fn frame_peak(samples: &[f32]) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// Find a sustained quiet interval after at least two seconds. Cut inside the
-/// silence and retain its last 200 ms in the next chunk. The threshold scales
-/// down with quiet microphones; a noisy room simply falls back to batch STT.
+/// Find a sustained quiet interval after at least two seconds. This is only
+/// a trigger for speculative whole-recording inference, never a cut in speech.
+/// The returned position is inside the pause (also useful for regression tests).
+/// A noisy room simply falls back to whole-recording STT on release.
 fn pause_boundary(samples: &[f32]) -> Option<usize> {
     if samples.len() < MIN_CHUNK + PAUSE_FRAMES * FRAME {
         return None;
@@ -230,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn release_decodes_only_tail_and_failure_retries_whole_recording() {
+    fn continued_speech_redecodes_whole_recording_instead_of_joining_chunks() {
         let engine = Fake(Mutex::new(Vec::new()));
         let wav = encode_wav_i16(&vec![0.1; RATE * 5], RATE as u32).unwrap();
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -238,38 +242,67 @@ mod tests {
             .unwrap();
         let prefix = Prefix {
             consumed: RATE * 3,
-            chunks: vec!["prefix".into()],
+            text: "prefix".into(),
             failed: false,
         };
         assert_eq!(
             rt.block_on(finish_prefix(&engine, prefix, &wav)).unwrap(),
-            "prefix tail"
+            "tail"
         );
-        assert_eq!(*engine.0.lock().unwrap(), vec![RATE * 2]);
+        assert_eq!(*engine.0.lock().unwrap(), vec![RATE * 5]);
         let prefix = Prefix {
             consumed: RATE * 3,
-            chunks: vec!["prefix".into()],
+            text: "prefix".into(),
             failed: true,
         };
         assert_eq!(
             rt.block_on(finish_prefix(&engine, prefix, &wav)).unwrap(),
             "tail"
         );
-        assert_eq!(*engine.0.lock().unwrap(), vec![RATE * 2, RATE * 5]);
+        assert_eq!(*engine.0.lock().unwrap(), vec![RATE * 5, RATE * 5]);
     }
+    #[test]
+    fn revises_speculative_periods_and_ellipses_without_stripping_final_punctuation() {
+        struct CompleteSentence;
+        impl Transcriber for CompleteSentence {
+            fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
+                Box::pin(async move {
+                    assert_eq!(wav_to_mono_f32(wav)?.len(), RATE * 5);
+                    Ok("Please keep this sentence together.".into())
+                })
+            }
+        }
+        let wav = encode_wav_i16(&vec![0.1; RATE * 5], RATE as u32).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for text in ["Please keep.", "Please keep...", "Please keep…"] {
+            let prefix = Prefix {
+                consumed: RATE * 3,
+                text: text.into(),
+                failed: false,
+            };
+            assert_eq!(
+                rt.block_on(finish_prefix(&CompleteSentence, prefix, &wav))
+                    .unwrap(),
+                "Please keep this sentence together."
+            );
+        }
+    }
+
     #[test]
     fn release_skips_retained_room_noise_but_keeps_quiet_speech() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        for (tail_amplitude, expected) in [(0.0003, "prefix"), (0.01, "prefix tail")] {
+        for (tail_amplitude, expected) in [(0.0003, "prefix"), (0.01, "tail")] {
             let engine = Fake(Mutex::new(Vec::new()));
             let mut samples = vec![0.1; RATE * 3];
             samples.extend(vec![tail_amplitude; RATE / 2]);
             let wav = encode_wav_i16(&samples, RATE as u32).unwrap();
             let prefix = Prefix {
                 consumed: RATE * 3,
-                chunks: vec!["prefix".into()],
+                text: "prefix".into(),
                 failed: false,
             };
             assert_eq!(
@@ -287,10 +320,13 @@ mod tests {
         entered: tokio::sync::Notify,
         release: tokio::sync::Notify,
         calls: std::sync::atomic::AtomicUsize,
+        samples: std::sync::atomic::AtomicUsize,
     }
     impl Transcriber for Gated {
-        fn transcribe<'a>(&'a self, _wav: &'a [u8]) -> TranscribeFuture<'a> {
+        fn transcribe<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
             Box::pin(async move {
+                self.samples
+                    .store(wav_to_mono_f32(wav)?.len(), Ordering::SeqCst);
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 self.entered.notify_one();
                 self.release.notified().await;
@@ -310,6 +346,7 @@ mod tests {
                     entered: tokio::sync::Notify::new(),
                     release: tokio::sync::Notify::new(),
                     calls: std::sync::atomic::AtomicUsize::new(0),
+                    samples: std::sync::atomic::AtomicUsize::new(0),
                 });
                 let mut live =
                     LiveTranscription::start(AudioFeed::test_samples(audio), engine.clone());
@@ -334,13 +371,14 @@ mod tests {
                     assert_eq!(text, "completed phrase");
                 }
                 assert_eq!(engine.calls.load(Ordering::SeqCst), 1);
+                assert_eq!(engine.samples.load(Ordering::SeqCst), RATE * 4, "snapshot must include the entire recording available, not just the first pause-delimited fragment");
             }
         });
     }
 
     #[test]
     #[ignore = "needs the local Whisper model"]
-    fn incremental_fixture_keeps_both_utterances() {
+    fn continued_speech_matches_whole_recording_fixture() {
         let engine = super::super::WhisperStt::new("small.en");
         engine.set_vocabulary(crate::config::DEFAULT_DICTATION_VOCABULARY);
         engine.set_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
@@ -359,14 +397,14 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let chunk = rt.block_on(engine.transcribe_chunk(&first)).unwrap();
+        let chunk = rt.block_on(engine.transcribe(&first)).unwrap();
         let released = std::time::Instant::now();
         let result = rt
             .block_on(finish_prefix(
                 &engine,
                 Prefix {
                     consumed: cut,
-                    chunks: vec![chunk],
+                    text: chunk,
                     failed: false,
                 },
                 &all,
@@ -376,16 +414,64 @@ mod tests {
         let batch_start = std::time::Instant::now();
         let batch = rt.block_on(engine.transcribe(&all)).unwrap();
         eprintln!(
-            "STT RELEASE: incremental {:.0}ms; full recording {:.0}ms",
+            "STT RELEASE: revised snapshot {:.0}ms; full recording {:.0}ms",
             release_time.as_secs_f32() * 1000.0,
             batch_start.elapsed().as_secs_f32() * 1000.0
         );
         assert_eq!(batch.to_lowercase().matches("dictation").count(), 2);
-        eprintln!("INCREMENTAL: {result}");
+        assert_eq!(
+            result, batch,
+            "snapshot must not change the final whole-recording transcript"
+        );
+        eprintln!("WHOLE RECORDING: {result}");
         assert_eq!(
             result.to_lowercase().matches("dictation").count(),
             2,
             "lost or repeated phrase: {result}"
         );
+    }
+    #[test]
+    #[ignore = "needs the local small.en model"]
+    fn pause_fixture_preserves_sentence_context() {
+        let wav = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/mid-sentence-pause.wav"
+        ))
+        .unwrap();
+        let samples = wav_to_mono_f32(&wav).unwrap();
+        let cut = pause_boundary(&samples).expect("recording needs a pause");
+        let engine = super::super::WhisperStt::new("small.en");
+        engine.set_vocabulary(crate::config::DEFAULT_DICTATION_VOCABULARY);
+        engine.set_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let first = encode_wav_i16(&samples[..cut], RATE as u32).unwrap();
+            let tail = encode_wav_i16(&samples[cut..], RATE as u32).unwrap();
+            let first_text = engine.transcribe_chunk(&first).await.unwrap();
+            let tail_text = engine.transcribe_chunk(&tail).await.unwrap();
+            eprintln!(
+                "OLD FRAGMENTS: {}",
+                engine.finish_chunks(&[first_text.clone(), tail_text])
+            );
+            let started = std::time::Instant::now();
+            let text = finish_prefix(
+                &engine,
+                Prefix {
+                    consumed: cut,
+                    text: first_text,
+                    failed: false,
+                },
+                &wav,
+            )
+            .await
+            .unwrap();
+            eprintln!(
+                "WHOLE CONTEXT ({:.0}ms): {text}",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            assert_eq!(text, "The first important change that I would like us to make is to keep the whole sentence together while I am thinking about what to say next.");
+        });
     }
 }
