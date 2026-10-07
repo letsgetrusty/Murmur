@@ -85,3 +85,14 @@ Authorized all-zero input reports an input-device problem. Nonzero room noise
 can now reach Whisper and cause additional inference or hallucinations; exact
 silence and transcript cleanup remain safeguards, not a speech classifier.
 Snapshot reuse is conservative: any nonzero tail forces whole-recording decode.
+
+### TTS punctuation boundaries
+
+The chunker keeps decimal/version/domain dots, common English abbreviations,
+initials, and time/URL colons inside their token or phrase. Ordinary sentence
+terminators and labels followed by whitespace still create natural breaks.
+These conservative rules may defer a break after an abbreviation that also
+ends a sentence; the existing character caps still bound chunks. Unit tests
+cover values, URLs, names, Unicode and ellipses. Listen to the
+`numbers-and-abbreviations` corpus output to verify pronunciation and prosody;
+text-boundary tests alone do not certify generated speech quality.

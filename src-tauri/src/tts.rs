@@ -508,6 +508,54 @@ pub(crate) const SOFT_GAP_MS: u32 = 60; // after a soft comma/clause break — j
 // prosody inverts. Enforced at compile time.
 const _: () = assert!(SENTENCE_GAP_MS > SOFT_GAP_MS);
 
+/// Protect punctuation inside tokens and common abbreviations. This is a
+/// conservative English boundary rule, not a linguistic sentence parser.
+fn tts_sentence_boundary(text: &str, offset: usize, ch: char) -> bool {
+    let next = text[offset + ch.len_utf8()..].chars().next();
+    match ch {
+        '.' => {
+            // Decimal/version/domain dots and all but the final ellipsis dot.
+            if next.is_some_and(|c| c.is_alphanumeric() || c == '.') {
+                return false;
+            }
+            if next.is_none() {
+                return true;
+            }
+            let token = text[..offset]
+                .split_whitespace()
+                .next_back()
+                .unwrap_or("")
+                .trim_start_matches(|c: char| !c.is_alphanumeric());
+            let lower = token.to_ascii_lowercase();
+            let abbreviation = matches!(
+                lower.as_str(),
+                "mr" | "mrs"
+                    | "ms"
+                    | "dr"
+                    | "prof"
+                    | "sr"
+                    | "jr"
+                    | "st"
+                    | "vs"
+                    | "etc"
+                    | "e.g"
+                    | "i.e"
+                    | "a.m"
+                    | "p.m"
+            );
+            let initial = token.chars().count() == 1 && token.chars().all(|c| c.is_uppercase());
+            let acronym = token.contains('.')
+                && token.split('.').all(|part| {
+                    part.chars().count() == 1 && part.chars().all(|c| c.is_uppercase())
+                });
+            !(abbreviation || initial || acronym)
+        }
+        ':' => next.map_or(true, char::is_whitespace),
+        '!' | '?' | '\n' | ';' => true,
+        _ => false,
+    }
+}
+
 /// Split at natural pauses where possible. Bound the opening phrase to about
 /// 64 characters even without punctuation, then ramp to 100 and 220 characters
 /// for subsequent chunks. Word boundaries preserve text; soft gaps avoid a
@@ -521,7 +569,7 @@ pub(crate) fn split_for_tts(text: &str) -> Vec<(String, bool)> {
     let mut cur = String::new();
     let mut last_comma = 0usize; // byte index just past the most recent comma
     let mut last_space = 0usize; // byte index just past the most recent space
-    for ch in text.chars() {
+    for (offset, ch) in text.char_indices() {
         cur.push(ch);
         match ch {
             ',' => last_comma = cur.len(),
@@ -534,7 +582,7 @@ pub(crate) fn split_for_tts(text: &str) -> Vec<(String, bool)> {
             1 => 100,
             _ => CAP,
         };
-        let sentence_end = matches!(ch, '.' | '!' | '?' | '\n' | ';' | ':');
+        let sentence_end = tts_sentence_boundary(text, offset, ch);
         if sentence_end && cur.trim_end().len() >= MIN {
             push_chunk(&mut chunks, &cur, true);
             cur.clear();
@@ -1386,6 +1434,44 @@ mod tests {
             split_for_tts("read this aloud"),
             vec![("read this aloud".to_string(), true)]
         );
+    }
+
+    #[test]
+    fn token_punctuation_does_not_split_spoken_values() {
+        for text in [
+            "The measured value was 3.14 seconds.",
+            "Use version 1.2.3 for this release.",
+            "Please talk with Dr. Smith tomorrow.",
+            "Download it from https://example.com today.",
+            "Meet me tomorrow at 10:30 please.",
+            "Please ask Prof. Jones about the U.S. release.",
+            "Please ask J. Smith to review this.",
+        ] {
+            assert_eq!(
+                split_for_tts(text),
+                vec![(text.to_string(), true)],
+                "{text}"
+            );
+        }
+        let text = "Please finish this task. Then review the result!";
+        assert_eq!(
+            split_for_tts(text),
+            vec![
+                ("Please finish this task.".into(), true),
+                ("Then review the result!".into(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn sentence_boundaries_remain_unicode_safe_and_preserve_ellipsis() {
+        let text = "Résumé version 1.2 works... Then continue.";
+        let boundaries: Vec<_> = text
+            .char_indices()
+            .filter(|(i, c)| tts_sentence_boundary(text, *i, *c))
+            .map(|(i, c)| &text[..i + c.len_utf8()])
+            .collect();
+        assert_eq!(boundaries, vec!["Résumé version 1.2 works...", text]);
     }
 
     #[test]
