@@ -12,6 +12,7 @@ use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
 };
 
+mod level;
 mod streaming;
 pub use streaming::LiveTranscription;
 
@@ -405,13 +406,17 @@ impl Transcriber for WhisperStt {
     fn transcribe_chunk<'a>(&'a self, wav: &'a [u8]) -> TranscribeFuture<'a> {
         Box::pin(async move {
             let t_decode = std::time::Instant::now();
-            let samples = wav_to_mono_f32(wav)?;
+            let mut samples = wav_to_mono_f32(wav)?;
             let decode_ms = t_decode.elapsed().as_secs_f32() * 1000.0;
             // Digital silence contains no speech. Repeated inference on an
             // all-zero recording can hallucinate text (including "[end]").
             // Use exact zero, not an energy threshold that could drop quiet words.
             if samples.iter().all(|&sample| sample == 0.0) {
                 return Ok(String::new());
+            }
+            let leveled = level::level_extreme_changes(&mut samples);
+            if leveled > 0 {
+                log::info!("stt: leveled {leveled} extreme quiet region(s) across digital pauses");
             }
             // Instrumentation: split the pre-inference setup so an intermittent
             // slow transcribe can be pinned to a layer — ctx acquire (model-lock
@@ -600,6 +605,36 @@ pub(crate) fn wav_to_mono_f32(wav: &[u8]) -> Result<Vec<f32>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs the local small.en model"]
+    fn mixed_volume_fixture_retains_every_utterance() {
+        use super::{Transcriber, WhisperStt};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let corpus: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("benchmarks/corpus.json")).unwrap())
+                .unwrap();
+        let case = corpus["stt"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == "multiple-pauses")
+            .unwrap();
+        let wav = std::fs::read(root.join(case["wav"].as_str().unwrap())).unwrap();
+        let engine = WhisperStt::new("small.en");
+        engine.set_vocabulary(crate::config::DEFAULT_DICTATION_VOCABULARY);
+        engine.set_corrections(crate::config::DEFAULT_DICTATION_CORRECTIONS);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let expected = case["reference"].as_str().unwrap();
+        for _ in 0..3 {
+            assert_eq!(runtime.block_on(engine.transcribe(&wav)).unwrap(), expected);
+        }
+    }
+
     #[test]
     fn digital_silence_skips_inference_but_quiet_audio_does_not() {
         use super::{Transcriber, WhisperStt};

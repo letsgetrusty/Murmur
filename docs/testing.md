@@ -96,3 +96,22 @@ ends a sentence; the existing character caps still bound chunks. Unit tests
 cover values, URLs, names, Unicode and ellipses. Listen to the
 `numbers-and-abbreviations` corpus output to verify pronunciation and prosody;
 text-boundary tests alone do not certify generated speech quality.
+
+### Extreme volume changes across digital pauses
+
+The mixed-volume fixture originally lost its middle utterance even during
+whole-recording decoding (33.3% WER). Before Whisper inference, a conservative
+leveling pass now raises only regions at least 32 times quieter than another
+speech-shaped region, separated by at least 400ms of exact digital silence.
+It compares 20ms RMS envelopes, excludes short transients and steady envelopes,
+caps gain at 64 times and output peak at 0.95, and ramps gain at region edges.
+No samples are removed, no text fragments are concatenated, and louder audio
+and exact silence remain unchanged. The model and fallback decoder are unchanged.
+
+This heuristic is not VAD. Variable noise can satisfy its envelope guard;
+continuous background noise prevents digital-pause segmentation. It does not
+claim to fix arbitrary real-microphone volume changes or repair lost PCM16 detail.
+The unchanged mixed-volume corpus and an ignored real-model regression test
+(`mixed_volume_fixture_retains_every_utterance`) guard the reproduced failure.
+Unit tests cover silence preservation, bounded output, steady low-level input,
+ordinary volume differences and short pauses.

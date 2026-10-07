@@ -23,6 +23,10 @@ content artifact.
 > Whisper's model and decoder state are reused, with inference serialized and
 > per-call context reset. Corrections apply to each complete transcript;
 > refinement and clipboard injection still happen once.
+> Before Whisper inference, extreme quiet regions separated by sustained digital
+> silence receive bounded gain; ordinary audio remains unchanged. This preserves
+> whole-recording context and targets mixed-volume word loss. It is a conservative
+> envelope heuristic, not VAD; see `docs/testing.md` for limits and regression tests.
 >
 > Kokoro uses a short opening chunk (about 64 characters), then ramps to 100
 > and 220 characters, preserving words. Startup and stall recovery buffer based

@@ -167,3 +167,19 @@ The added corpus covers quiet speech surrounded by silence, a pause followed
 by much quieter speech, and TTS decimals, versions, abbreviations and code
 identifiers. Listen to generated TTS audio: fingerprints cannot grade pronunciation.
 Consented natural speech remains needed to assess real-world accuracy.
+
+## Mixed-volume fix validation (October 7, 2026)
+
+Run `20261007T185459.831625Z` completed all 642 paired observations after
+conservative STT leveling was added. Both arms had zero STT word/punctuation
+errors, including all 60 mixed-volume observations; the unchanged fixture
+previously omitted its quiet middle utterance (33.3% WER). Three additional
+real-model regression decodes also retained all utterances. No fixture reference
+or quality threshold was relaxed.
+
+The full gate still failed 23 Kokoro timing comparisons between unchanged
+arms. This is an accuracy fix with unresolved timing stability, not a
+performance pass. Reports, original pre-fix STT diagnostics and a timing
+comparison are retained locally under `.benchmarks/`. No baseline was replaced.
+Natural speech and live microphone/cancel/playback checks remain necessary;
+the leveling heuristic's scope and noise risks are described in `testing.md`.
