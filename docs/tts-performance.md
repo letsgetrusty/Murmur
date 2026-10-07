@@ -90,3 +90,25 @@ Use `MURMUR_TTS_DISPATCH=production` with `scripts/profile-tts.py` to benchmark 
 Production-worker verification (four warm rounds, 20-second idle, same samples and CoreML policy): short median/worst **552/556 ms**, medium **1173/1198 ms**, long **2186/2299 ms**. Resumed sequence: **570/1273/2036 ms**. Waveform checksums match the original engine for all samples. [Production measurements](benchmarks/tts-production-2026-09-23.csv).
 
 Local integration checks compare exact waveforms for two voices and multi-chunk text, exercise missing voices, concurrent requests, queue cancellation, and confirm an executor timer advances during native inference. The headless AVQueuePlayer check covers startup/progress and Stop; it did not observe natural playback completion. Live completion verification was unavailable because the computer-use service could not start. This remains a manual check in the signed app.
+
+## Stability investigation (2026-10-07)
+
+A full unchanged-engine paired run (`.benchmarks/runs/20261007T185459.831625Z`) passed STT quality but failed 23 Kokoro timing comparisons. All TTS waveform fingerprints matched and estimated playback stalls remained zero. These failures remain retained; the existing baseline and thresholds were not replaced.
+
+Subsequent sequential production-worker profiles used seven warm rounds and a 20-second idle, with the same model, voice, and three texts. These are diagnostic samples, not the full paragraph/chunking/coexistence gate.
+
+| Session setting | Short median | Medium median | Long median |
+| --- | ---: | ---: | ---: |
+| Default, initial | 522 ms | 1068 ms | 2003 ms |
+| Four intra-op threads | 551 ms | 1129 ms | 2106 ms |
+| Default, adjacent control | 535 ms | 1083 ms | 2073 ms |
+| Spinning disabled, clean run | 545 ms | 1107 ms | 2100 ms |
+| One intra-op thread | 1456 ms | 2961 ms | 5538 ms |
+
+Every sample retained its waveform fingerprint across these configurations. Neither four threads nor disabling spinning showed an improvement; one thread was substantially slower. Production defaults remain unchanged. A separate no-spin run overlapped Clippy and is explicitly excluded from timing comparisons. Background CPU activity was observed; it is a possible confounder, not a proven explanation for every failure.
+
+An opt-in ONNX operator profile covering constructor probes and the first synthesis recorded 709,513 microseconds of CPU-provider kernels and 155,489 microseconds of CoreML-provider kernels (about 82% CPU). CPU convolution accounted for 506,424 microseconds. This confirms that selecting CoreML does not place the entire graph on it. Operator profiling adds overhead and must not be enabled during gating. Raw profiles, logs, and metadata are local in `.benchmarks/kokoro-investigation/`.
+
+For diagnostic production-worker runs only, `KOKORO_INTRA_THREADS` selects a positive session thread count, `KOKORO_SPIN=0|1` controls intra-op spinning, and `KOKORO_PROFILE_PATH` enables profiling. The worker flushes the profile after the first synthesis. `scripts/profile-tts.py` records these overrides; the full speech gate clears them. Unset variables preserve normal behavior.
+
+The full default-settings rerun (`.benchmarks/runs/20261007T200410.630113Z`) completed all 642 observations and **failed 25 timing comparisons across STT and TTS**. STT quality passed and every mixed-volume observation retained all three utterances; TTS fingerprints matched. Unlike the earlier run, this run also recorded estimated stalls (76.8 ms at the 2× warm p95 for numbers/abbreviations and 192.9 ms at the 1× coexistence p95 for paragraphs). These are software estimates, not listening results. Background snapshots included busy Tella, camera-service, WindowServer, and BTLEServer processes; macOS reported no thermal/performance warning and power remained AC. A controlled idle-machine run is still needed to separate engine effects from host variation. This rerun is not a performance pass and establishes no tuning improvement.

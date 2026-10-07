@@ -7,6 +7,7 @@ are kept for inspection, including provider initialization/fallback messages.
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -37,7 +38,13 @@ def main():
                 "threads": os.environ.get("MURMUR_TTS_THREADS", "0"),
                 "spin": os.environ.get("MURMUR_TTS_SPIN", "1"),
                 "flush": os.environ.get("MURMUR_TTS_FLUSH", "0"),
-                "qos": os.environ.get("MURMUR_TTS_QOS", "0")}
+                "qos": os.environ.get("MURMUR_TTS_QOS", "0"),
+                "session_threads": os.environ.get("KOKORO_INTRA_THREADS", "default"),
+                "session_spin": os.environ.get("KOKORO_SPIN", "default"),
+                "operator_profile": os.environ.get("KOKORO_PROFILE_PATH")}
+    metadata["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+    metadata["production_source_sha256"] = hashlib.sha256((ROOT / "src-tauri/src/kokoro.rs").read_bytes()).hexdigest()
+    metadata["working_tree"] = subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True).strip()
     for name, cmd in (("hardware", ["sysctl", "-n", "machdep.cpu.brand_string"]), ("power", ["pmset", "-g", "batt"]), ("revision", ["git", "rev-parse", "HEAD"])):
         metadata[name] = subprocess.check_output(cmd, cwd=ROOT, text=True).strip()
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")

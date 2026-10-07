@@ -128,6 +128,7 @@ struct Engine {
     session: Session,
     voices_dir: PathBuf,
     voices: HashMap<String, Vec<f32>>,
+    profile_pending: bool,
 }
 impl Engine {
     fn new(model: &Path, voices_dir: PathBuf) -> Result<Self> {
@@ -151,6 +152,7 @@ impl Engine {
             session,
             voices_dir,
             voices: HashMap::new(),
+            profile_pending: std::env::var_os("KOKORO_PROFILE_PATH").is_some(),
         })
     }
 
@@ -189,6 +191,13 @@ impl Engine {
             audio.extend(samples);
             elapsed += duration;
         }
+        if self.profile_pending {
+            // End explicitly on the worker so the profile is flushed before
+            // short-lived benchmark processes exit. Diagnostic runs only.
+            let path = self.session.end_profiling()?;
+            eprintln!("kokoro: operator profile saved to {path}");
+            self.profile_pending = false;
+        }
         Ok((audio, elapsed))
     }
 }
@@ -215,6 +224,28 @@ fn decode_voice(bytes: &[u8]) -> Result<Vec<f32>> {
 
 fn build_session(model: &Path, coreml: bool) -> Result<Session> {
     let mut builder = Session::builder()?;
+    // Diagnostic overrides: keep normal ORT behavior unless explicitly set.
+    if let Ok(value) = std::env::var("KOKORO_INTRA_THREADS") {
+        let threads: usize = value.parse().context("invalid KOKORO_INTRA_THREADS")?;
+        ensure!(threads > 0, "KOKORO_INTRA_THREADS must be positive");
+        builder = builder
+            .with_intra_threads(threads)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    }
+    if let Ok(value) = std::env::var("KOKORO_SPIN") {
+        ensure!(
+            matches!(value.as_str(), "0" | "1"),
+            "KOKORO_SPIN must be 0 or 1"
+        );
+        builder = builder
+            .with_intra_op_spinning(value == "1")
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    }
+    if let Some(path) = std::env::var_os("KOKORO_PROFILE_PATH") {
+        builder = builder
+            .with_profiling(PathBuf::from(path))
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    }
     if coreml {
         let units = match std::env::var("KOKORO_COREML_COMPUTE_UNITS")
             .unwrap_or_else(|_| "cpu_and_gpu".into())
